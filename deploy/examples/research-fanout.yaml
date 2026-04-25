@@ -1,0 +1,179 @@
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-0
+spec:
+  goal: "Research and summarize the current landscape for: US tariffs."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
+---
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-1
+spec:
+  goal: "Research and summarize the current landscape for: AI regulation."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
+---
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-2
+spec:
+  goal: "Research and summarize the current landscape for: EV market."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
+---
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-3
+spec:
+  goal: "Research and summarize the current landscape for: semiconductor supply chain."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
+---
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-4
+spec:
+  goal: "Research and summarize the current landscape for: renewable energy storage."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
+---
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-5
+spec:
+  goal: "Research and summarize the current landscape for: cybersecurity insurance."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
+---
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-6
+spec:
+  goal: "Research and summarize the current landscape for: space launch market."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
+---
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-7
+spec:
+  goal: "Research and summarize the current landscape for: AI data centers."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
+---
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-8
+spec:
+  goal: "Research and summarize the current landscape for: battery recycling."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
+---
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-fanout-9
+spec:
+  goal: "Research and summarize the current landscape for: robotics startups."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic
