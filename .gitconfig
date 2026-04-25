@@ -1,0 +1,16 @@
+[core]
+	autocrlf = input
+	eol = lf
+	whitespace = trailing-space,space-before-tab
+
+[pull]
+	ff = only
+
+[push]
+	default = simple
+
+[init]
+	defaultBranch = main
+
+[include]
+	path = .gitconfig.local

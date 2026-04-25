@@ -1,0 +1,12 @@
+[
+  {"name": "tariffs", "phase": "Thinking", "podName": "agent-tariffs"},
+  {"name": "ai-regulation", "phase": "Running", "podName": "agent-ai-regulation"},
+  {"name": "ev-market", "phase": "Pending", "podName": null},
+  {"name": "chips", "phase": "Thinking", "podName": "agent-chips"},
+  {"name": "housing", "phase": "Running", "podName": "agent-housing"},
+  {"name": "energy", "phase": "Thinking", "podName": "agent-energy"},
+  {"name": "crypto", "phase": "Pending", "podName": null},
+  {"name": "healthcare", "phase": "Running", "podName": "agent-healthcare"},
+  {"name": "defense", "phase": "Thinking", "podName": "agent-defense"},
+  {"name": "labor", "phase": "Pending", "podName": null}
+]

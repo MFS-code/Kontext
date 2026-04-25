@@ -1,0 +1,17 @@
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: research-tariffs
+spec:
+  goal: "Find the 5 most-cited articles on US tariffs this month and summarize the consensus."
+  provider: anthropic
+  model: claude-sonnet-4
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 2.00
+  secretRef:
+    name: kontext-anthropic

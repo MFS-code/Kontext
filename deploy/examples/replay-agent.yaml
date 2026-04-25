@@ -1,0 +1,15 @@
+apiVersion: kontext.dev/v1
+kind: Agent
+metadata:
+  name: replay-tariffs
+spec:
+  goal: "Replay the tariff research demo without calling a provider API."
+  provider: replay
+  model: fake-model
+  tools:
+    - web_fetch
+    - python
+  budget:
+    tokens: 200000
+    wallclock: 5m
+    dollars: 0.00
