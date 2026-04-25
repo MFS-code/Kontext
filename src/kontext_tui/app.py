@@ -5,6 +5,7 @@ from pathlib import Path
 
 from textual import on
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Input, Label, Log, Static, TabbedContent, TabPane, TextArea
@@ -45,6 +46,7 @@ class KontextApp(App[None]):
         ("l", "launch_agent", "Launch"),
         ("r", "refresh_agents", "Refresh"),
         ("x", "stop_logs", "Stop logs"),
+        Binding("escape", "clear_focus", "Commands", show=False, priority=True),
         ("?", "toggle_help", "Help"),
         ("q", "quit", "Quit"),
     ]
@@ -64,7 +66,7 @@ class KontextApp(App[None]):
         yield Container(
             Static(LOGO, id="logo"),
             Static(
-                "1 create  2 monitor  c check  s secret  g goal  n name  y yaml  w watch  l launch  r refresh  x stop  ? help  q quit",
+                "esc commands  1 create  2 monitor  c check  s secret  g goal  n name  y yaml  w watch  l launch  r refresh  x stop  ? help  q quit",
                 id="command-strip",
             ),
             Static("kubectl checking | cluster checking | crd checking | secret checking", id="readiness-strip"),
@@ -72,7 +74,7 @@ class KontextApp(App[None]):
             id="hero",
         )
         yield Static(
-            "Tab moves fields. Enter activates focused controls. Generated YAML can be applied manually.",
+            "Tab moves fields. Esc clears focus so single-key commands work. Generated YAML can be applied manually.",
             id="help",
         )
         with TabbedContent(initial="create", id="tabs"):
@@ -350,6 +352,10 @@ class KontextApp(App[None]):
 
     def action_focus_watch(self) -> None:
         self.query_one("#agents-table", DataTable).focus()
+
+    def action_clear_focus(self) -> None:
+        self.set_focus(None)
+        self.set_status("command mode")
 
     def action_stop_logs(self) -> None:
         if self._log_task and not self._log_task.done():
