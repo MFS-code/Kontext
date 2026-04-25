@@ -57,8 +57,8 @@ class AgentConfig:
         if self.replicas <= 0:
             errors.append("replicas must be greater than zero")
         if self.replicas > 1:
-            if len(self.topics) < self.replicas:
-                errors.append("fanout needs at least one topic per replica")
+            if not self.topics:
+                errors.append("fanout needs at least one topic")
             for name in self.generated_names():
                 if not is_valid_name(name):
                     errors.append("generated fanout names must be DNS labels")
@@ -80,7 +80,9 @@ class AgentConfig:
             return [self.to_resource(self.name, self.goal)]
 
         resources: list[dict[str, Any]] = []
-        for index, topic in enumerate(self.topics[: self.replicas]):
+        topics = self.topics
+        for index in range(self.replicas):
+            topic = topics[index % len(topics)]
             goal = render_goal_template(self.goal_template, topic, index)
             resources.append(self.to_resource(f"{self.name}-{index}", goal))
         return resources
