@@ -1,109 +1,80 @@
 # AGENTS.md
 
+## Workspace & Cross-Project Vision
+
+> This repo is part of a two-project Cursor workspace: **AgentNet** and **Kontext**, worked on together on purpose. Cursor reads `AGENTS.md` per repo (there is no enclosing repo over both), so this section is mirrored in both repos to give every agent the shared picture. Keep the two copies in sync when the vision changes.
+>
+> **You are in: Kontext.** Its sibling repo in this workspace is **AgentNet**.
+
+### The two projects
+
+- **Kontext** — a Kubernetes-native control plane for running, governing, and observing AI agents as production workloads. Thesis: *agents are workloads*. An `Agent` is a real custom resource reconciled into real Pods; `kubectl apply`, `kubectl logs`, and `.status.result` work through Kubernetes, not mock state. Kontext is meant to be a **general, standalone product**, not tied to any one consumer.
+- **AgentNet** — an infrastructure layer that makes a codebase agent-native: it indexes a repo into a code graph and partitions it into a web of persistent, specialized **agentic code-owners** ("ownership zones") that review incoming code, hand the right context to external working agents, and enforce local conventions — mirroring how human engineering orgs do local ownership plus structured handoff.
+
+### How they relate (and the firewall)
+
+AgentNet is meant to **run on Kontext**: each persistent code-owner is deployed as a long-running (`Service`-mode) Kontext `Agent`, so when one fails it is **instantly re-cast** as a Kubernetes workload. The work a code-owner performs (review this PR, assemble context for task X) is dispatched as one-shot `AgentRun`s.
+
+Critical boundary — **Kontext must stay general**. It never learns AgentNet's vocabulary ("code owner", "zone", "repository", "pull request"). AgentNet encodes all of that inside its own **runtime image** and orchestrates by creating generic Kontext `Agent`/`AgentRun` objects. If a feature cannot be expressed without Kontext knowing a consumer's domain, it belongs in the consumer's image, not in Kontext. (See the anti-overfit firewall in `SPEC.md`.)
+
+### Current direction (live)
+
+- **Go + kubebuilder** operator is the product control plane (`api/v1alpha1`, `internal/controller/`).
+- **API model Option B:** `Agent` (definition) + `AgentRun` (execution). Modes: `Service` (implemented), `Task`/`Scheduled` (schema only).
+- Canonical docs: **`SPEC.md`**, **`ROADMAP.md`**, **`README.md`**.
+- Hackathon Python stack lives on branch **`deprecated/hackathon-python`** — see `DEPRECATED.md`. Do not reintroduce it on main.
+
+### Maintainer context
+
+The author is a junior engineer treating these as learning projects (experienced with cloud APIs; newer to Go and Kubernetes). Prefer building real product over throwaway practice, explain non-obvious Go/Kubernetes steps while doing them, and never make large architectural decisions silently — surface the trade-offs first.
+
 ## First Read
 
-Before making code changes, read these docs in order:
+Before making code changes, read in order:
 
-1. `CONCEPT.md` - project vision, demo beats, and why this is real Kubernetes.
-2. `PLAN.md` - hackathon plan, scope, build split, and summer expansion.
-3. `PHASES.md` - current implementation phases and exit criteria.
-4. `README.md` - current quickstart and test commands.
+1. `SPEC.md` — API + runtime-image contract
+2. `ROADMAP.md` — milestones and locked decisions
+3. `README.md` — install, test, and layout
 
-If the docs disagree, prefer the most recent implementation state in the codebase, then update docs when the direction changes.
+If docs disagree, prefer the codebase, then update docs.
 
 ## Project Thesis
 
-Kontext is a Kubernetes-native runtime for AI agents. The key idea is:
-
 > Agents are workloads.
 
-An `Agent` should be a real Kubernetes custom resource, reconciled by a real controller into real Pods. The demo must prove that `kubectl apply`, `kubectl get agents`, `kubectl logs`, and `.status.result` all work through Kubernetes, not through local mock state.
+An `Agent`/`AgentRun` must reconcile into real Pods. `kubectl apply`, `kubectl get agentruns`, `kubectl logs`, and `.status.result` are the demo path — not mock state.
 
-## Current Phase
+## Architecture (main)
 
-The repo is currently in Phase 1:
+| Path | Owns |
+|------|------|
+| `api/v1alpha1/` | CRD Go types |
+| `internal/controller/` | Agent + AgentRun reconciliation |
+| `internal/podbuilder/` | Pod env, volumes, provider secrets |
+| `internal/runtimepolicy/` | Provider credential table |
+| `internal/status/` | Pod observation, termination parsing |
+| `internal/conditions/` | Shared condition merge helpers |
+| `config/` | Kustomize: CRDs, RBAC, manager Deployment |
+| `deploy/examples/v1alpha1/` | Sample manifests |
+| `runtimes/*/` | Container runtime images (bring-your-own-runtime) |
 
-- Real CRD: `deploy/crds/agents.kontext.dev.yaml`
-- Python `kopf` controller: `src/kontext_operator/controller.py`
-- Fake runtime runner: `src/kontext_runtime/fake_runner.py`
-- Controller/RBAC install manifest: `deploy/install.yaml`
-- Example resource: `deploy/examples/research-agent.yaml`
-- TUI prototype: `src/kontext_tui/`
+## Demo invariants
 
-Phase 1 goal: fake AI runtime, real Kubernetes path.
+- `kubectl apply -f deploy/examples/v1alpha1/echo-task-run.yaml` → `AgentRun` → Pod → `.status.result`
+- `kubectl apply -f deploy/examples/v1alpha1/echo-service-agent.yaml` → Service `Agent` mints child runs; pod delete triggers recast
+- `./scripts/e2e-kind.sh` passes on a fresh kind cluster
 
-## Architecture Boundaries
-
-- `src/kontext_operator/` owns Kubernetes reconciliation.
-- `src/kontext_runtime/` owns code that runs inside agent Pods.
-- `src/kontext_tui/` owns the local terminal UI and should treat Kubernetes as the source of truth.
-- `deploy/` owns CRDs, RBAC, controller deployment, and example manifests.
-- `demo/fixtures/` owns canned fallback data for presentation safety.
-
-Do not make the TUI the execution layer. It may generate/apply YAML and watch resources, but the resource must still work with plain `kubectl`.
-
-## Agent Resource Contract
-
-The shared `Agent.spec` contract is:
-
-- `goal`
-- `provider`
-- `model`
-- `tools`
-- `budget.tokens`
-- `budget.wallclock`
-- `budget.dollars`
-- optional `secretRef`
-- optional `replicas`
-- optional `goalTemplate`
-- optional `topics`
-
-The shared `Agent.status` contract is:
-
-- `phase`
-- `podName`
-- `result`
-- `message`
-- optional `tokensUsed`
-- optional `dollarsUsed`
-
-Keep the controller, TUI models, CRD schema, and examples aligned when changing this contract.
-
-## Demo-Critical Invariants
-
-- `kubectl apply -f deploy/examples/research-agent.yaml` should create an `Agent`.
-- The controller should create a Pod named like `agent-<agent-name>`.
-- `kubectl logs -f <pod>` should show agent thoughts streaming from stdout.
-- `kubectl get agents -w` should show phase movement.
-- `kubectl get agent <name> -o yaml` should show `.status.result` after completion.
-
-Protect these before polishing internals.
-
-## Local Test Path
-
-For a kind cluster named `kontext`:
+## Local test path
 
 ```bash
-docker build -t kontext:dev .
-kind create cluster --name kontext
-kind load docker-image kontext:dev --name kontext
-kubectl apply -f deploy/crds/agents.kontext.dev.yaml
-kubectl apply -f deploy/install.yaml
-kubectl apply -f deploy/examples/research-agent.yaml
-kubectl get agents -w
-kubectl logs -f agent-research-tariffs
-kubectl get agent research-tariffs -o jsonpath='{.status.result}'
+make test
+./scripts/install-go-kind.sh
+./scripts/e2e-kind.sh
 ```
 
-If the cluster already exists, skip `kind create cluster`.
+## Engineering guidance
 
-## Engineering Guidance
-
-- Optimize for a working demo vertical slice over production completeness.
-- Keep hackathon code small and legible.
-- Prefer real Kubernetes primitives over local wrappers or subprocess illusions.
-- Use raw manifests for now; no Helm until later phases.
-- Use Python for the hackathon controller/runtime; the planned production rewrite is Go/kubebuilder later.
-- Avoid broad refactors unless they directly protect the demo path.
-- When adding runtime features, preserve stdout streaming because `kubectl logs -f` is the magic moment.
-- Always provide a way to test your work after completing a task as well as a detailed explanation of everything you did.
+- Keep Kontext general — no consumer domain fields on CRDs.
+- Preserve stdout streaming (`kubectl logs -f`) as the observability contract.
+- Run `make test` after controller or API changes.
+- Always provide a way to test your work and explain what you did.
