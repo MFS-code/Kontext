@@ -91,6 +91,48 @@ func TestParseWallclockDetailedInvalid(t *testing.T) {
 	}
 }
 
+func TestObservePodWaitingUsesReason(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"},
+					},
+				},
+			},
+		},
+	}
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhasePending {
+		t.Fatalf("expected Pending, got %s", observation.Phase)
+	}
+	if observation.Message != "Waiting: ContainerCreating" {
+		t.Fatalf("expected reason in message, got %q", observation.Message)
+	}
+}
+
+func TestObservePodWaitingIncludesMessage(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					State: corev1.ContainerState{
+						Waiting: &corev1.ContainerStateWaiting{
+							Reason:  "ImagePullBackOff",
+							Message: "Back-off pulling image \"missing:latest\"",
+						},
+					},
+				},
+			},
+		},
+	}
+	observation := status.ObservePod(pod)
+	if observation.Message != "Waiting: ImagePullBackOff (Back-off pulling image \"missing:latest\")" {
+		t.Fatalf("unexpected message %q", observation.Message)
+	}
+}
+
 func TestObservePodPending(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "run-demo"},
