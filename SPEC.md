@@ -1,5 +1,6 @@
 # Kontext API Spec (DRAFT — v1alpha1)
 
+> Status: draft for review. This contract keeps Kontext a **general** agent runtime. Features that require application-specific vocabulary or behavior belong in the consumer's runtime image, not the control plane.
 
 Kontext exposes two custom resources and one runtime-image contract.
 
@@ -111,6 +112,7 @@ When created from an `Agent`, the controller snapshots/resolves these fields so 
 
 ### Ownership
 
+`AgentRun` created from an `Agent` carries an owner reference to it → standard GC cascade. Standalone `AgentRun`s are allowed for ad-hoc execution, demos, and direct task dispatch.
 
 ---
 
@@ -149,7 +151,7 @@ The controller injects, on the Pod:
 
 ## Anti-overfit firewall (read before adding a field)
 
-Kontext's vocabulary is fixed: `Agent`, `AgentRun`, runtime image, mode, budget, secret, tools, status, result. It must not gain domain-specific fields or workflow semantics for any one consumer. Consumers encode their semantics inside runtime images and orchestrate by creating generic `Agent`/`AgentRun` objects.
+Kontext's vocabulary is fixed: `Agent`, `AgentRun`, runtime image, mode, budget, secret, tools, status, result. It must not gain fields like `repository`, `zone`, `owner`, `pullRequest`, or anything domain-specific to a consumer. Consumers encode their semantics inside runtime images and orchestrate by creating generic `Agent`/`AgentRun` objects.
 
 ---
 
@@ -158,5 +160,6 @@ Kontext's vocabulary is fixed: `Agent`, `AgentRun`, runtime image, mode, budget,
 1. Does `Service` mode ever need >1 concurrent `AgentRun` (replicas), or is single-run-per-Agent enough for the MVP?
 2. Where do tool *permissions* get enforced — admission/CEL on the CRD, or trusted to the runtime image at first?
 3. Is `BudgetExceeded` a distinct phase or a `Failed` with a reason condition?
+4. Do we need a `goalTemplate` + parameters object now, or defer templating until a concrete consumer needs it?
 5. Standalone `AgentRun` UX: encouraged primitive, or always create via an `Agent`?
 
