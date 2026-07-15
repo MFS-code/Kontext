@@ -151,7 +151,7 @@ The controller injects, on the Pod:
 
 ## Anti-overfit firewall (read before adding a field)
 
-Kontext's vocabulary is fixed: `Agent`, `AgentRun`, runtime image, mode, budget, secret, tools, status, result. It must not gain fields like `repository`, `zone`, `owner`, `pullRequest`, or anything domain-specific to a consumer. Consumers encode their semantics inside runtime images and orchestrate by creating generic `Agent`/`AgentRun` objects.
+Kontext's vocabulary is fixed: `Agent`, `AgentRun`, runtime image, mode, budget, secret, tools, status, result. It must not gain domain-specific fields or workflow semantics for any one consumer. Consumers encode their semantics inside runtime images and orchestrate by creating generic `Agent`/`AgentRun` objects.
 
 ---
 
