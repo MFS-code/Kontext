@@ -19,9 +19,10 @@ type AgentSpec struct {
 	Goal         string `json:"goal,omitempty"`
 	GoalTemplate string `json:"goalTemplate,omitempty"`
 
-	Provider string   `json:"provider,omitempty"`
-	Model    string   `json:"model"`
-	Tools    []string `json:"tools,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	Model string   `json:"model"`
+	Tools []string `json:"tools,omitempty"`
 
 	Budget *BudgetSpec `json:"budget,omitempty"`
 
