@@ -4,6 +4,8 @@ A Kubernetes-native control plane for running, governing, and observing AI agent
 
 The thesis: **agents are workloads.** An agent should not live in a screen session or behind a bespoke orchestration service. It should be a resource your cluster understands — created with `kubectl apply`, observed with `kubectl logs -f`, governed by RBAC, budgets, and owner references, and restarted by a controller when it dies.
 
+After the [quickstart](#quickstart-on-kind) below, this is the whole workflow:
+
 ```bash
 kubectl apply -f deploy/examples/v1alpha1/echo-task-run.yaml
 kubectl get agentrun echo-review -w
@@ -19,7 +21,7 @@ Kontext adds two custom resources under `kontext.dev/v1alpha1`, deliberately mir
 |---|---|---|
 | `Agent` (mode `Service`) | `Deployment` | Always-on. The controller keeps one live `AgentRun` and re-casts it with backoff when it exits. |
 | `Agent` (mode `Task`) | reusable template | A definition that mints an `AgentRun` per invocation. *(Schema present; controller support planned.)* |
-| `Agent` (mode `Scheduled`) | `CronJob` | Mints runs on a cron schedule. *(Reserved.)* |
+| `Agent` (mode `Scheduled`) | `CronJob` | Mints runs on a cron schedule. *(Schema present; controller support not yet planned.)* |
 | `AgentRun` | `Job` / `Pod` | One bounded execution. Owns exactly one Pod, holds the immutable spec snapshot, the final `.status.result`, and usage. |
 
 An `AgentRun` can also be created standalone, without any owning `Agent` — useful for ad-hoc dispatch and demos.
