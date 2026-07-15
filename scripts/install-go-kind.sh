@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Load prebuilt operator + echo images into kind and install the controller.
+# Build images first, e.g. `make docker-build docker-build-echo` or `make kind-install`.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,11 +19,14 @@ need docker
 need kind
 need kubectl
 
-echo "==> building operator image ${OPERATOR_IMAGE}"
-docker build -t "${OPERATOR_IMAGE}" "${ROOT_DIR}"
-
-echo "==> building echo runtime ${ECHO_IMAGE}"
-docker build -t "${ECHO_IMAGE}" "${ROOT_DIR}/runtimes/echo"
+if ! docker image inspect "${OPERATOR_IMAGE}" >/dev/null 2>&1; then
+  echo "missing local image ${OPERATOR_IMAGE}; build with: make docker-build" >&2
+  exit 1
+fi
+if ! docker image inspect "${ECHO_IMAGE}" >/dev/null 2>&1; then
+  echo "missing local image ${ECHO_IMAGE}; build with: make docker-build-echo" >&2
+  exit 1
+fi
 
 if ! kind get clusters | grep -qx "${CLUSTER_NAME}"; then
   echo "==> creating kind cluster ${CLUSTER_NAME}"

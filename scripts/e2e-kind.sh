@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
+# Keyless kind scenarios. On failure, CI collects diagnostics separately via
+# scripts/collect-kind-diagnostics.sh; locally run that script after a failed e2e.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CLUSTER_NAME="${KIND_CLUSTER_NAME:-kontext}"
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -29,8 +30,6 @@ phase="$(kubectl get agentrun echo-review -o jsonpath='{.status.phase}')"
 result="$(kubectl get agentrun echo-review -o jsonpath='{.status.result}')"
 if [[ "${phase}" != "Succeeded" ]]; then
   echo "expected echo-review to succeed, got phase=${phase}" >&2
-  kubectl describe agentrun echo-review || true
-  kubectl logs "$(kubectl get pod -l kontext.dev/run=echo-review -o jsonpath='{.items[0].metadata.name}')" || true
   exit 1
 fi
 echo "task result: ${result}"
@@ -51,7 +50,6 @@ done
 service_pod="$(kubectl get pod -l kontext.dev/agent=echo-service -o jsonpath='{.items[0].metadata.name}')"
 if [[ -z "${service_pod}" ]]; then
   echo "service agent pod not found" >&2
-  kubectl describe agent echo-service || true
   exit 1
 fi
 
@@ -70,5 +68,4 @@ for _ in $(seq 1 60); do
 done
 
 echo "service recast did not complete in time" >&2
-kubectl describe agent echo-service || true
 exit 1

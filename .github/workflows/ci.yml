@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache controller tools
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-controller-tools-${{ hashFiles('Makefile', 'go.mod', 'go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-controller-tools-
+
+      - name: Verify generated artifacts and formatting
+        run: make verify
+
+      - name: Run unit and envtest suites
+        run: make test
+
+  # Anthropic is never loaded into kind for PR e2e (keyless echo path only).
+  # Build it here so Dockerfile breakage still fails CI without pretending it is
+  # part of the kind install surface.
+  image-smoke:
+    name: Image smoke
+    runs-on: ubuntu-latest
+    env:
+      KONTEXT_ANTHROPIC_IMAGE: kontext-runtime-anthropic:dev
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Anthropic reference runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: runtimes/python-anthropic
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_ANTHROPIC_IMAGE }}
+          cache-from: type=gha,scope=anthropic
+          cache-to: type=gha,mode=max,scope=anthropic
+
+  e2e:
+    name: Kind e2e
+    runs-on: ubuntu-latest
+    needs:
+      - validate
+      - image-smoke
+    env:
+      KIND_CLUSTER_NAME: kontext-ci
+      KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
+      KONTEXT_ECHO_IMAGE: kontext-echo:dev
+      KONTEXT_DIAG_DIR: ${{ github.workspace }}/.ci-diagnostics
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build operator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
+          cache-from: type=gha,scope=operator
+          cache-to: type=gha,mode=max,scope=operator
+
+      - name: Build echo runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: runtimes/echo
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_ECHO_IMAGE }}
+          cache-from: type=gha,scope=echo
+          cache-to: type=gha,mode=max,scope=echo
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          wait: 120s
+
+      - name: Install Kontext with local images
+        run: ./scripts/install-go-kind.sh
+
+      - name: Run keyless kind end-to-end scenarios
+        run: ./scripts/e2e-kind.sh
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: ./scripts/collect-kind-diagnostics.sh "${KONTEXT_DIAG_DIR}"
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kind-diagnostics-${{ github.run_id }}
+          path: ${{ env.KONTEXT_DIAG_DIR }}
+          if-no-files-found: ignore
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
