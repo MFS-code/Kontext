@@ -53,7 +53,7 @@ verify: manifests generate ## Check generated artifacts and gofmt; fail on drift
 		git --no-pager diff -- api/v1alpha1/zz_generated.deepcopy.go config/crd/bases config/rbac/role.yaml; \
 		exit 1; \
 	fi
-	@unformatted="$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*' -not -path './bin/*'))"; \
+	@unformatted="$$(find . -name '*.go' -not -path './vendor/*' -not -path './bin/*' -exec gofmt -l {} +)"; \
 	if [[ -n "$${unformatted}" ]]; then \
 		echo "go files need formatting; run 'make fmt'" >&2; \
 		echo "$${unformatted}"; \

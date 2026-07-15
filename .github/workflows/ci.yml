@@ -18,6 +18,7 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -48,6 +49,7 @@ jobs:
   image-smoke:
     name: Image smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       KONTEXT_ANTHROPIC_IMAGE: kontext-runtime-anthropic:dev
     steps:
@@ -70,6 +72,7 @@ jobs:
   e2e:
     name: Kind e2e
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs:
       - validate
       - image-smoke

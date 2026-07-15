@@ -12,16 +12,28 @@ need() {
   fi
 }
 
+is_terminal_failure_phase() {
+  case "$1" in
+    Failed|BudgetExceeded) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 need kubectl
 
 echo "==> applying standalone echo task run"
 kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/echo-task-run.yaml"
 
 echo "==> waiting for AgentRun to succeed"
+phase=""
 for _ in $(seq 1 60); do
   phase="$(kubectl get agentrun echo-review -o jsonpath='{.status.phase}' 2>/dev/null || true)"
   if [[ "${phase}" == "Succeeded" ]]; then
     break
+  fi
+  if is_terminal_failure_phase "${phase}"; then
+    echo "expected echo-review to succeed, got phase=${phase}" >&2
+    exit 1
   fi
   sleep 2
 done
