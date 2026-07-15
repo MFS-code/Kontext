@@ -10,85 +10,76 @@ const DefaultProvider = "anthropic"
 
 // CredentialSpec describes how a provider receives API keys in the runtime Pod.
 type CredentialSpec struct {
-	EnvVarName        string
-	SecretKey         string
-	DefaultSecretName string
+	EnvVarName string
+	SecretKey  string
 }
 
 type providerDefinition struct {
-	keyless     bool
-	credentials CredentialSpec
+	keyless           bool
+	defaultSecretName string
+	credentials       []CredentialSpec
 }
 
 var providerDefinitions = map[string]providerDefinition{
 	"anthropic": {
-		credentials: CredentialSpec{
-			EnvVarName:        "ANTHROPIC_API_KEY",
-			SecretKey:         "ANTHROPIC_API_KEY",
-			DefaultSecretName: "kontext-anthropic",
+		defaultSecretName: "kontext-anthropic",
+		credentials: []CredentialSpec{
+			{EnvVarName: "ANTHROPIC_API_KEY", SecretKey: "ANTHROPIC_API_KEY"},
 		},
 	},
 	"openai": {
-		credentials: CredentialSpec{
-			EnvVarName:        "OPENAI_API_KEY",
-			SecretKey:         "OPENAI_API_KEY",
-			DefaultSecretName: "kontext-openai",
+		defaultSecretName: "kontext-openai",
+		credentials: []CredentialSpec{
+			{EnvVarName: "OPENAI_API_KEY", SecretKey: "OPENAI_API_KEY"},
 		},
 	},
 	"google": {
-		credentials: CredentialSpec{
-			EnvVarName:        "GOOGLE_API_KEY",
-			SecretKey:         "GOOGLE_API_KEY",
-			DefaultSecretName: "kontext-google",
+		defaultSecretName: "kontext-google",
+		credentials: []CredentialSpec{
+			{EnvVarName: "GOOGLE_API_KEY", SecretKey: "GOOGLE_API_KEY"},
 		},
 	},
 	"gemini": {
-		credentials: CredentialSpec{
-			EnvVarName:        "GOOGLE_API_KEY",
-			SecretKey:         "GOOGLE_API_KEY",
-			DefaultSecretName: "kontext-google",
+		defaultSecretName: "kontext-google",
+		credentials: []CredentialSpec{
+			{EnvVarName: "GOOGLE_API_KEY", SecretKey: "GOOGLE_API_KEY"},
 		},
 	},
 	"azure": {
-		credentials: CredentialSpec{
-			EnvVarName:        "AZURE_OPENAI_API_KEY",
-			SecretKey:         "AZURE_OPENAI_API_KEY",
-			DefaultSecretName: "kontext-azure-openai",
+		defaultSecretName: "kontext-azure-openai",
+		credentials: []CredentialSpec{
+			{EnvVarName: "AZURE_OPENAI_API_KEY", SecretKey: "AZURE_OPENAI_API_KEY"},
 		},
 	},
 	"azure-openai": {
-		credentials: CredentialSpec{
-			EnvVarName:        "AZURE_OPENAI_API_KEY",
-			SecretKey:         "AZURE_OPENAI_API_KEY",
-			DefaultSecretName: "kontext-azure-openai",
+		defaultSecretName: "kontext-azure-openai",
+		credentials: []CredentialSpec{
+			{EnvVarName: "AZURE_OPENAI_API_KEY", SecretKey: "AZURE_OPENAI_API_KEY"},
 		},
 	},
 	"mistral": {
-		credentials: CredentialSpec{
-			EnvVarName:        "MISTRAL_API_KEY",
-			SecretKey:         "MISTRAL_API_KEY",
-			DefaultSecretName: "kontext-mistral",
+		defaultSecretName: "kontext-mistral",
+		credentials: []CredentialSpec{
+			{EnvVarName: "MISTRAL_API_KEY", SecretKey: "MISTRAL_API_KEY"},
 		},
 	},
 	"groq": {
-		credentials: CredentialSpec{
-			EnvVarName:        "GROQ_API_KEY",
-			SecretKey:         "GROQ_API_KEY",
-			DefaultSecretName: "kontext-groq",
+		defaultSecretName: "kontext-groq",
+		credentials: []CredentialSpec{
+			{EnvVarName: "GROQ_API_KEY", SecretKey: "GROQ_API_KEY"},
 		},
 	},
 	"cohere": {
-		credentials: CredentialSpec{
-			EnvVarName:        "COHERE_API_KEY",
-			SecretKey:         "COHERE_API_KEY",
-			DefaultSecretName: "kontext-cohere",
+		defaultSecretName: "kontext-cohere",
+		credentials: []CredentialSpec{
+			{EnvVarName: "COHERE_API_KEY", SecretKey: "COHERE_API_KEY"},
 		},
 	},
 	"bedrock": {
-		credentials: CredentialSpec{
-			EnvVarName:        "AWS_ACCESS_KEY_ID",
-			SecretKey:         "AWS_ACCESS_KEY_ID",
-			DefaultSecretName: "kontext-bedrock",
+		defaultSecretName: "kontext-bedrock",
+		credentials: []CredentialSpec{
+			{EnvVarName: "AWS_ACCESS_KEY_ID", SecretKey: "AWS_ACCESS_KEY_ID"},
+			{EnvVarName: "AWS_SECRET_ACCESS_KEY", SecretKey: "AWS_SECRET_ACCESS_KEY"},
 		},
 	},
 	"fake":          {keyless: true},
@@ -116,21 +107,19 @@ func NeedsAPIKey(provider string) bool {
 }
 
 // Credentials returns the credential wiring for a provider.
-func Credentials(provider string) CredentialSpec {
+func Credentials(provider string) []CredentialSpec {
 	normalized := NormalizeProvider(provider)
 	def, ok := providerDefinitions[normalized]
 	if !ok {
 		envName := strings.ToUpper(strings.ReplaceAll(normalized, "-", "_")) + "_API_KEY"
-		return CredentialSpec{
-			EnvVarName:        envName,
-			SecretKey:         envName,
-			DefaultSecretName: "kontext-" + normalized,
+		return []CredentialSpec{
+			{EnvVarName: envName, SecretKey: envName},
 		}
 	}
 	if def.keyless {
-		return CredentialSpec{}
+		return nil
 	}
-	return def.credentials
+	return append([]CredentialSpec(nil), def.credentials...)
 }
 
 // SecretName returns the Kubernetes Secret name for provider credentials.
@@ -138,5 +127,9 @@ func SecretName(provider string, secretRef *kontextv1alpha1.SecretRef) string {
 	if secretRef != nil && secretRef.Name != "" {
 		return secretRef.Name
 	}
-	return Credentials(provider).DefaultSecretName
+	normalized := NormalizeProvider(provider)
+	if def, ok := providerDefinitions[normalized]; ok {
+		return def.defaultSecretName
+	}
+	return "kontext-" + normalized
 }

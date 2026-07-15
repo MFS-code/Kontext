@@ -201,6 +201,66 @@ func TestAgentRunReconcilerSurfacesInvalidWallclock(t *testing.T) {
 	}
 }
 
+func TestAgentRunReconcilerObservesRunningPodWithinWallclockBudget(t *testing.T) {
+	ctx := context.Background()
+	podName := podbuilder.PodNameForRun("active-wallclock-run")
+	started := metav1.NewTime(time.Now().Add(-time.Second))
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "active-wallclock-run",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+			Budget:   &kontextv1alpha1.BudgetSpec{Wallclock: "1m"},
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
+		Phase:   kontextv1alpha1.AgentRunPhasePending,
+		PodName: podName,
+	}); err != nil {
+		t.Fatalf("update run status: %v", err)
+	}
+
+	pod := podbuilder.BuildPod(run)
+	if err := k8sClient.Create(ctx, pod); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+	var createdPod corev1.Pod
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, &createdPod); err != nil {
+		t.Fatalf("get pod: %v", err)
+	}
+	createdPod.Status.Phase = corev1.PodRunning
+	createdPod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: "runtime",
+		State: corev1.ContainerState{
+			Running: &corev1.ContainerStateRunning{StartedAt: started},
+		},
+	}}
+	if err := k8sClient.Status().Update(ctx, &createdPod); err != nil {
+		t.Fatalf("update pod status: %v", err)
+	}
+
+	reconcileAgentRun(ctx, t, types.NamespacedName{Name: run.Name, Namespace: run.Namespace})
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: run.Name, Namespace: run.Namespace}, &updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseRunning {
+		t.Fatalf("expected Running, got %s", updated.Status.Phase)
+	}
+	if updated.Status.StartTime == nil {
+		t.Fatalf("expected start time")
+	}
+}
+
 func TestAgentRunReconcilerEnforcesWallclockBudget(t *testing.T) {
 	ctx := context.Background()
 	podName := podbuilder.PodNameForRun("wallclock-run")

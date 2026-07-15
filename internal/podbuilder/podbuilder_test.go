@@ -1,6 +1,7 @@
 package podbuilder_test
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -116,9 +117,53 @@ func TestBuildPodInjectsProviderCredentials(t *testing.T) {
 	}
 }
 
+func TestBuildPodInjectsAllBedrockCredentials(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-task", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "bedrock",
+			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+		},
+	}
+	pod := podbuilder.BuildPod(run)
+
+	expected := map[string]string{
+		"AWS_ACCESS_KEY_ID":     "AWS_ACCESS_KEY_ID",
+		"AWS_SECRET_ACCESS_KEY": "AWS_SECRET_ACCESS_KEY",
+	}
+	for _, item := range pod.Spec.Containers[0].Env {
+		secretKeyRef := item.ValueFrom
+		if expectedKey, ok := expected[item.Name]; ok && secretKeyRef != nil && secretKeyRef.SecretKeyRef != nil {
+			if secretKeyRef.SecretKeyRef.Name != "kontext-bedrock" {
+				t.Fatalf("expected Bedrock secret, got %s", secretKeyRef.SecretKeyRef.Name)
+			}
+			if secretKeyRef.SecretKeyRef.Key != expectedKey {
+				t.Fatalf("expected key %s, got %s", expectedKey, secretKeyRef.SecretKeyRef.Key)
+			}
+			delete(expected, item.Name)
+		}
+	}
+	if len(expected) != 0 {
+		t.Fatalf("missing Bedrock credential env vars: %#v", expected)
+	}
+}
+
 func TestPodNameForRunSanitizes(t *testing.T) {
 	if got := podbuilder.PodNameForRun("Review Task!"); got != "run-review-task" {
 		t.Fatalf("unexpected sanitized name: %s", got)
+	}
+}
+
+func TestPodNameForRunTrimsHyphenAfterTruncation(t *testing.T) {
+	runName := strings.Repeat("a", 55) + "-" + strings.Repeat("b", 10)
+	got := podbuilder.PodNameForRun(runName)
+	if strings.HasSuffix(got, "-") {
+		t.Fatalf("pod name must not end in a hyphen: %s", got)
+	}
+	if len(got) > 63 {
+		t.Fatalf("pod name exceeds DNS label limit: %d", len(got))
 	}
 }
 

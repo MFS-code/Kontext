@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
@@ -174,6 +175,73 @@ func TestAgentReconcilerRecastsAfterTerminalRun(t *testing.T) {
 	}
 	if updated.Status.RunsCreated != 2 {
 		t.Fatalf("expected runsCreated=2, got %d", updated.Status.RunsCreated)
+	}
+}
+
+func TestAgentReconcilerBacksOffWhenTerminalRunHasNoCompletionTime(t *testing.T) {
+	ctx := context.Background()
+	agent := &kontextv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "missing-completion-owner",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentSpec{
+			Mode:     kontextv1alpha1.AgentModeService,
+			Goal:     "stay ready",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := updateAgentStatus(ctx, agent, kontextv1alpha1.AgentStatus{
+		CurrentRunName: "missing-completion-owner-1",
+		RunsCreated:    1,
+	}); err != nil {
+		t.Fatalf("update agent status: %v", err)
+	}
+
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "missing-completion-owner-1",
+			Namespace: "default",
+			Labels:    map[string]string{podbuilder.LabelAgentName: agent.Name},
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			AgentRef: &kontextv1alpha1.AgentRef{Name: agent.Name},
+			Goal:     agent.Spec.Goal,
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
+		Phase: kontextv1alpha1.AgentRunPhaseFailed,
+	}); err != nil {
+		t.Fatalf("update run status: %v", err)
+	}
+
+	result, err := newAgentReconciler().Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+	})
+	if err != nil {
+		t.Fatalf("reconcile agent: %v", err)
+	}
+	if result.RequeueAfter <= 0 {
+		t.Fatalf("expected positive backoff, got %s", result.RequeueAfter)
+	}
+
+	var runs kontextv1alpha1.AgentRunList
+	if err := k8sClient.List(ctx, &runs, client.MatchingLabels{podbuilder.LabelAgentName: agent.Name}); err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs.Items) != 1 {
+		t.Fatalf("expected no immediate recast, got %d runs", len(runs.Items))
 	}
 }
 

@@ -101,17 +101,18 @@ func buildEnv(run *kontextv1alpha1.AgentRun) []corev1.EnvVar {
 	}
 
 	if runtimepolicy.NeedsAPIKey(provider) {
-		credentials := runtimepolicy.Credentials(provider)
 		secretName := runtimepolicy.SecretName(provider, run.Spec.SecretRef)
-		env = append(env, corev1.EnvVar{
-			Name: credentials.EnvVarName,
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-					Key:                  credentials.SecretKey,
+		for _, credential := range runtimepolicy.Credentials(provider) {
+			env = append(env, corev1.EnvVar{
+				Name: credential.EnvVarName,
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+						Key:                  credential.SecretKey,
+					},
 				},
-			},
-		})
+			})
+		}
 	}
 
 	return env
@@ -179,6 +180,10 @@ func PodNameForRun(runName string) string {
 	}
 	if len(safe) > 56 {
 		safe = safe[:56]
+	}
+	safe = strings.Trim(safe, "-")
+	if safe == "" {
+		safe = "run"
 	}
 	return fmt.Sprintf("run-%s", safe)
 }

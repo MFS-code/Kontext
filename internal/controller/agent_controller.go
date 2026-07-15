@@ -232,7 +232,7 @@ func timeSinceCompletion(run *kontextv1alpha1.AgentRun) time.Duration {
 	if run.Status.CompletionTime != nil {
 		return time.Since(run.Status.CompletionTime.Time)
 	}
-	return time.Duration(defaultBackoffInitial) * time.Second
+	return 0
 }
 
 func (r *AgentReconciler) setAgentStatus(
