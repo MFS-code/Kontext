@@ -95,7 +95,7 @@ def run_anthropic(config: RuntimeConfig) -> tuple[str, int, int]:
     with wallclock_limit(config.wallclock_seconds):
         response = client.messages.create(
             model=config.model,
-            max_tokens=min(config.max_tokens, DEFAULT_MAX_TOKENS),
+            max_tokens=config.max_tokens,
             system=(
                 "You are running inside a Kubernetes Pod as a Kontext Agent. "
                 "Answer the user's goal directly and concisely. Mention key assumptions "

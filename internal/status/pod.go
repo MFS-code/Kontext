@@ -47,9 +47,13 @@ func ObservePod(pod *corev1.Pod) PodObservation {
 			return observationFromTermination(state.Terminated)
 		}
 		if state.Waiting != nil && state.Waiting.Reason != "" {
+			message := fmt.Sprintf("Waiting: %s", state.Waiting.Reason)
+			if state.Waiting.Message != "" {
+				message = fmt.Sprintf("%s (%s)", message, state.Waiting.Message)
+			}
 			return PodObservation{
 				Phase:   kontextv1alpha1.AgentRunPhasePending,
-				Message: fmt.Sprintf("Waiting: %s", state.Waiting.Message),
+				Message: message,
 			}
 		}
 	}
