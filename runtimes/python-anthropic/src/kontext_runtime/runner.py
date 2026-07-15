@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -171,20 +172,36 @@ def parse_positive_int(value: str, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
+_DURATION_COMPONENT = re.compile(r"(\d+(?:\.\d+)?)(h|ms|m|s)")
+
+
 def parse_duration_seconds(value: str, default: int) -> int:
+    """Parse a Go-style duration ("1h30m", "300s") into whole seconds.
+
+    The controller validates spec.budget.wallclock with Go's time.ParseDuration,
+    so compound values are legal here. Bare integers are treated as seconds.
+    """
+    value = value.strip().lower()
     if not value:
         return default
 
-    units = {"s": 1, "m": 60, "h": 3600}
-    suffix = value[-1].lower()
-    multiplier = units.get(suffix, 1)
-    number = value[:-1] if suffix in units else value
+    if value.isdigit():
+        parsed = int(value)
+        return parsed if parsed > 0 else default
 
-    try:
-        parsed = int(number)
-    except ValueError:
+    units = {"h": 3600.0, "m": 60.0, "s": 1.0, "ms": 0.001}
+    total = 0.0
+    position = 0
+    for match in _DURATION_COMPONENT.finditer(value):
+        if match.start() != position:
+            return default
+        total += float(match.group(1)) * units[match.group(2)]
+        position = match.end()
+    if position != len(value):
         return default
-    return parsed * multiplier if parsed > 0 else default
+
+    seconds = int(total)
+    return seconds if seconds > 0 else default
 
 
 def env(name: str, default: str) -> str:

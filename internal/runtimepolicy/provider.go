@@ -49,12 +49,14 @@ var providerDefinitions = map[string]providerDefinition{
 		defaultSecretName: "kontext-azure-openai",
 		credentials: []CredentialSpec{
 			{EnvVarName: "AZURE_OPENAI_API_KEY", SecretKey: "AZURE_OPENAI_API_KEY"},
+			{EnvVarName: "AZURE_OPENAI_ENDPOINT", SecretKey: "AZURE_OPENAI_ENDPOINT"},
 		},
 	},
 	"azure-openai": {
 		defaultSecretName: "kontext-azure-openai",
 		credentials: []CredentialSpec{
 			{EnvVarName: "AZURE_OPENAI_API_KEY", SecretKey: "AZURE_OPENAI_API_KEY"},
+			{EnvVarName: "AZURE_OPENAI_ENDPOINT", SecretKey: "AZURE_OPENAI_ENDPOINT"},
 		},
 	},
 	"mistral": {

@@ -173,8 +173,34 @@ func TestAgentReconcilerRecastsAfterTerminalRun(t *testing.T) {
 	if updated.Status.CurrentRunName != "recast-owner-2" {
 		t.Fatalf("expected recast-owner-2, got %q", updated.Status.CurrentRunName)
 	}
+	if updated.Status.LastRunName != "recast-owner-1" {
+		t.Fatalf("expected lastRunName recast-owner-1, got %q", updated.Status.LastRunName)
+	}
 	if updated.Status.RunsCreated != 2 {
 		t.Fatalf("expected runsCreated=2, got %d", updated.Status.RunsCreated)
+	}
+
+	// A follow-up reconcile with the new run active must keep the history intact.
+	var newRun kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: "recast-owner-2", Namespace: agent.Namespace}, &newRun); err != nil {
+		t.Fatalf("get new run: %v", err)
+	}
+	if err := updateAgentRunStatus(ctx, &newRun, kontextv1alpha1.AgentRunStatus{
+		Phase: kontextv1alpha1.AgentRunPhaseRunning,
+	}); err != nil {
+		t.Fatalf("update new run status: %v", err)
+	}
+
+	reconcileAgent(ctx, t, types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace})
+
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace}, &updated); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if updated.Status.CurrentRunName != "recast-owner-2" {
+		t.Fatalf("expected recast-owner-2 to stay current, got %q", updated.Status.CurrentRunName)
+	}
+	if updated.Status.LastRunName != "recast-owner-1" {
+		t.Fatalf("expected lastRunName to remain recast-owner-1, got %q", updated.Status.LastRunName)
 	}
 }
 
