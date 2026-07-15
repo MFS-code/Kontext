@@ -51,11 +51,19 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	if result, done, err := r.enforceWallclock(ctx, &run, pod); err != nil || done {
-		return result, err
+	wallclockResult, done, err := r.enforceWallclock(ctx, &run, pod)
+	if err != nil || done {
+		return wallclockResult, err
 	}
 
-	return r.syncPodObservation(ctx, &run, pod, podName)
+	observationResult, err := r.syncPodObservation(ctx, &run, pod, podName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if wallclockResult.RequeueAfter > 0 {
+		return wallclockResult, nil
+	}
+	return observationResult, nil
 }
 
 func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *kontextv1alpha1.AgentRun, podName string) (ctrl.Result, error) {
@@ -160,7 +168,7 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 	elapsed := time.Since(startedAt.Time)
 	if elapsed <= limit {
 		remaining := limit - elapsed
-		return ctrl.Result{RequeueAfter: remaining + time.Second}, true, nil
+		return ctrl.Result{RequeueAfter: remaining + time.Second}, false, nil
 	}
 
 	if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {

@@ -39,23 +39,32 @@ func TestCredentialsForKnownProviders(t *testing.T) {
 		"mistral":      "MISTRAL_API_KEY",
 		"groq":         "GROQ_API_KEY",
 		"cohere":       "COHERE_API_KEY",
-		"bedrock":      "AWS_ACCESS_KEY_ID",
 	}
 	for provider, envName := range cases {
 		creds := runtimepolicy.Credentials(provider)
-		if creds.EnvVarName != envName {
-			t.Fatalf("provider %s: expected env %s, got %s", provider, envName, creds.EnvVarName)
+		if len(creds) != 1 || creds[0].EnvVarName != envName {
+			t.Fatalf("provider %s: expected env %s, got %#v", provider, envName, creds)
 		}
+	}
+}
+
+func TestCredentialsForBedrock(t *testing.T) {
+	creds := runtimepolicy.Credentials("bedrock")
+	if len(creds) != 2 {
+		t.Fatalf("expected two Bedrock credentials, got %#v", creds)
+	}
+	if creds[0].EnvVarName != "AWS_ACCESS_KEY_ID" || creds[1].EnvVarName != "AWS_SECRET_ACCESS_KEY" {
+		t.Fatalf("unexpected Bedrock credentials: %#v", creds)
 	}
 }
 
 func TestCredentialsFallbackForUnknownProvider(t *testing.T) {
 	creds := runtimepolicy.Credentials("custom-vendor")
-	if creds.EnvVarName != "CUSTOM_VENDOR_API_KEY" {
-		t.Fatalf("unexpected fallback env: %s", creds.EnvVarName)
+	if len(creds) != 1 || creds[0].EnvVarName != "CUSTOM_VENDOR_API_KEY" {
+		t.Fatalf("unexpected fallback credentials: %#v", creds)
 	}
-	if creds.DefaultSecretName != "kontext-custom-vendor" {
-		t.Fatalf("unexpected fallback secret: %s", creds.DefaultSecretName)
+	if got := runtimepolicy.SecretName("custom-vendor", nil); got != "kontext-custom-vendor" {
+		t.Fatalf("unexpected fallback secret: %s", got)
 	}
 }
 
