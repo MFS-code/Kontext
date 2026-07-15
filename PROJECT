@@ -1,0 +1,25 @@
+domain: kontext.dev
+layout:
+- go.kubebuilder.io/v4
+projectName: kontext
+repo: github.com/kontext-dev/kontext
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: kontext.dev
+  group: kontext
+  kind: Agent
+  path: github.com/kontext-dev/kontext/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: kontext.dev
+  group: kontext
+  kind: AgentRun
+  path: github.com/kontext-dev/kontext/api/v1alpha1
+  version: v1alpha1
+version: "3"

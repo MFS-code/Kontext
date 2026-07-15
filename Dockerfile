@@ -1,10 +1,18 @@
-FROM python:3.13-slim
+# Build the manager binary
+FROM golang:1.23 AS builder
+ARG TARGETOS
+ARG TARGETARCH
 
-WORKDIR /app
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY api/ api/
+COPY cmd/ cmd/
+COPY internal/ internal/
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -a -o manager cmd/main.go
 
-COPY pyproject.toml README.md ./
-COPY src ./src
-
-RUN pip install --no-cache-dir .
-
-CMD ["kontext-runner"]
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/manager .
+USER 65532:65532
+ENTRYPOINT ["/manager"]

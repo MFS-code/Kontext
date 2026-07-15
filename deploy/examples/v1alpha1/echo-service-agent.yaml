@@ -1,0 +1,18 @@
+apiVersion: kontext.dev/v1alpha1
+kind: Agent
+metadata:
+  name: echo-service
+spec:
+  mode: Service
+  goal: Remain available and emit heartbeats for service-mode tasks.
+  provider: echo
+  model: echo-model
+  runtime:
+    image: kontext-echo:dev
+    command: ["/entrypoint.sh"]
+  env:
+    - name: KONTEXT_MODE
+      value: service
+  backoff:
+    initialSeconds: 3
+    maxSeconds: 15
