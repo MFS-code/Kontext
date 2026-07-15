@@ -49,5 +49,8 @@ bin/
 cover.out
 vendor/
 
+# CI diagnostics
+.ci-diagnostics/
+
 # Local development files
 AGENTS.md

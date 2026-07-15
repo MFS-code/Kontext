@@ -1,5 +1,7 @@
 # Image URL to use all building/pushing image targets
 IMG ?= kontext-operator:dev
+ECHO_IMG ?= kontext-echo:dev
+ANTHROPIC_IMG ?= kontext-runtime-anthropic:dev
 
 # Get the currently used golang version
 GO_VERSION ?= 1.23.0
@@ -41,6 +43,23 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: verify
+verify: manifests generate ## Check generated artifacts and gofmt; fail on drift.
+	@if ! git diff --quiet --exit-code -- \
+		api/v1alpha1/zz_generated.deepcopy.go \
+		config/crd/bases \
+		config/rbac/role.yaml; then \
+		echo "generated files are out of date; run 'make manifests generate' and commit the result" >&2; \
+		git --no-pager diff -- api/v1alpha1/zz_generated.deepcopy.go config/crd/bases config/rbac/role.yaml; \
+		exit 1; \
+	fi
+	@unformatted="$$(find . -name '*.go' -not -path './vendor/*' -not -path './bin/*' -exec gofmt -l {} +)"; \
+	if [[ -n "$${unformatted}" ]]; then \
+		echo "go files need formatting; run 'make fmt'" >&2; \
+		echo "$${unformatted}"; \
+		exit 1; \
+	fi
+
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
@@ -58,6 +77,21 @@ run: manifests generate fmt vet ## Run a controller from your host.
 .PHONY: docker-build
 docker-build: ## Build docker image for the operator.
 	docker build -t ${IMG} .
+
+.PHONY: docker-build-echo
+docker-build-echo: ## Build docker image for the echo runtime.
+	docker build -t ${ECHO_IMG} runtimes/echo
+
+.PHONY: docker-build-anthropic
+docker-build-anthropic: ## Build docker image for the Anthropic reference runtime.
+	docker build -t ${ANTHROPIC_IMG} runtimes/python-anthropic
+
+.PHONY: docker-build-all
+docker-build-all: docker-build docker-build-echo docker-build-anthropic ## Build operator and runtime images.
+
+.PHONY: kind-install
+kind-install: docker-build docker-build-echo ## Build kind images and install the operator into kind.
+	./scripts/install-go-kind.sh
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

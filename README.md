@@ -33,8 +33,8 @@ Agents themselves are **bring-your-own-runtime**: any container image that reads
 Requires Docker, [kind](https://kind.sigs.k8s.io/), and kubectl.
 
 ```bash
-./scripts/install-go-kind.sh   # build operator + echo runtime, install CRDs and controller
-./scripts/e2e-kind.sh          # end-to-end verification
+make kind-install       # build operator + echo images, load into kind, install controller
+./scripts/e2e-kind.sh   # end-to-end verification
 ```
 
 The e2e script proves the two core behaviors:
@@ -86,10 +86,15 @@ Every run is bounded and auditable:
 ## Development
 
 ```bash
-make test    # unit + envtest reconciler tests
-make build   # compile operator binary to bin/manager
-make run     # run the controller locally against your kubeconfig
+make verify            # CRD/deepcopy generation + gofmt drift check
+make test              # unit + envtest reconciler tests
+make docker-build-all  # operator + echo + Anthropic runtime images
+make kind-install      # build operator + echo, load into kind, install controller
+make build             # compile operator binary to bin/manager
+make run               # run the controller locally against your kubeconfig
 ```
+
+Pull requests and pushes to `main` run validate, Dockerfile smoke for every shipped image, and keyless kind e2e via `.github/workflows/ci.yml`. After a failed local kind run, collect cluster state with `./scripts/collect-kind-diagnostics.sh`.
 
 ## Layout
 
