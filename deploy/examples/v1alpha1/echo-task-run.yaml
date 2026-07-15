@@ -1,0 +1,12 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: echo-review
+spec:
+  goal: Summarize the conventions for the owned files.
+  provider: echo
+  model: echo-model
+  runtime:
+    image: kontext-echo:dev
+  budget:
+    wallclock: 2m

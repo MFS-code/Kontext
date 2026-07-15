@@ -43,3 +43,11 @@ pip-wheel-metadata/
 *.log
 tmp/
 temp/
+
+# Go build artifacts
+bin/
+cover.out
+vendor/
+
+# Local-only shared workspace vision (kept out of commits; see skip-worktree)
+AGENTS.md

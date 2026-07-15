@@ -1,83 +1,76 @@
 # Kontext
 
-Kubernetes-native AI agents with a polished terminal demo layer.
+Kubernetes-native control plane for running, governing, and observing AI agents as
+production workloads.
 
-## Quickstart
+**API:** `kontext.dev/v1alpha1` — `Agent` (definition) + `AgentRun` (execution).
 
-Install Kontext into a fresh or existing kind cluster:
-
-```bash
-export ANTHROPIC_API_KEY=...
-./scripts/install-kind.sh
-```
-
-The script builds `kontext:dev`, creates a `kontext` kind cluster if needed,
-loads the image into kind, installs the CRD/controller, and creates
-`Secret/kontext-anthropic` when `ANTHROPIC_API_KEY` is set.
-
-Launch the single-agent demo:
+## Quickstart (kind)
 
 ```bash
-kubectl apply -f deploy/examples/research-agent.yaml
-kubectl get agents -w
-kubectl logs -f agent-research-tariffs
-kubectl get agent research-tariffs -o jsonpath='{.status.result}'
+./scripts/install-go-kind.sh
+./scripts/e2e-kind.sh
 ```
 
-The runner streams progress to pod stdout, calls Anthropic with `spec.goal`,
-writes the final answer to the pod termination message, and the controller
-reconciles that into `.status.result` with basic token usage.
+This builds `kontext-operator:dev` and `kontext-echo:dev`, installs CRDs and the Go
+controller, and verifies:
 
-## Replay Fallback
+- a standalone `AgentRun` completes with `.status.result`
+- a `Service` `Agent` re-casts after its Pod is deleted
 
-If the API key, provider, or network is unavailable, use the Kubernetes replay
-manifest. It still creates a real `Agent`, controller-managed Pod, pod logs, and
-`.status.result`; it just runs the canned fake runner instead of Anthropic.
+### Standalone task
 
 ```bash
-kubectl apply -f deploy/examples/replay-agent.yaml
-kubectl get agents -w
-kubectl logs -f agent-replay-tariffs
-kubectl get agent replay-tariffs -o yaml
+kubectl apply -f deploy/examples/v1alpha1/echo-task-run.yaml
+kubectl get agentrun echo-review -w
+kubectl logs -f run-echo-review
+kubectl get agentrun echo-review -o jsonpath='{.status.result}'
 ```
 
-## Run the TUI
-
-Install the local package and dependencies:
+### Persistent service owner
 
 ```bash
-python3 -m pip install -e .
+kubectl apply -f deploy/examples/v1alpha1/echo-service-agent.yaml
+kubectl get agent echo-owner -w
+kubectl logs -f $(kubectl get pod -l kontext.dev/agent=echo-owner -o jsonpath='{.items[0].metadata.name}')
 ```
 
-Open the guided launcher:
+## AgentNet integration
+
+With Kontext on kind, from the sibling AgentNet repo:
 
 ```bash
-kontext demo
+cd ../agentnet
+./scripts/demo-kontext-kind.sh
 ```
 
-If the cluster or provider is not ready, use the canned fallback flow:
+## Local development
 
 ```bash
-kontext demo --fallback
+make test    # unit + envtest reconciler tests
+make build   # compile operator binary to bin/manager
+make run     # run controller locally (needs kubeconfig)
 ```
 
-The TUI generates real `kontext.dev/v1` `Agent` YAML, applies it through
-`kubectl apply -f -`, and watches `Agent` status and pod logs through Kubernetes.
+## Docs
 
-## Fanout Demo
+| Doc | Purpose |
+|-----|---------|
+| [`SPEC.md`](SPEC.md) | API + runtime-image contract |
+| [`ROADMAP.md`](ROADMAP.md) | Milestones and decisions |
+| [`DEPRECATED.md`](DEPRECATED.md) | Hackathon stack on `deprecated/hackathon-python` |
 
-Launch ten agents in parallel with one manifest:
+## Layout
 
-```bash
-kubectl apply -f deploy/examples/research-fanout.yaml
-kubectl get agents -w
 ```
-
-In `kontext demo`, set `replicas` above `1` and edit the fanout topics. The
-YAML preview becomes a multi-document manifest, and launch applies all generated
-`Agent` resources through Kubernetes.
-
-## Demo Script
-
-Use `demo/SCRIPT.md` as the rehearsed 5-minute path for judges. It includes the
-single-agent launch, `kubectl logs`, status result, fanout, and replay fallback.
+api/v1alpha1/          CRD Go types
+cmd/                   Operator entrypoint
+internal/controller/   Agent + AgentRun reconcilers
+internal/podbuilder/   Pod construction
+internal/runtimepolicy/ Provider credential wiring
+config/                Kustomize install (CRDs, RBAC, manager)
+deploy/examples/v1alpha1/  Sample manifests
+runtimes/echo/         Keyless test runtime
+runtimes/python-anthropic/ Optional Anthropic runtime image
+scripts/               kind install + e2e
+```

@@ -1,0 +1,18 @@
+apiVersion: kontext.dev/v1alpha1
+kind: Agent
+metadata:
+  name: echo-owner
+spec:
+  mode: Service
+  goal: Maintain ownership of the configured zone and stay ready for dispatched tasks.
+  provider: echo
+  model: echo-model
+  runtime:
+    image: kontext-echo:dev
+    command: ["/entrypoint.sh"]
+  env:
+    - name: KONTEXT_MODE
+      value: service
+  backoff:
+    initialSeconds: 3
+    maxSeconds: 15
