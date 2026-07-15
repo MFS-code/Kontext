@@ -31,19 +31,30 @@ func TestNeedsAPIKey(t *testing.T) {
 
 func TestCredentialsForKnownProviders(t *testing.T) {
 	cases := map[string]string{
-		"anthropic":    "ANTHROPIC_API_KEY",
-		"openai":       "OPENAI_API_KEY",
-		"google":       "GOOGLE_API_KEY",
-		"gemini":       "GOOGLE_API_KEY",
-		"azure-openai": "AZURE_OPENAI_API_KEY",
-		"mistral":      "MISTRAL_API_KEY",
-		"groq":         "GROQ_API_KEY",
-		"cohere":       "COHERE_API_KEY",
+		"anthropic": "ANTHROPIC_API_KEY",
+		"openai":    "OPENAI_API_KEY",
+		"google":    "GOOGLE_API_KEY",
+		"gemini":    "GOOGLE_API_KEY",
+		"mistral":   "MISTRAL_API_KEY",
+		"groq":      "GROQ_API_KEY",
+		"cohere":    "COHERE_API_KEY",
 	}
 	for provider, envName := range cases {
 		creds := runtimepolicy.Credentials(provider)
 		if len(creds) != 1 || creds[0].EnvVarName != envName {
 			t.Fatalf("provider %s: expected env %s, got %#v", provider, envName, creds)
+		}
+	}
+}
+
+func TestCredentialsForAzureOpenAI(t *testing.T) {
+	for _, provider := range []string{"azure", "azure-openai"} {
+		creds := runtimepolicy.Credentials(provider)
+		if len(creds) != 2 {
+			t.Fatalf("provider %s: expected two credentials, got %#v", provider, creds)
+		}
+		if creds[0].EnvVarName != "AZURE_OPENAI_API_KEY" || creds[1].EnvVarName != "AZURE_OPENAI_ENDPOINT" {
+			t.Fatalf("provider %s: unexpected credentials: %#v", provider, creds)
 		}
 	}
 }

@@ -76,7 +76,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 	if currentRun != nil && !status.IsTerminalPhase(currentRun.Status.Phase) {
 		return r.setAgentStatus(ctx, agent, kontextv1alpha1.AgentStatus{
 			CurrentRunName:     currentRun.Name,
-			LastRunName:        currentRun.Name,
+			LastRunName:        agent.Status.LastRunName,
 			RunsCreated:        agent.Status.RunsCreated,
 			Restarts:           agent.Status.Restarts,
 			ObservedGeneration: agent.Generation,
@@ -125,7 +125,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 
 	nextStatus := kontextv1alpha1.AgentStatus{
 		CurrentRunName:     run.Name,
-		LastRunName:        run.Name,
+		LastRunName:        agent.Status.CurrentRunName,
 		RunsCreated:        agent.Status.RunsCreated,
 		Restarts:           agent.Status.Restarts,
 		ObservedGeneration: agent.Generation,
