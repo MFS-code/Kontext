@@ -315,7 +315,10 @@ func TestObservePodUnknownPhaseDefaultsPending(t *testing.T) {
 }
 
 func TestParseTerminationMessageEmpty(t *testing.T) {
-	payload := status.ParseTerminationMessage("   ")
+	payload, err := status.ParseTerminationMessage("   ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if payload.Result != "" || payload.TokensUsed != 0 {
 		t.Fatalf("expected empty payload, got %#v", payload)
 	}
