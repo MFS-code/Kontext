@@ -206,14 +206,10 @@ func TestBuildPodEmptyBudgetEnvWhenUnset(t *testing.T) {
 			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
 		},
 	}
-	pod := podbuilder.BuildPod(run)
-	values := map[string]string{}
-	for _, item := range pod.Spec.Containers[0].Env {
-		values[item.Name] = item.Value
-	}
+	env := envMap(podbuilder.BuildPod(run))
 	for _, key := range []string{"KONTEXT_BUDGET_TOKENS", "KONTEXT_BUDGET_WALLCLOCK", "KONTEXT_BUDGET_DOLLARS"} {
-		if values[key] != "" {
-			t.Fatalf("expected %s to be empty, got %q", key, values[key])
+		if env[key] != "" {
+			t.Fatalf("expected %s to be empty, got %q", key, env[key])
 		}
 	}
 }
