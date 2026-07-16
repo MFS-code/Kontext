@@ -43,6 +43,9 @@ jobs:
       - name: Run unit and envtest suites
         run: make test
 
+      - name: Scan for known Go vulnerabilities
+        run: make vulncheck
+
   # Anthropic is never loaded into kind for PR e2e (keyless echo path only).
   # Build it here so Dockerfile breakage still fails CI without pretending it is
   # part of the kind install surface.

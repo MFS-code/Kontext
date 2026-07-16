@@ -4,13 +4,24 @@ ECHO_IMG ?= kontext-echo:dev
 ANTHROPIC_IMG ?= kontext-runtime-anthropic:dev
 
 # Get the currently used golang version
-GO_VERSION ?= 1.23.0
+GO_VERSION ?= 1.26.5
+
+# Pin govulncheck so CI and local runs share the same analyzer.
+GOVULNCHECK_VERSION ?= v1.6.0
 
 # CONTROLLER_TOOLS_VERSION defines the controller-gen version
 CONTROLLER_TOOLS_VERSION ?= v0.17.2
 
 # ENVTEST_K8S_VERSION refers to the Kubernetes version for envtest binaries
 ENVTEST_K8S_VERSION = 1.32.0
+
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+
+## Tool Binaries
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+ENVTEST ?= $(LOCALBIN)/setup-envtest
+GOVULNCHECK ?= $(LOCALBIN)/govulncheck
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 SHELL = /usr/bin/env bash -o pipefail
@@ -63,6 +74,10 @@ verify: manifests generate ## Check generated artifacts and gofmt; fail on drift
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test ./... -coverprofile cover.out
+
+.PHONY: vulncheck
+vulncheck: $(GOVULNCHECK) ## Scan for known Go vulnerabilities in reachable code.
+	$(GOVULNCHECK) ./...
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
@@ -122,14 +137,8 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 
 ##@ Dependencies
 
-## Location to install dependencies to
-LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
-
-## Tool Binaries
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-ENVTEST ?= $(LOCALBIN)/setup-envtest
 
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download setup-envtest if necessary.
@@ -140,6 +149,11 @@ $(ENVTEST): $(LOCALBIN)
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
 $(CONTROLLER_GEN): $(LOCALBIN)
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+
+.PHONY: govulncheck-tool
+govulncheck-tool: $(GOVULNCHECK) ## Download govulncheck locally if necessary.
+$(GOVULNCHECK): $(LOCALBIN)
+	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
 
 # go-install-tool will 'go install' any package with a custom version
 define go-install-tool

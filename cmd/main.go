@@ -49,14 +49,10 @@ func main() {
 		Metrics: metricsserver.Options{
 			BindAddress:   metricsAddr,
 			SecureServing: secureMetrics,
-			TLSOpts: []func(*tls.Config){
-				func(config *tls.Config) {},
-			},
+			TLSOpts:       []func(*tls.Config){disableHTTP2},
 		},
 		WebhookServer: webhook.NewServer(webhook.Options{
-			TLSOpts: []func(*tls.Config){
-				func(config *tls.Config) {},
-			},
+			TLSOpts: []func(*tls.Config){disableHTTP2},
 		}),
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
@@ -97,4 +93,12 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// disableHTTP2 forces HTTP/1.1 on inbound metrics and webhook TLS listeners.
+// This mitigates HTTP/2 Rapid Reset (CVE-2023-44487) and stream-multiplexing
+// DoS (CVE-2023-39325) on those server surfaces. It does not change the
+// controller's outbound Kubernetes API client.
+func disableHTTP2(c *tls.Config) {
+	c.NextProtos = []string{"http/1.1"}
 }
