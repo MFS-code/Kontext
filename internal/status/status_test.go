@@ -1,6 +1,7 @@
 package status_test
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -69,6 +70,34 @@ func TestObservePodMalformedTerminationOnSuccessFails(t *testing.T) {
 	}
 	if observation.Result != "" {
 		t.Fatalf("expected empty result for malformed payload, got %q", observation.Result)
+	}
+}
+
+func TestObservePodMalformedTerminationOnFailureNotesParseError(t *testing.T) {
+	exitCode := int32(1)
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: exitCode,
+							Message:  `{"result":"partial",`,
+						},
+					},
+				},
+			},
+		},
+	}
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", observation.Phase)
+	}
+	if !strings.Contains(observation.Message, "exited with code 1") {
+		t.Fatalf("expected exit code in message, got %q", observation.Message)
+	}
+	if !strings.Contains(observation.Message, "malformed termination payload") {
+		t.Fatalf("expected malformed payload note in message, got %q", observation.Message)
 	}
 }
 

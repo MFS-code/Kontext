@@ -71,13 +71,20 @@ def main() -> int:
     except Exception as exc:
         message = f"{type(exc).__name__}: {exc}"
         print(f"ERROR: {message}", file=sys.stderr, flush=True)
-        write_termination_message(
+        if not write_termination_message(
             termination_message_path,
             result="",
             tokens_used=0,
             dollars_used=0.0,
             error=message,
-        )
+        ):
+            # The error itself is already on stderr; note that it could not be
+            # persisted to the termination log so the loss is visible in logs.
+            print(
+                "ERROR: failed to persist error to the termination message",
+                file=sys.stderr,
+                flush=True,
+            )
         return 1
 
 
