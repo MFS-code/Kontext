@@ -11,6 +11,7 @@ import (
 
 	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
 	"github.com/kontext-dev/kontext/internal/runtimepolicy"
+	"github.com/kontext-dev/kontext/internal/util"
 )
 
 const (
@@ -53,10 +54,10 @@ func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
 		},
 	}
 	if len(run.Spec.Runtime.Command) > 0 {
-		container.Command = append([]string{}, run.Spec.Runtime.Command...)
+		container.Command = util.CloneSlice(run.Spec.Runtime.Command)
 	}
 	if len(run.Spec.Runtime.Args) > 0 {
-		container.Args = append([]string{}, run.Spec.Runtime.Args...)
+		container.Args = util.CloneSlice(run.Spec.Runtime.Args)
 	}
 
 	pod := &corev1.Pod{

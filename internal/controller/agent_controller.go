@@ -19,6 +19,7 @@ import (
 	"github.com/kontext-dev/kontext/internal/podbuilder"
 	"github.com/kontext-dev/kontext/internal/runtimepolicy"
 	"github.com/kontext-dev/kontext/internal/status"
+	"github.com/kontext-dev/kontext/internal/util"
 )
 
 const (
@@ -183,10 +184,10 @@ func (r *AgentReconciler) buildServiceRun(agent *kontextv1alpha1.Agent, runName 
 			Goal:     agent.Spec.Goal,
 			Provider: provider,
 			Model:    agent.Spec.Model,
-			Tools:    append([]string{}, agent.Spec.Tools...),
+			Tools:    util.CloneSlice(agent.Spec.Tools),
 			Budget:   agent.Spec.Budget,
 			Runtime:  agent.Spec.Runtime,
-			Env:      append([]kontextv1alpha1.EnvVar{}, agent.Spec.Env...),
+			Env:      util.CloneSlice(agent.Spec.Env),
 		},
 	}
 	if agent.Spec.SecretRef != nil {
@@ -243,9 +244,9 @@ func (r *AgentReconciler) setAgentStatus(
 	updates ...metav1.Condition,
 ) (ctrl.Result, error) {
 	next.Conditions = conditions.Merge(agent.Status.Conditions, updates...)
-	patch := client.MergeFrom(agent.DeepCopy())
-	agent.Status = next
-	if err := r.Status().Patch(ctx, agent, patch); err != nil {
+	if err := patchStatus(ctx, r.Client, agent, func() {
+		agent.Status = next
+	}); err != nil {
 		return ctrl.Result{}, err
 	}
 	if requeue {
