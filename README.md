@@ -88,13 +88,14 @@ Every run is bounded and auditable:
 ```bash
 make verify            # CRD/deepcopy generation + gofmt drift check
 make test              # unit + envtest reconciler tests
+make vulncheck         # scan reachable Go code for known vulnerabilities
 make docker-build-all  # operator + echo + Anthropic runtime images
 make kind-install      # build operator + echo, load into kind, install controller
 make build             # compile operator binary to bin/manager
 make run               # run the controller locally against your kubeconfig
 ```
 
-Pull requests and pushes to `main` run validate, Dockerfile smoke for every shipped image, and keyless kind e2e via `.github/workflows/ci.yml`. After a failed local kind run, collect cluster state with `./scripts/collect-kind-diagnostics.sh`.
+Pull requests and pushes to `main` run validate (including `make vulncheck`), Dockerfile smoke for every shipped image, and keyless kind e2e via `.github/workflows/ci.yml`. After a failed local kind run, collect cluster state with `./scripts/collect-kind-diagnostics.sh`.
 
 ## Layout
 

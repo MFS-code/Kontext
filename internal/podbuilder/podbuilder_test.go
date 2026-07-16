@@ -69,6 +69,60 @@ func TestBuildPodMountsKnowledgeConfigMap(t *testing.T) {
 	}
 }
 
+func TestBuildPodLeavesRuntimePermissionsUntouched(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "permission-task", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "echo",
+			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+		},
+	}
+
+	pod := podbuilder.BuildPod(run)
+	if pod.Spec.SecurityContext != nil {
+		t.Fatalf("expected no pod security context, got %+v", pod.Spec.SecurityContext)
+	}
+	if pod.Spec.AutomountServiceAccountToken != nil {
+		t.Fatalf("expected default token automount behavior, got %v", *pod.Spec.AutomountServiceAccountToken)
+	}
+	if pod.Spec.ServiceAccountName != "" {
+		t.Fatalf("expected empty service account name, got %q", pod.Spec.ServiceAccountName)
+	}
+	sc := pod.Spec.Containers[0].SecurityContext
+	if sc != nil {
+		t.Fatalf("expected no container security context, got %+v", sc)
+	}
+}
+
+func TestBuildPodSetsRequestedServiceAccount(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-task", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:               "do work",
+			Model:              "model",
+			Provider:           "echo",
+			ServiceAccountName: "agent-sa",
+			Runtime:            kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+		},
+	}
+
+	pod := podbuilder.BuildPod(run)
+	if pod.Spec.ServiceAccountName != "agent-sa" {
+		t.Fatalf("expected service account agent-sa, got %s", pod.Spec.ServiceAccountName)
+	}
+	if pod.Spec.AutomountServiceAccountToken != nil {
+		t.Fatal("expected automount left to Kubernetes defaults when a service account is requested")
+	}
+	if pod.Spec.SecurityContext != nil {
+		t.Fatalf("expected no pod security context, got %+v", pod.Spec.SecurityContext)
+	}
+	if pod.Spec.Containers[0].SecurityContext != nil {
+		t.Fatalf("expected no container security context, got %+v", pod.Spec.Containers[0].SecurityContext)
+	}
+}
+
 func TestBuildPodInjectsProviderCredentials(t *testing.T) {
 	cases := map[string]struct {
 		provider   string
