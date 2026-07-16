@@ -1,7 +1,9 @@
 package status_test
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -141,5 +143,133 @@ func TestObservePodPending(t *testing.T) {
 	observation := status.ObservePod(pod)
 	if observation.Phase != kontextv1alpha1.AgentRunPhasePending {
 		t.Fatalf("expected Pending, got %s", observation.Phase)
+	}
+}
+
+func TestIsTerminalPhase(t *testing.T) {
+	cases := map[kontextv1alpha1.AgentRunPhase]bool{
+		kontextv1alpha1.AgentRunPhaseSucceeded:      true,
+		kontextv1alpha1.AgentRunPhaseFailed:         true,
+		kontextv1alpha1.AgentRunPhaseBudgetExceeded: true,
+		kontextv1alpha1.AgentRunPhasePending:        false,
+		kontextv1alpha1.AgentRunPhaseRunning:        false,
+		kontextv1alpha1.AgentRunPhase("Bogus"):      false,
+	}
+	for phase, want := range cases {
+		if got := status.IsTerminalPhase(phase); got != want {
+			t.Fatalf("IsTerminalPhase(%s) = %v, want %v", phase, got, want)
+		}
+	}
+}
+
+func TestObservePodTerminatedFailure(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 2,
+							Message:  `{"result":"partial","error":"boom","tokensUsed":9,"dollarsUsed":0.25}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", observation.Phase)
+	}
+	if observation.ExitCode == nil || *observation.ExitCode != 2 {
+		t.Fatalf("expected exit code 2, got %v", observation.ExitCode)
+	}
+	if observation.Result != "partial" {
+		t.Fatalf("expected result partial, got %q", observation.Result)
+	}
+	if !strings.Contains(observation.Message, "code 2") || !strings.Contains(observation.Message, "boom") {
+		t.Fatalf("expected exit code and error in message, got %q", observation.Message)
+	}
+	if observation.Usage == nil || observation.Usage.Tokens != 9 || observation.Usage.Dollars != 0.25 {
+		t.Fatalf("unexpected usage: %#v", observation.Usage)
+	}
+}
+
+func TestObservePodTerminatedFailureWithoutError(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{ExitCode: 1},
+					},
+				},
+			},
+		},
+	}
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", observation.Phase)
+	}
+	if observation.Message != "Agent run exited with code 1." {
+		t.Fatalf("unexpected message: %q", observation.Message)
+	}
+}
+
+func TestObservePodRunningFallbackPhase(t *testing.T) {
+	pod := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodRunning}}
+	if got := status.ObservePod(pod).Phase; got != kontextv1alpha1.AgentRunPhaseRunning {
+		t.Fatalf("expected Running, got %s", got)
+	}
+}
+
+func TestObservePodSucceededFallbackPhase(t *testing.T) {
+	pod := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodSucceeded}}
+	if got := status.ObservePod(pod).Phase; got != kontextv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("expected Succeeded, got %s", got)
+	}
+}
+
+func TestObservePodFailedFallbackPhase(t *testing.T) {
+	pod := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodFailed}}
+	if got := status.ObservePod(pod).Phase; got != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", got)
+	}
+}
+
+func TestObservePodUnknownPhaseDefaultsPending(t *testing.T) {
+	pod := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodUnknown}}
+	if got := status.ObservePod(pod).Phase; got != kontextv1alpha1.AgentRunPhasePending {
+		t.Fatalf("expected Pending, got %s", got)
+	}
+}
+
+func TestParseTerminationMessageEmpty(t *testing.T) {
+	payload := status.ParseTerminationMessage("   ")
+	if payload.Result != "" || payload.TokensUsed != 0 {
+		t.Fatalf("expected empty payload, got %#v", payload)
+	}
+}
+
+func TestParseWallclockDetailedValidDuration(t *testing.T) {
+	result := status.ParseWallclockDetailed("90s", 30)
+	if !result.Valid {
+		t.Fatalf("expected valid result")
+	}
+	if result.Duration != 90*time.Second {
+		t.Fatalf("expected 90s, got %v", result.Duration)
+	}
+	if result.Warning != "" {
+		t.Fatalf("expected no warning, got %q", result.Warning)
+	}
+}
+
+func TestParseWallclockDetailedNonPositive(t *testing.T) {
+	result := status.ParseWallclockDetailed("0s", 30)
+	if result.Valid {
+		t.Fatalf("expected non-positive duration to be invalid")
+	}
+	if result.Duration != 30*time.Second {
+		t.Fatalf("expected default duration, got %v", result.Duration)
 	}
 }
