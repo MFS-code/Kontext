@@ -13,7 +13,10 @@ import (
 )
 
 func TestParseTerminationMessageJSON(t *testing.T) {
-	payload := status.ParseTerminationMessage(`{"result":"done","tokensUsed":42,"dollarsUsed":1.5}`)
+	payload, err := status.ParseTerminationMessage(`{"result":"done","tokensUsed":42,"dollarsUsed":1.5}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if payload.Result != "done" {
 		t.Fatalf("expected result done, got %q", payload.Result)
 	}
@@ -26,9 +29,76 @@ func TestParseTerminationMessageJSON(t *testing.T) {
 }
 
 func TestParseTerminationMessagePlainText(t *testing.T) {
-	payload := status.ParseTerminationMessage("plain answer")
+	payload, err := status.ParseTerminationMessage("plain answer")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if payload.Result != "plain answer" {
 		t.Fatalf("expected plain answer, got %q", payload.Result)
+	}
+}
+
+func TestParseTerminationMessageMalformedJSON(t *testing.T) {
+	raw := `{"result":"partial",`
+	payload, err := status.ParseTerminationMessage(raw)
+	if err == nil {
+		t.Fatalf("expected error for malformed JSON payload")
+	}
+	if payload.Result != raw {
+		t.Fatalf("expected raw message preserved as result, got %q", payload.Result)
+	}
+}
+
+func TestObservePodMalformedTerminationOnSuccessFails(t *testing.T) {
+	exitCode := int32(0)
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: exitCode,
+							Message:  `{"result":"partial",`,
+						},
+					},
+				},
+			},
+		},
+	}
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed for malformed payload on exit 0, got %s", observation.Phase)
+	}
+	if observation.Result != "" {
+		t.Fatalf("expected empty result for malformed payload, got %q", observation.Result)
+	}
+}
+
+func TestObservePodMalformedTerminationOnFailureNotesParseError(t *testing.T) {
+	exitCode := int32(1)
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: exitCode,
+							Message:  `{"result":"partial",`,
+						},
+					},
+				},
+			},
+		},
+	}
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", observation.Phase)
+	}
+	if !strings.Contains(observation.Message, "exited with code 1") {
+		t.Fatalf("expected exit code in message, got %q", observation.Message)
+	}
+	if !strings.Contains(observation.Message, "malformed termination payload") {
+		t.Fatalf("expected malformed payload note in message, got %q", observation.Message)
 	}
 }
 
