@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -72,12 +71,11 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 	}
 
 	if run.Status.PodName != "" {
-		now := metav1.Now()
 		return r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 			next.Phase = kontextv1alpha1.AgentRunPhaseFailed
 			next.PodName = podName
 			next.Message = "Pod lost before run completed."
-			next.CompletionTime = &now
+			next.CompletionTime = nowPtr()
 			next.Conditions = conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed, next.Conditions)
 		})
 	}
@@ -112,12 +110,10 @@ func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontex
 			next.Usage = observation.Usage
 		}
 		if next.StartTime == nil && observation.Phase == kontextv1alpha1.AgentRunPhaseRunning {
-			now := metav1.Now()
-			next.StartTime = &now
+			next.StartTime = nowPtr()
 		}
 		if status.IsTerminalPhase(observation.Phase) && next.CompletionTime == nil {
-			now := metav1.Now()
-			next.CompletionTime = &now
+			next.CompletionTime = nowPtr()
 		}
 		next.Conditions = conditions.ForAgentRunPhase(observation.Phase, next.Conditions)
 	})
@@ -175,7 +171,6 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 		return ctrl.Result{}, false, err
 	}
 
-	now := metav1.Now()
 	_, err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 		next.Phase = kontextv1alpha1.AgentRunPhaseBudgetExceeded
 		next.PodName = pod.Name
@@ -183,7 +178,7 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 		if next.StartTime == nil {
 			next.StartTime = run.Status.StartTime
 		}
-		next.CompletionTime = &now
+		next.CompletionTime = nowPtr()
 		next.Conditions = conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseBudgetExceeded, next.Conditions)
 	})
 	if err != nil {
@@ -193,12 +188,11 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 }
 
 func (r *AgentRunReconciler) patchRunStatus(ctx context.Context, run *kontextv1alpha1.AgentRun, mutate func(*kontextv1alpha1.AgentRunStatus)) (ctrl.Result, error) {
-	next := run.Status.DeepCopy()
-	mutate(next)
-
-	patch := client.MergeFrom(run.DeepCopy())
-	run.Status = *next
-	if err := r.Status().Patch(ctx, run, patch); err != nil {
+	if err := patchStatus(ctx, r.Client, run, func() {
+		next := run.Status.DeepCopy()
+		mutate(next)
+		run.Status = *next
+	}); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
