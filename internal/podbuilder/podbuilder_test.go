@@ -167,6 +167,133 @@ func TestPodNameForRunTrimsHyphenAfterTruncation(t *testing.T) {
 	}
 }
 
+func TestBuildPodPopulatesBudgetEnv(t *testing.T) {
+	tokens := int32(1000)
+	dollars := 2.5
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "budget-task", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "echo",
+			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+			Budget: &kontextv1alpha1.BudgetSpec{
+				Tokens:    &tokens,
+				Wallclock: "5m",
+				Dollars:   &dollars,
+			},
+		},
+	}
+	env := envMap(podbuilder.BuildPod(run))
+	if env["KONTEXT_BUDGET_TOKENS"] != "1000" {
+		t.Fatalf("unexpected tokens budget: %q", env["KONTEXT_BUDGET_TOKENS"])
+	}
+	if env["KONTEXT_BUDGET_WALLCLOCK"] != "5m" {
+		t.Fatalf("unexpected wallclock budget: %q", env["KONTEXT_BUDGET_WALLCLOCK"])
+	}
+	if env["KONTEXT_BUDGET_DOLLARS"] != "2.5" {
+		t.Fatalf("unexpected dollars budget: %q", env["KONTEXT_BUDGET_DOLLARS"])
+	}
+}
+
+func TestBuildPodEmptyBudgetEnvWhenUnset(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "no-budget", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "echo",
+			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+		},
+	}
+	pod := podbuilder.BuildPod(run)
+	values := map[string]string{}
+	for _, item := range pod.Spec.Containers[0].Env {
+		values[item.Name] = item.Value
+	}
+	for _, key := range []string{"KONTEXT_BUDGET_TOKENS", "KONTEXT_BUDGET_WALLCLOCK", "KONTEXT_BUDGET_DOLLARS"} {
+		if values[key] != "" {
+			t.Fatalf("expected %s to be empty, got %q", key, values[key])
+		}
+	}
+}
+
+func TestBuildPodDefaultsAgentNameToRunName(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "standalone-run", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "echo",
+			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+		},
+	}
+	pod := podbuilder.BuildPod(run)
+	if envMap(pod)["KONTEXT_AGENT_NAME"] != "standalone-run" {
+		t.Fatalf("expected agent name to default to run name")
+	}
+	if _, ok := pod.Labels[podbuilder.LabelAgentName]; ok {
+		t.Fatalf("expected no agent label for standalone run")
+	}
+}
+
+func TestBuildPodUsesAgentRefName(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "run-1", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "echo",
+			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+			AgentRef: &kontextv1alpha1.AgentRef{Name: "echo-service"},
+		},
+	}
+	pod := podbuilder.BuildPod(run)
+	if envMap(pod)["KONTEXT_AGENT_NAME"] != "echo-service" {
+		t.Fatalf("expected agent name from AgentRef")
+	}
+	if pod.Labels[podbuilder.LabelAgentName] != "echo-service" {
+		t.Fatalf("expected agent label set from AgentRef, got %q", pod.Labels[podbuilder.LabelAgentName])
+	}
+}
+
+func TestBuildPodAppliesRuntimeCommandArgsAndServiceAccount(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "cmd-run", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:               "do work",
+			Model:              "model",
+			Provider:           "echo",
+			ServiceAccountName: "kontext-agent",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:   "runtime:dev",
+				Command: []string{"/bin/agent"},
+				Args:    []string{"--verbose", "--goal"},
+			},
+		},
+	}
+	pod := podbuilder.BuildPod(run)
+	if pod.Spec.ServiceAccountName != "kontext-agent" {
+		t.Fatalf("expected service account, got %q", pod.Spec.ServiceAccountName)
+	}
+	container := pod.Spec.Containers[0]
+	if len(container.Command) != 1 || container.Command[0] != "/bin/agent" {
+		t.Fatalf("unexpected command: %#v", container.Command)
+	}
+	if len(container.Args) != 2 || container.Args[0] != "--verbose" {
+		t.Fatalf("unexpected args: %#v", container.Args)
+	}
+}
+
+func TestPodNameForRunEmptyFallsBackToRun(t *testing.T) {
+	if got := podbuilder.PodNameForRun("!!!"); got != "run-run" {
+		t.Fatalf("expected run-run fallback, got %s", got)
+	}
+	if got := podbuilder.PodNameForRun(""); got != "run-run" {
+		t.Fatalf("expected run-run fallback for empty input, got %s", got)
+	}
+}
+
 func envMap(pod *corev1.Pod) map[string]string {
 	env := map[string]string{}
 	for _, item := range pod.Spec.Containers[0].Env {
