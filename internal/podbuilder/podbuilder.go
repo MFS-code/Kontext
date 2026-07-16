@@ -41,6 +41,13 @@ func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Env:             env,
 		VolumeMounts:    volumeMounts,
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: ptr(false),
+			Privileged:               ptr(false),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceCPU:    resourceQuantity("50m"),
@@ -69,11 +76,20 @@ func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers:    []corev1.Container{container},
 			Volumes:       volumes,
+			SecurityContext: &corev1.PodSecurityContext{
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
 		},
 	}
 
 	if run.Spec.ServiceAccountName != "" {
 		pod.Spec.ServiceAccountName = run.Spec.ServiceAccountName
+	} else {
+		// Agents that don't request a ServiceAccount get no API token mounted,
+		// so untrusted runtime code cannot reach the Kubernetes API.
+		pod.Spec.AutomountServiceAccountToken = ptr(false)
 	}
 
 	return pod
@@ -190,4 +206,8 @@ func PodNameForRun(runName string) string {
 
 func resourceQuantity(value string) resource.Quantity {
 	return resource.MustParse(value)
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }

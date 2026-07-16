@@ -44,19 +44,22 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// disableHTTP2 turns off HTTP/2 on the metrics and webhook servers to
+	// mitigate the HTTP/2 Rapid Reset (CVE-2023-44487) and stream
+	// multiplexing (CVE-2023-39325) denial-of-service vulnerabilities.
+	disableHTTP2 := func(c *tls.Config) {
+		c.NextProtos = []string{"http/1.1"}
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:   metricsAddr,
 			SecureServing: secureMetrics,
-			TLSOpts: []func(*tls.Config){
-				func(config *tls.Config) {},
-			},
+			TLSOpts:       []func(*tls.Config){disableHTTP2},
 		},
 		WebhookServer: webhook.NewServer(webhook.Options{
-			TLSOpts: []func(*tls.Config){
-				func(config *tls.Config) {},
-			},
+			TLSOpts: []func(*tls.Config){disableHTTP2},
 		}),
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,

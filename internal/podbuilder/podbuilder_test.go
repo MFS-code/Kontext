@@ -69,6 +69,59 @@ func TestBuildPodMountsKnowledgeConfigMap(t *testing.T) {
 	}
 }
 
+func TestBuildPodAppliesSecurityHardening(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "harden-task", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "echo",
+			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+		},
+	}
+
+	pod := podbuilder.BuildPod(run)
+
+	sc := pod.Spec.Containers[0].SecurityContext
+	if sc == nil {
+		t.Fatal("expected container security context")
+	}
+	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+		t.Fatal("expected allowPrivilegeEscalation=false")
+	}
+	if sc.Capabilities == nil || len(sc.Capabilities.Drop) != 1 || sc.Capabilities.Drop[0] != "ALL" {
+		t.Fatalf("expected capabilities drop ALL, got %+v", sc.Capabilities)
+	}
+	if pod.Spec.SecurityContext == nil || pod.Spec.SecurityContext.SeccompProfile == nil ||
+		pod.Spec.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Fatal("expected pod seccompProfile=RuntimeDefault")
+	}
+	if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
+		t.Fatal("expected automountServiceAccountToken=false when no service account is set")
+	}
+}
+
+func TestBuildPodKeepsTokenWhenServiceAccountSet(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-task", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:               "do work",
+			Model:              "model",
+			Provider:           "echo",
+			ServiceAccountName: "agent-sa",
+			Runtime:            kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+		},
+	}
+
+	pod := podbuilder.BuildPod(run)
+	if pod.Spec.ServiceAccountName != "agent-sa" {
+		t.Fatalf("expected service account agent-sa, got %s", pod.Spec.ServiceAccountName)
+	}
+	if pod.Spec.AutomountServiceAccountToken != nil {
+		t.Fatal("expected automount left to default when a service account is requested")
+	}
+}
+
 func TestBuildPodInjectsProviderCredentials(t *testing.T) {
 	cases := map[string]struct {
 		provider   string
