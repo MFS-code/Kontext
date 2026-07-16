@@ -38,26 +38,41 @@ class WallclockTimeout(RuntimeError):
 
 
 def main() -> int:
-    config = load_config()
+    # Resolve the termination path up front so that a failure inside
+    # load_config() (e.g. a malformed env var) can still be reported to the
+    # controller instead of crashing with an unwritten termination message.
+    termination_message_path = env("KONTEXT_TERMINATION_MESSAGE", "/dev/termination-log")
 
     try:
+        config = load_config()
+        termination_message_path = config.termination_message_path
+
         if config.provider != "anthropic":
             raise ValueError(f"unsupported provider: {config.provider}")
 
         result, input_tokens, output_tokens = run_anthropic(config)
-        write_termination_message(
-            config.termination_message_path,
+        if not write_termination_message(
+            termination_message_path,
             result=result,
             tokens_used=input_tokens + output_tokens,
             dollars_used=0.0,
-        )
+        ):
+            # The work succeeded but the result could not be persisted for the
+            # controller to observe. Fail loudly rather than reporting an empty
+            # success, which would silently discard the agent's output.
+            print(
+                "ERROR: agent produced a result but the termination message could not be written",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 1
         print(f"RESULT: {result}", flush=True)
         return 0
     except Exception as exc:
         message = f"{type(exc).__name__}: {exc}"
         print(f"ERROR: {message}", file=sys.stderr, flush=True)
         write_termination_message(
-            config.termination_message_path,
+            termination_message_path,
             result="",
             tokens_used=0,
             dollars_used=0.0,
@@ -134,7 +149,12 @@ def write_termination_message(
     tokens_used: int,
     dollars_used: float,
     error: str | None = None,
-) -> None:
+) -> bool:
+    """Write the termination payload; return True on success.
+
+    A False return lets the caller decide whether the failure to persist the
+    payload should fail the run rather than being silently ignored.
+    """
     payload = {
         "result": result,
         "tokensUsed": tokens_used,
@@ -148,6 +168,8 @@ def write_termination_message(
             json.dump(payload, handle)
     except OSError as exc:
         print(f"warning: could not write termination message: {exc}", file=sys.stderr, flush=True)
+        return False
+    return True
 
 
 @contextmanager

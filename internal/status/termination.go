@@ -2,6 +2,7 @@ package status
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -14,15 +15,25 @@ type TerminationPayload struct {
 }
 
 // ParseTerminationMessage decodes a Pod termination message into a payload.
-func ParseTerminationMessage(message string) TerminationPayload {
+//
+// The runtime contract (SPEC.md) is that agents write a JSON object to
+// /dev/termination-log. A message that is not JSON is treated as a plain-text
+// result for convenience. A message that looks like JSON (starts with '{') but
+// fails to decode is a malformed payload: the raw text is still returned as the
+// result so nothing is lost, but a non-nil error is reported so callers can
+// surface the failure instead of silently accepting a broken payload.
+func ParseTerminationMessage(message string) (TerminationPayload, error) {
 	message = strings.TrimSpace(message)
 	if message == "" {
-		return TerminationPayload{}
+		return TerminationPayload{}, nil
 	}
 
 	var payload TerminationPayload
 	if err := json.Unmarshal([]byte(message), &payload); err != nil {
-		return TerminationPayload{Result: message}
+		if strings.HasPrefix(message, "{") {
+			return TerminationPayload{Result: message}, fmt.Errorf("decode termination payload: %w", err)
+		}
+		return TerminationPayload{Result: message}, nil
 	}
-	return payload
+	return payload, nil
 }

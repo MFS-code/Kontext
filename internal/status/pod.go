@@ -83,7 +83,7 @@ func ObservePod(pod *corev1.Pod) PodObservation {
 }
 
 func observationFromTermination(terminated *corev1.ContainerStateTerminated) PodObservation {
-	payload := ParseTerminationMessage(terminated.Message)
+	payload, parseErr := ParseTerminationMessage(terminated.Message)
 	usage := &kontextv1alpha1.UsageStatus{
 		Tokens:  payload.TokensUsed,
 		Dollars: payload.DollarsUsed,
@@ -91,6 +91,17 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 	exitCode := terminated.ExitCode
 
 	if terminated.ExitCode == 0 {
+		if parseErr != nil {
+			// The container reported success but emitted a payload that looked
+			// like JSON and failed to decode. Do not silently accept it as the
+			// result: mark the run failed so the malformed output is visible.
+			return PodObservation{
+				Phase:    kontextv1alpha1.AgentRunPhaseFailed,
+				Message:  fmt.Sprintf("Agent run exited 0 but the termination payload was malformed: %v", parseErr),
+				Usage:    usage,
+				ExitCode: &exitCode,
+			}
+		}
 		return PodObservation{
 			Phase:    kontextv1alpha1.AgentRunPhaseSucceeded,
 			Message:  "Agent run completed successfully.",
@@ -103,6 +114,9 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 	message := fmt.Sprintf("Agent run exited with code %d.", terminated.ExitCode)
 	if payload.Error != "" {
 		message = fmt.Sprintf("%s %s", message, payload.Error)
+	}
+	if parseErr != nil {
+		message = fmt.Sprintf("%s (malformed termination payload: %v)", message, parseErr)
 	}
 
 	return PodObservation{
