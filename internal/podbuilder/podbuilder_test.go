@@ -89,6 +89,9 @@ func TestBuildPodAppliesSecurityHardening(t *testing.T) {
 	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
 		t.Fatal("expected allowPrivilegeEscalation=false")
 	}
+	if sc.Privileged == nil || *sc.Privileged {
+		t.Fatal("expected privileged=false")
+	}
 	if sc.Capabilities == nil || len(sc.Capabilities.Drop) != 1 || sc.Capabilities.Drop[0] != "ALL" {
 		t.Fatalf("expected capabilities drop ALL, got %+v", sc.Capabilities)
 	}
