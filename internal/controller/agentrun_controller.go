@@ -189,9 +189,7 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 
 func (r *AgentRunReconciler) patchRunStatus(ctx context.Context, run *kontextv1alpha1.AgentRun, mutate func(*kontextv1alpha1.AgentRunStatus)) (ctrl.Result, error) {
 	if err := patchStatus(ctx, r.Client, run, func() {
-		next := run.Status.DeepCopy()
-		mutate(next)
-		run.Status = *next
+		mutate(&run.Status)
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
