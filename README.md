@@ -72,6 +72,7 @@ kubectl get agentruns -w
 |---|---|
 | [`runtimes/echo/`](runtimes/echo) | Keyless test runtime. Exercises the full contract (stdout thoughts, termination-log result, service heartbeat) without any API key. |
 | [`runtimes/python-anthropic/`](runtimes/python-anthropic) | Real runtime backed by the Anthropic Messages API. Needs an `ANTHROPIC_API_KEY` secret via `spec.secretRef`. |
+| [`runtimes/reporter/`](runtimes/reporter) | Reusable PID 1 supervisor. Preserves child logs and process semantics while producing the versioned result envelope. |
 
 Provider credentials are wired by the controller from a Kubernetes Secret into the env vars each provider expects (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, AWS credential pairs for Bedrock, and so on). See `internal/runtimepolicy/`.
 
@@ -89,7 +90,8 @@ Every run is bounded and auditable:
 make verify            # CRD/deepcopy generation + gofmt drift check
 make test              # unit + envtest reconciler tests
 make vulncheck         # scan reachable Go code for known vulnerabilities
-make docker-build-all  # operator + echo + Anthropic runtime images
+make docker-build-all  # operator + all maintained runtime images
+make docker-build-reporter  # build the reusable result reporter image
 make kind-install      # build operator + echo, load into kind, install controller
 make build             # compile operator binary to bin/manager
 make run               # run the controller locally against your kubeconfig
@@ -109,7 +111,7 @@ internal/status/           Pod observation, termination parsing
 internal/conditions/       Condition merge helpers
 config/                    Kustomize install (CRDs, RBAC, manager)
 deploy/examples/v1alpha1/  Sample manifests
-runtimes/                  Runtime images (echo, python-anthropic)
+runtimes/                  Runtime images and reusable result reporter
 scripts/                   kind install + e2e
 ```
 

@@ -46,21 +46,33 @@ jobs:
       - name: Scan for known Go vulnerabilities
         run: make vulncheck
 
-  # Anthropic is never loaded into kind for PR e2e (keyless echo path only).
-  # Build it here so Dockerfile breakage still fails CI without pretending it is
-  # part of the kind install surface.
+  # These images are not loaded into kind for PR e2e (keyless echo path only).
+  # Build them here so Dockerfile breakage still fails CI without pretending
+  # they are part of the kind install surface.
   image-smoke:
     name: Image smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       KONTEXT_ANTHROPIC_IMAGE: kontext-runtime-anthropic:dev
+      KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Build reusable reporter image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runtimes/reporter/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
+          cache-from: type=gha,scope=reporter
+          cache-to: type=gha,mode=max,scope=reporter
 
       - name: Build Anthropic reference runtime image
         uses: docker/build-push-action@v6

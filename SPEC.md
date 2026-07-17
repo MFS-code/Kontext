@@ -219,6 +219,24 @@ always fails the run. A failed envelope also fails the run even if the process
 exits zero. Malformed or partially written JSON is an actionable failure, not
 a successful plain-text result.
 
+### Optional result reporter
+
+The maintained `runtimes/reporter` executable can supervise an explicit child
+command and produce the versioned envelope without requiring the child to write
+the termination log itself. It preserves child stdout, stderr, signals, and
+process exit status.
+
+Reporter extraction supports:
+
+- `last-line` — the last non-empty stdout line becomes `text/plain` output.
+- `kontext-envelope` — the last stdout line prefixed with
+  `KONTEXT_RESULT:` supplies a complete versioned envelope.
+
+The reporter bounds only captured result data; streamed logs remain unbounded.
+It compacts every emitted envelope to the termination-message limit. Reporter
+injection and workload configuration are control-plane concerns defined
+separately from this executable.
+
 ### Mode expectations for the image
 
 - **Task / Scheduled run image:** does its work, writes result, exits. Pod `restartPolicy: Never`.
