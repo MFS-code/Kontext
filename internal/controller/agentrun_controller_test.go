@@ -127,7 +127,7 @@ func TestAgentRunReconcilerObservesSucceededPod(t *testing.T) {
 		State: corev1.ContainerState{
 			Terminated: &corev1.ContainerStateTerminated{
 				ExitCode: 0,
-				Message:  `{"result":"done","tokensUsed":3}`,
+				Message:  `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":["done",42]},"usage":{"totalTokens":3}}`,
 			},
 		},
 	}}
@@ -144,8 +144,17 @@ func TestAgentRunReconcilerObservesSucceededPod(t *testing.T) {
 	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseSucceeded {
 		t.Fatalf("expected Succeeded, got %s", updated.Status.Phase)
 	}
-	if updated.Status.Result != "done" {
-		t.Fatalf("expected result done, got %q", updated.Status.Result)
+	if updated.Status.Result != `["done",42]` {
+		t.Fatalf("unexpected legacy result projection %q", updated.Status.Result)
+	}
+	if updated.Status.Output == nil || updated.Status.Output.MediaType != "application/json" {
+		t.Fatalf("expected structured output, got %#v", updated.Status.Output)
+	}
+	if string(updated.Status.Output.Value.Raw) != `["done",42]` {
+		t.Fatalf("unexpected structured output value %s", updated.Status.Output.Value.Raw)
+	}
+	if updated.Status.Usage == nil || updated.Status.Usage.Tokens == nil || *updated.Status.Usage.Tokens != 3 {
+		t.Fatalf("expected total token usage, got %#v", updated.Status.Usage)
 	}
 }
 

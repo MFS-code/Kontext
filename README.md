@@ -26,7 +26,7 @@ Kontext adds two custom resources under `kontext.dev/v1alpha1`, deliberately mir
 
 An `AgentRun` can also be created standalone, without any owning `Agent` — useful for ad-hoc dispatch and demos.
 
-Agents themselves are **bring-your-own-runtime**: any container image that reads a few `KONTEXT_*` env vars, streams its reasoning to stdout, and writes a JSON result to `/dev/termination-log` is a valid agent. Kontext never inspects what the agent does — only that I/O boundary. The full contract is in [`SPEC.md`](SPEC.md).
+Agents themselves are **bring-your-own-runtime**: any container image that reads a few `KONTEXT_*` env vars, streams ordinary logs, and writes a JSON result to `/dev/termination-log` is a valid agent. Kontext never inspects what the agent does — only that I/O boundary. Structured consumers should read `.status.output`; `.status.result` remains its backward-compatible text projection. The full versioned contract is in [`SPEC.md`](SPEC.md).
 
 ## Quickstart on kind
 

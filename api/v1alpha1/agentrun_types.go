@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -42,18 +43,31 @@ type AgentRunSpec struct {
 	Env []EnvVar `json:"env,omitempty"`
 }
 
-// UsageStatus records consumption for a completed run.
+// OutputStatus preserves the runtime's structured terminal output.
+type OutputStatus struct {
+	MediaType string `json:"mediaType"`
+
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Value runtime.RawExtension `json:"value"`
+}
+
+// UsageStatus records measured consumption for a completed run. Pointer fields
+// distinguish a measured zero from a metric the provider did not report.
 type UsageStatus struct {
-	Tokens  int32   `json:"tokens,omitempty"`
-	Dollars float64 `json:"dollars,omitempty"`
+	Tokens       *int64   `json:"tokens,omitempty"`
+	InputTokens  *int64   `json:"inputTokens,omitempty"`
+	OutputTokens *int64   `json:"outputTokens,omitempty"`
+	Dollars      *float64 `json:"dollars,omitempty"`
 }
 
 // AgentRunStatus defines the observed state of AgentRun.
 type AgentRunStatus struct {
 	Phase AgentRunPhase `json:"phase,omitempty"`
 
-	PodName string `json:"podName,omitempty"`
-	Result  string `json:"result,omitempty"`
+	PodName string        `json:"podName,omitempty"`
+	Result  string        `json:"result,omitempty"`
+	Output  *OutputStatus `json:"output,omitempty"`
 
 	Usage *UsageStatus `json:"usage,omitempty"`
 

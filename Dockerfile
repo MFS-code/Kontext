@@ -9,6 +9,7 @@ RUN go mod download
 COPY api/ api/
 COPY cmd/ cmd/
 COPY internal/ internal/
+COPY pkg/ pkg/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -a -o manager cmd/main.go
 
 FROM gcr.io/distroless/static:nonroot

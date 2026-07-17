@@ -204,6 +204,18 @@ spec:
                 type: array
               message:
                 type: string
+              output:
+                description: OutputStatus preserves the runtime's structured terminal
+                  output.
+                properties:
+                  mediaType:
+                    type: string
+                  value:
+                    x-kubernetes-preserve-unknown-fields: true
+                required:
+                - mediaType
+                - value
+                type: object
               phase:
                 description: AgentRunPhase is the lifecycle phase of an AgentRun.
                 enum:
@@ -221,12 +233,20 @@ spec:
                 format: date-time
                 type: string
               usage:
-                description: UsageStatus records consumption for a completed run.
+                description: |-
+                  UsageStatus records measured consumption for a completed run. Pointer fields
+                  distinguish a measured zero from a metric the provider did not report.
                 properties:
                   dollars:
                     type: number
+                  inputTokens:
+                    format: int64
+                    type: integer
+                  outputTokens:
+                    format: int64
+                    type: integer
                   tokens:
-                    format: int32
+                    format: int64
                     type: integer
                 type: object
             type: object

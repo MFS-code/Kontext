@@ -20,11 +20,11 @@ func TestParseTerminationMessageJSON(t *testing.T) {
 	if payload.Result != "done" {
 		t.Fatalf("expected result done, got %q", payload.Result)
 	}
-	if payload.TokensUsed != 42 {
-		t.Fatalf("expected tokens 42, got %d", payload.TokensUsed)
+	if payload.Usage == nil || payload.Usage.TotalTokens == nil || *payload.Usage.TotalTokens != 42 {
+		t.Fatalf("expected tokens 42, got %#v", payload.Usage)
 	}
-	if payload.DollarsUsed != 1.5 {
-		t.Fatalf("expected dollars 1.5, got %f", payload.DollarsUsed)
+	if payload.Usage.Dollars == nil || *payload.Usage.Dollars != 1.5 {
+		t.Fatalf("expected dollars 1.5, got %#v", payload.Usage)
 	}
 }
 
@@ -138,6 +138,113 @@ func TestObservePodSucceeded(t *testing.T) {
 	}
 	if observation.Result != "ok" {
 		t.Fatalf("expected result ok, got %q", observation.Result)
+	}
+}
+
+func TestObservePodPreservesVersionedStructuredOutputAndUsage(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{{
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+						Message: `{
+							"apiVersion":"kontext.dev/result/v1alpha1",
+							"outcome":"Succeeded",
+							"output":{"mediaType":"application/json","value":{"answer":42}},
+							"usage":{"inputTokens":0,"outputTokens":7}
+						}`,
+					},
+				},
+			}},
+		},
+	}
+
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("expected Succeeded, got %s", observation.Phase)
+	}
+	if observation.Output == nil || observation.Output.MediaType != "application/json" {
+		t.Fatalf("unexpected structured output %#v", observation.Output)
+	}
+	if string(observation.Output.Value.Raw) != `{"answer":42}` {
+		t.Fatalf("unexpected output value %s", observation.Output.Value.Raw)
+	}
+	if observation.Result != `{"answer":42}` {
+		t.Fatalf("unexpected legacy result projection %q", observation.Result)
+	}
+	if observation.Usage == nil || observation.Usage.InputTokens == nil || *observation.Usage.InputTokens != 0 {
+		t.Fatalf("expected measured zero input tokens, got %#v", observation.Usage)
+	}
+	if observation.Usage.OutputTokens == nil || *observation.Usage.OutputTokens != 7 {
+		t.Fatalf("expected output token usage, got %#v", observation.Usage)
+	}
+	if observation.Usage.Tokens != nil || observation.Usage.Dollars != nil {
+		t.Fatalf("missing metrics must remain absent, got %#v", observation.Usage)
+	}
+}
+
+func TestObservePodFailedEnvelopeOverridesZeroExit(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{{
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+						Message:  `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Failed","error":{"message":"provider unavailable"}}`,
+					},
+				},
+			}},
+		},
+	}
+
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", observation.Phase)
+	}
+	if !strings.Contains(observation.Message, "provider unavailable") {
+		t.Fatalf("expected reported error, got %q", observation.Message)
+	}
+}
+
+func TestObservePodLegacyErrorDoesNotOverrideZeroExit(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{{
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+						Message:  `{"result":"ok","error":"informational warning"}`,
+					},
+				},
+			}},
+		},
+	}
+
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("expected legacy exit 0 to remain Succeeded, got %s", observation.Phase)
+	}
+	if observation.Result != "ok" {
+		t.Fatalf("expected legacy result, got %q", observation.Result)
+	}
+}
+
+func TestObservePodLegacyPayloadWithoutMetricsLeavesUsageAbsent(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{{
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+						Message:  `{"result":"ok"}`,
+					},
+				},
+			}},
+		},
+	}
+	if observation := status.ObservePod(pod); observation.Usage != nil {
+		t.Fatalf("expected absent usage, got %#v", observation.Usage)
 	}
 }
 
@@ -260,7 +367,8 @@ func TestObservePodTerminatedFailure(t *testing.T) {
 	if !strings.Contains(observation.Message, "code 2") || !strings.Contains(observation.Message, "boom") {
 		t.Fatalf("expected exit code and error in message, got %q", observation.Message)
 	}
-	if observation.Usage == nil || observation.Usage.Tokens != 9 || observation.Usage.Dollars != 0.25 {
+	if observation.Usage == nil || observation.Usage.Tokens == nil || *observation.Usage.Tokens != 9 ||
+		observation.Usage.Dollars == nil || *observation.Usage.Dollars != 0.25 {
 		t.Fatalf("unexpected usage: %#v", observation.Usage)
 	}
 }
@@ -319,7 +427,7 @@ func TestParseTerminationMessageEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if payload.Result != "" || payload.TokensUsed != 0 {
+	if payload.Result != "" || payload.Usage != nil {
 		t.Fatalf("expected empty payload, got %#v", payload)
 	}
 }

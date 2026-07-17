@@ -6,8 +6,10 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
+	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
 )
 
 // PodObservation summarizes a Pod for AgentRun reconciliation.
@@ -15,6 +17,7 @@ type PodObservation struct {
 	Phase    kontextv1alpha1.AgentRunPhase
 	Message  string
 	Result   string
+	Output   *kontextv1alpha1.OutputStatus
 	Usage    *kontextv1alpha1.UsageStatus
 	ExitCode *int32
 }
@@ -84,10 +87,8 @@ func ObservePod(pod *corev1.Pod) PodObservation {
 
 func observationFromTermination(terminated *corev1.ContainerStateTerminated) PodObservation {
 	payload, parseErr := ParseTerminationMessage(terminated.Message)
-	usage := &kontextv1alpha1.UsageStatus{
-		Tokens:  payload.TokensUsed,
-		Dollars: payload.DollarsUsed,
-	}
+	output := outputStatus(payload)
+	usage := usageStatus(payload)
 	exitCode := terminated.ExitCode
 
 	if terminated.ExitCode == 0 {
@@ -98,6 +99,19 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 			return PodObservation{
 				Phase:    kontextv1alpha1.AgentRunPhaseFailed,
 				Message:  fmt.Sprintf("Agent run exited 0 but the termination payload was malformed: %v", parseErr),
+				ExitCode: &exitCode,
+			}
+		}
+		if payload.Outcome == resultv1alpha1.OutcomeFailed {
+			message := "Agent runtime reported a failed outcome."
+			if payload.Error != "" {
+				message = fmt.Sprintf("%s %s", message, payload.Error)
+			}
+			return PodObservation{
+				Phase:    kontextv1alpha1.AgentRunPhaseFailed,
+				Message:  message,
+				Result:   payload.Result,
+				Output:   output,
 				Usage:    usage,
 				ExitCode: &exitCode,
 			}
@@ -106,6 +120,7 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 			Phase:    kontextv1alpha1.AgentRunPhaseSucceeded,
 			Message:  "Agent run completed successfully.",
 			Result:   payload.Result,
+			Output:   output,
 			Usage:    usage,
 			ExitCode: &exitCode,
 		}
@@ -123,8 +138,33 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 		Phase:    kontextv1alpha1.AgentRunPhaseFailed,
 		Message:  message,
 		Result:   payload.Result,
+		Output:   output,
 		Usage:    usage,
 		ExitCode: &exitCode,
+	}
+}
+
+func outputStatus(payload TerminationPayload) *kontextv1alpha1.OutputStatus {
+	if payload.Output == nil {
+		return nil
+	}
+	return &kontextv1alpha1.OutputStatus{
+		MediaType: payload.Output.MediaType,
+		Value: runtime.RawExtension{
+			Raw: append([]byte(nil), payload.Output.Value...),
+		},
+	}
+}
+
+func usageStatus(payload TerminationPayload) *kontextv1alpha1.UsageStatus {
+	if payload.Usage == nil {
+		return nil
+	}
+	return &kontextv1alpha1.UsageStatus{
+		Tokens:       payload.Usage.TotalTokens,
+		InputTokens:  payload.Usage.InputTokens,
+		OutputTokens: payload.Usage.OutputTokens,
+		Dollars:      payload.Usage.Dollars,
 	}
 }
 
