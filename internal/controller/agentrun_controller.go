@@ -86,7 +86,15 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 		ReporterImage: r.ReporterImage,
 	})
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("build agent run pod: %w", err)
+		return r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+			next.Phase = kontextv1alpha1.AgentRunPhaseFailed
+			next.Message = fmt.Sprintf("Agent run configuration is invalid: %v.", err)
+			next.CompletionTime = nowPtr()
+			next.Conditions = conditions.ForAgentRunPhase(
+				kontextv1alpha1.AgentRunPhaseFailed,
+				next.Conditions,
+			)
+		})
 	}
 	if err := controllerutil.SetControllerReference(run, pod, r.Scheme); err != nil {
 		return ctrl.Result{}, err

@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
 	"github.com/kontext-dev/kontext/internal/conditions"
@@ -91,6 +92,52 @@ func TestAgentRunReconcilerCreatesReporterWrappedPod(t *testing.T) {
 	}
 	if pod.Spec.Containers[0].Image != "busybox:1.36.1" {
 		t.Fatalf("workload image changed: %q", pod.Spec.Containers[0].Image)
+	}
+}
+
+func TestAgentRunReconcilerFailsWhenReporterImageIsUnconfigured(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "missing-reporter-image",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:   "busybox:1.36.1",
+				Command: []string{"echo", "hello"},
+				Result: &kontextv1alpha1.RuntimeResultSpec{
+					Source: kontextv1alpha1.ResultSourceStdout,
+					Format: kontextv1alpha1.ResultFormatLastLine,
+				},
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	reconciler := newAgentRunReconciler()
+	reconciler.ReporterImage = ""
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: run.Name, Namespace: run.Namespace},
+	}); err != nil {
+		t.Fatalf("reconcile run: %v", err)
+	}
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: run.Name, Namespace: run.Namespace}, &updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", updated.Status.Phase)
+	}
+	if updated.Status.Message != "Agent run configuration is invalid: reporter image is not configured." ||
+		updated.Status.CompletionTime == nil {
+		t.Fatalf("expected actionable terminal status, got %#v", updated.Status)
 	}
 }
 
