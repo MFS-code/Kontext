@@ -2,6 +2,7 @@
 IMG ?= kontext-operator:dev
 ECHO_IMG ?= kontext-echo:dev
 ANTHROPIC_IMG ?= kontext-runtime-anthropic:dev
+REPORTER_IMG ?= kontext-reporter:dev
 
 # Get the currently used golang version
 GO_VERSION ?= 1.26.5
@@ -101,8 +102,12 @@ docker-build-echo: ## Build docker image for the echo runtime.
 docker-build-anthropic: ## Build docker image for the Anthropic reference runtime.
 	docker build -t ${ANTHROPIC_IMG} runtimes/python-anthropic
 
+.PHONY: docker-build-reporter
+docker-build-reporter: ## Build the reusable result reporter image.
+	docker build -f runtimes/reporter/Dockerfile -t ${REPORTER_IMG} .
+
 .PHONY: docker-build-all
-docker-build-all: docker-build docker-build-echo docker-build-anthropic ## Build operator and runtime images.
+docker-build-all: docker-build docker-build-echo docker-build-anthropic docker-build-reporter ## Build operator and runtime images.
 
 .PHONY: kind-install
 kind-install: docker-build docker-build-echo ## Build kind images and install the operator into kind.
