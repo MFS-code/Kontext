@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-var truncatedOutputValue = json.RawMessage(`{"truncated":true}`)
+const truncatedOutputJSON = `{"truncated":true}`
 
 // Compact serializes an envelope within maxBytes. It removes the least
 // status-relevant data first and always marks data loss explicitly.
@@ -48,7 +48,7 @@ func Compact(envelope Envelope, maxBytes int) ([]byte, error) {
 	if compacted.Output != nil {
 		compacted.Output = &Output{
 			MediaType: "application/vnd.kontext.truncated+json",
-			Value:     truncatedOutputValue,
+			Value:     json.RawMessage(truncatedOutputJSON),
 		}
 		compacted.Truncation.OutputTruncated = true
 		if encoded, ok := marshalWithin(compacted, maxBytes); ok {

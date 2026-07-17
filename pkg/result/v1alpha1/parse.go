@@ -61,13 +61,13 @@ func Parse(message string) (ParsedResult, error) {
 		return ParsedResult{}, fmt.Errorf("decode legacy termination payload: %w", err)
 	}
 	parsed := ParsedResult{
-		Output: outputFromText(legacy.Result),
-		Usage:  usageFromLegacy(legacy),
-		Legacy: true,
+		Output:  outputFromText(legacy.Result),
+		Usage:   usageFromLegacy(legacy),
+		Outcome: OutcomeSucceeded,
+		Legacy:  true,
 	}
 	if legacy.Error != "" {
 		parsed.Error = &ErrorInfo{Message: legacy.Error}
-		parsed.Outcome = OutcomeFailed
 	}
 	return parsed, nil
 }
@@ -94,8 +94,9 @@ func ProjectLegacyResult(output *Output) string {
 
 func parsedPlainText(message string) ParsedResult {
 	return ParsedResult{
-		Output: outputFromText(message),
-		Legacy: true,
+		Output:  outputFromText(message),
+		Outcome: OutcomeSucceeded,
+		Legacy:  true,
 	}
 }
 

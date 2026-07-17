@@ -210,7 +210,9 @@ transition:
 ```
 
 Legacy text becomes `text/plain` structured output. Legacy usage fields are
-recorded only when they are present in the payload.
+recorded only when they are present in the payload. For compatibility, the
+process exit code remains authoritative for legacy payloads; a legacy `error`
+field is retained as diagnostic text but does not turn exit `0` into failure.
 
 Exit `0` plus a successful envelope means success. A non-zero process exit
 always fails the run. A failed envelope also fails the run even if the process

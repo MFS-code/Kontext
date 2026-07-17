@@ -207,6 +207,29 @@ func TestObservePodFailedEnvelopeOverridesZeroExit(t *testing.T) {
 	}
 }
 
+func TestObservePodLegacyErrorDoesNotOverrideZeroExit(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{{
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+						Message:  `{"result":"ok","error":"informational warning"}`,
+					},
+				},
+			}},
+		},
+	}
+
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("expected legacy exit 0 to remain Succeeded, got %s", observation.Phase)
+	}
+	if observation.Result != "ok" {
+		t.Fatalf("expected legacy result, got %q", observation.Result)
+	}
+}
+
 func TestObservePodLegacyPayloadWithoutMetricsLeavesUsageAbsent(t *testing.T) {
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{

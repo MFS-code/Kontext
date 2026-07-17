@@ -62,8 +62,24 @@ func TestParseLegacyPayloadWithoutUsageLeavesUsageAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse legacy payload: %v", err)
 	}
+	if parsed.Outcome != resultv1alpha1.OutcomeSucceeded {
+		t.Fatalf("expected explicit successful outcome, got %q", parsed.Outcome)
+	}
 	if parsed.Usage != nil {
 		t.Fatalf("expected absent usage, got %#v", parsed.Usage)
+	}
+}
+
+func TestParseLegacyErrorPreservesExitCodeAuthority(t *testing.T) {
+	parsed, err := resultv1alpha1.Parse(`{"result":"done","error":"informational warning"}`)
+	if err != nil {
+		t.Fatalf("parse legacy payload: %v", err)
+	}
+	if parsed.Outcome != resultv1alpha1.OutcomeSucceeded {
+		t.Fatalf("legacy error must not override a successful process exit, got %q", parsed.Outcome)
+	}
+	if parsed.Error == nil || parsed.Error.Message != "informational warning" {
+		t.Fatalf("expected legacy error details to remain available, got %#v", parsed.Error)
 	}
 }
 
@@ -71,6 +87,9 @@ func TestParsePlainText(t *testing.T) {
 	parsed, err := resultv1alpha1.Parse("plain answer")
 	if err != nil {
 		t.Fatalf("parse plain text: %v", err)
+	}
+	if parsed.Outcome != resultv1alpha1.OutcomeSucceeded {
+		t.Fatalf("expected explicit successful outcome, got %q", parsed.Outcome)
 	}
 	if got := resultv1alpha1.ProjectLegacyResult(parsed.Output); got != "plain answer" {
 		t.Fatalf("expected plain answer, got %q", got)
