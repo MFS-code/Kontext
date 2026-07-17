@@ -8,6 +8,10 @@ const (
 	AgentModeTask      = "Task"
 	AgentModeService   = "Service"
 	AgentModeScheduled = "Scheduled"
+
+	ResultSourceStdout          ResultSource = "Stdout"
+	ResultFormatLastLine        ResultFormat = "LastLine"
+	ResultFormatKontextEnvelope ResultFormat = "KontextEnvelope"
 )
 
 // AgentSpec defines the desired state of Agent.
@@ -43,12 +47,28 @@ type AgentSpec struct {
 type AgentMode string
 
 // RuntimeSpec describes the container image implementing the runtime contract.
+// +kubebuilder:validation:XValidation:rule="!has(self.result) || (has(self.command) && size(self.command) > 0 && size(self.command[0]) > 0)",message="runtime.command must provide a non-empty executable when runtime.result is configured"
 type RuntimeSpec struct {
 	// +kubebuilder:validation:MinLength=1
-	Image   string   `json:"image"`
-	Command []string `json:"command,omitempty"`
-	Args    []string `json:"args,omitempty"`
+	Image   string             `json:"image"`
+	Command []string           `json:"command,omitempty"`
+	Args    []string           `json:"args,omitempty"`
+	Result  *RuntimeResultSpec `json:"result,omitempty"`
 }
+
+// RuntimeResultSpec opts an existing runtime image into result capture.
+type RuntimeResultSpec struct {
+	Source ResultSource `json:"source"`
+	Format ResultFormat `json:"format"`
+}
+
+// ResultSource identifies the stream used to extract a runtime result.
+// +kubebuilder:validation:Enum=Stdout
+type ResultSource string
+
+// ResultFormat identifies how the reporter extracts a result from stdout.
+// +kubebuilder:validation:Enum=LastLine;KontextEnvelope
+type ResultFormat string
 
 // BudgetSpec limits resource consumption for an agent run.
 type BudgetSpec struct {

@@ -1,0 +1,20 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: stdout-failure
+spec:
+  goal: Preserve a non-zero exit from an unmodified image.
+  provider: echo
+  model: fixture-model
+  runtime:
+    image: kontext-stdout-fixture:dev
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        echo "partial answer"
+        exit 7
+    result:
+      source: Stdout
+      format: LastLine
+  budget:
+    wallclock: 2m

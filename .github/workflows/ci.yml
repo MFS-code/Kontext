@@ -95,6 +95,8 @@ jobs:
       KIND_CLUSTER_NAME: kontext-ci
       KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
       KONTEXT_ECHO_IMAGE: kontext-echo:dev
+      KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
+      KONTEXT_STDOUT_FIXTURE_IMAGE: kontext-stdout-fixture:dev
       KONTEXT_DIAG_DIR: ${{ github.workspace }}/.ci-diagnostics
     steps:
       - name: Check out repository
@@ -122,6 +124,27 @@ jobs:
           tags: ${{ env.KONTEXT_ECHO_IMAGE }}
           cache-from: type=gha,scope=echo
           cache-to: type=gha,mode=max,scope=echo
+
+      - name: Build reusable reporter image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runtimes/reporter/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
+          cache-from: type=gha,scope=reporter
+          cache-to: type=gha,mode=max,scope=reporter
+
+      - name: Build stdout-capture fixture image
+        uses: docker/build-push-action@v6
+        with:
+          context: runtimes/stdout-fixture
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_STDOUT_FIXTURE_IMAGE }}
+          cache-from: type=gha,scope=stdout-fixture
+          cache-to: type=gha,mode=max,scope=stdout-fixture
 
       - name: Create kind cluster
         uses: helm/kind-action@v1

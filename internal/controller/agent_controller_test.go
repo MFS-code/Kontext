@@ -28,7 +28,14 @@ func TestAgentReconcilerMintsServiceRun(t *testing.T) {
 			Goal:     "stay ready",
 			Provider: "echo",
 			Model:    "echo-model",
-			Runtime:  echoRuntimeSpec(),
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:   "kontext-echo:dev",
+				Command: []string{"/entrypoint.sh"},
+				Result: &kontextv1alpha1.RuntimeResultSpec{
+					Source: kontextv1alpha1.ResultSourceStdout,
+					Format: kontextv1alpha1.ResultFormatLastLine,
+				},
+			},
 		},
 	}
 	if err := k8sClient.Create(ctx, agent); err != nil {
@@ -51,6 +58,14 @@ func TestAgentReconcilerMintsServiceRun(t *testing.T) {
 	var run kontextv1alpha1.AgentRun
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: "mint-owner-1", Namespace: agent.Namespace}, &run); err != nil {
 		t.Fatalf("expected child run: %v", err)
+	}
+	if run.Spec.Runtime.Result == nil ||
+		run.Spec.Runtime.Result.Source != kontextv1alpha1.ResultSourceStdout ||
+		run.Spec.Runtime.Result.Format != kontextv1alpha1.ResultFormatLastLine {
+		t.Fatalf("runtime result policy was not snapshotted: %#v", run.Spec.Runtime.Result)
+	}
+	if len(run.Spec.Runtime.Command) != 1 || run.Spec.Runtime.Command[0] != "/entrypoint.sh" {
+		t.Fatalf("runtime command was not snapshotted: %#v", run.Spec.Runtime.Command)
 	}
 }
 

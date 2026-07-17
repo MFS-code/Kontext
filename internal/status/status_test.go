@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
+	"github.com/kontext-dev/kontext/internal/podbuilder"
 	"github.com/kontext-dev/kontext/internal/status"
 )
 
@@ -55,6 +56,7 @@ func TestObservePodMalformedTerminationOnSuccessFails(t *testing.T) {
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
+					Name: podbuilder.RuntimeContainerName,
 					State: corev1.ContainerState{
 						Terminated: &corev1.ContainerStateTerminated{
 							ExitCode: exitCode,
@@ -80,6 +82,7 @@ func TestObservePodMalformedTerminationOnFailureNotesParseError(t *testing.T) {
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
+					Name: podbuilder.RuntimeContainerName,
 					State: corev1.ContainerState{
 						Terminated: &corev1.ContainerStateTerminated{
 							ExitCode: exitCode,
@@ -106,7 +109,10 @@ func TestObservePodRunning(t *testing.T) {
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
-				{State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}},
+				{
+					Name:  podbuilder.RuntimeContainerName,
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				},
 			},
 		},
 	}
@@ -116,12 +122,41 @@ func TestObservePodRunning(t *testing.T) {
 	}
 }
 
+func TestObservePodSelectsRuntimeContainerByName(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name: "unrelated-sidecar",
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							ExitCode: 0,
+							Message:  `{"result":"wrong container"}`,
+						},
+					},
+				},
+				{
+					Name:  podbuilder.RuntimeContainerName,
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				},
+			},
+		},
+	}
+
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseRunning {
+		t.Fatalf("expected runtime container to remain Running, got %s", observation.Phase)
+	}
+}
+
 func TestObservePodSucceeded(t *testing.T) {
 	exitCode := int32(0)
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
+					Name: podbuilder.RuntimeContainerName,
 					State: corev1.ContainerState{
 						Terminated: &corev1.ContainerStateTerminated{
 							ExitCode: exitCode,
@@ -145,6 +180,7 @@ func TestObservePodPreservesVersionedStructuredOutputAndUsage(t *testing.T) {
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: podbuilder.RuntimeContainerName,
 				State: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 0,
@@ -188,6 +224,7 @@ func TestObservePodFailedEnvelopeOverridesZeroExit(t *testing.T) {
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: podbuilder.RuntimeContainerName,
 				State: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 0,
@@ -211,6 +248,7 @@ func TestObservePodLegacyErrorDoesNotOverrideZeroExit(t *testing.T) {
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: podbuilder.RuntimeContainerName,
 				State: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 0,
@@ -234,6 +272,7 @@ func TestObservePodLegacyPayloadWithoutMetricsLeavesUsageAbsent(t *testing.T) {
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: podbuilder.RuntimeContainerName,
 				State: corev1.ContainerState{
 					Terminated: &corev1.ContainerStateTerminated{
 						ExitCode: 0,
@@ -275,6 +314,7 @@ func TestObservePodWaitingUsesReason(t *testing.T) {
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
+					Name: podbuilder.RuntimeContainerName,
 					State: corev1.ContainerState{
 						Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"},
 					},
@@ -296,6 +336,7 @@ func TestObservePodWaitingIncludesMessage(t *testing.T) {
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
+					Name: podbuilder.RuntimeContainerName,
 					State: corev1.ContainerState{
 						Waiting: &corev1.ContainerStateWaiting{
 							Reason:  "ImagePullBackOff",
@@ -344,6 +385,7 @@ func TestObservePodTerminatedFailure(t *testing.T) {
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
+					Name: podbuilder.RuntimeContainerName,
 					State: corev1.ContainerState{
 						Terminated: &corev1.ContainerStateTerminated{
 							ExitCode: 2,
@@ -378,6 +420,7 @@ func TestObservePodTerminatedFailureWithoutError(t *testing.T) {
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
+					Name: podbuilder.RuntimeContainerName,
 					State: corev1.ContainerState{
 						Terminated: &corev1.ContainerStateTerminated{ExitCode: 1},
 					},

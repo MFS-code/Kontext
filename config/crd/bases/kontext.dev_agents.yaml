@@ -130,9 +130,35 @@ spec:
                   image:
                     minLength: 1
                     type: string
+                  result:
+                    description: RuntimeResultSpec opts an existing runtime image
+                      into result capture.
+                    properties:
+                      format:
+                        description: ResultFormat identifies how the reporter extracts
+                          a result from stdout.
+                        enum:
+                        - LastLine
+                        - KontextEnvelope
+                        type: string
+                      source:
+                        description: ResultSource identifies the stream used to extract
+                          a runtime result.
+                        enum:
+                        - Stdout
+                        type: string
+                    required:
+                    - format
+                    - source
+                    type: object
                 required:
                 - image
                 type: object
+                x-kubernetes-validations:
+                - message: runtime.command must provide a non-empty executable when
+                    runtime.result is configured
+                  rule: '!has(self.result) || (has(self.command) && size(self.command)
+                    > 0 && size(self.command[0]) > 0)'
               schedule:
                 type: string
               secretRef:

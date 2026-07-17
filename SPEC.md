@@ -40,6 +40,7 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `runtime.image`      | string                                | yes | Container image implementing the runtime contract.             |
 | `runtime.command`    | []string                              | no  | Override entrypoint.                                           |
 | `runtime.args`       | []string                              | no  |                                                                |
+| `runtime.result`     | object                                | no  | Optional stdout result capture policy.                         |
 | `goal`               | string                                | no* | Default/persistent goal. Required for `Service`/`Scheduled`.   |
 | `goalTemplate`       | string                                | no  | Parameterized goal for templated runs (`Task`).                |
 | `provider`           | string                                | no  | Default `anthropic`.                                           |
@@ -90,6 +91,9 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 | `secretRef.name`     | string   | no  |                                                  |
 | `serviceAccountName` | string   | no  |                                                  |
 | `runtime.image`      | string   | yes | Resolved from Agent.                             |
+| `runtime.command`    | []string | no  | Required when stdout capture is configured.      |
+| `runtime.args`       | []string | no  | Appended to the declared command.                |
+| `runtime.result`     | object   | no  | Optional stdout result capture policy.           |
 
 
 When created from an `Agent`, the controller snapshots/resolves these fields so the run does not drift if the `Agent` changes later.
@@ -236,6 +240,32 @@ The reporter bounds only captured result data; streamed logs remain unbounded.
 It compacts every emitted envelope to the termination-message limit. Reporter
 injection and workload configuration are control-plane concerns defined
 separately from this executable.
+
+An existing Linux image opts into stdout capture with:
+
+```yaml
+runtime:
+  image: example/agent:v1
+  command: ["python", "-m", "agent"]
+  result:
+    source: Stdout
+    format: LastLine
+```
+
+`runtime.command` is required because reporter injection replaces the image
+entrypoint; Kubernetes cannot recover that entrypoint automatically.
+`KontextEnvelope` is the other supported format. Without `runtime.result`,
+Kontext leaves the image entrypoint and native termination behavior unchanged.
+
+The operator installation selects the trusted reporter image. Kontext injects
+its binary with an init container and mounts it read-only into the workload
+container; workloads cannot select a different reporter image. The controller
+does not read Pod logs and needs no `pods/log` permission. `LastLine` is
+heuristic, cannot infer usage, and is discouraged for long-running Service
+agents. The trusted init container runs as UID 0 only while populating the
+otherwise empty shared volume; it drops capabilities, disables privilege
+escalation, and uses a read-only root filesystem. The workload container's own
+user and security context remain unchanged.
 
 ### Mode expectations for the image
 

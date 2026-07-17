@@ -19,6 +19,19 @@ func execute(
 	stdout io.Writer,
 	stderr io.Writer,
 ) int {
+	destination, install, err := installDestination(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "kontext reporter: %v\n", err)
+		return reporterFailureExitCode
+	}
+	if install {
+		if err := installCurrentExecutable(destination); err != nil {
+			fmt.Fprintf(stderr, "kontext reporter: %v\n", err)
+			return reporterFailureExitCode
+		}
+		return 0
+	}
+
 	config, err := parseConfig(args, getenv)
 	if err != nil {
 		fmt.Fprintf(

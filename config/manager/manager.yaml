@@ -29,6 +29,9 @@ spec:
           image: controller:latest
           command:
             - /manager
+          env:
+            - name: KONTEXT_REPORTER_IMAGE
+              value: ""
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

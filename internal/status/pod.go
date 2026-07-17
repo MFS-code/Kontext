@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
+	"github.com/kontext-dev/kontext/internal/podbuilder"
 	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
 )
 
@@ -38,8 +39,8 @@ func ObservePod(pod *corev1.Pod) PodObservation {
 		}
 	}
 
-	if len(pod.Status.ContainerStatuses) > 0 {
-		state := pod.Status.ContainerStatuses[0].State
+	if containerStatus := runtimeContainerStatus(pod); containerStatus != nil {
+		state := containerStatus.State
 		if state.Running != nil {
 			return PodObservation{
 				Phase:   kontextv1alpha1.AgentRunPhaseRunning,
@@ -83,6 +84,15 @@ func ObservePod(pod *corev1.Pod) PodObservation {
 			Message: "Agent run pod status is not available yet.",
 		}
 	}
+}
+
+func runtimeContainerStatus(pod *corev1.Pod) *corev1.ContainerStatus {
+	for index := range pod.Status.ContainerStatuses {
+		if pod.Status.ContainerStatuses[index].Name == podbuilder.RuntimeContainerName {
+			return &pod.Status.ContainerStatuses[index]
+		}
+	}
+	return nil
 }
 
 func observationFromTermination(terminated *corev1.ContainerStateTerminated) PodObservation {

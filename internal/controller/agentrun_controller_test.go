@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
 	"github.com/kontext-dev/kontext/internal/conditions"
@@ -46,6 +47,148 @@ func TestAgentRunReconcilerCreatesPod(t *testing.T) {
 	pod := &corev1.Pod{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, pod); err != nil {
 		t.Fatalf("expected pod %s: %v", podName, err)
+	}
+}
+
+func TestAgentRunReconcilerCreatesReporterWrappedPod(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "stdout-capture-run",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:   "busybox:1.36.1",
+				Command: []string{"sh", "-c"},
+				Args:    []string{"echo final answer"},
+				Result: &kontextv1alpha1.RuntimeResultSpec{
+					Source: kontextv1alpha1.ResultSourceStdout,
+					Format: kontextv1alpha1.ResultFormatLastLine,
+				},
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	reconcileAgentRun(ctx, t, types.NamespacedName{Name: run.Name, Namespace: run.Namespace})
+
+	var pod corev1.Pod
+	podName := podbuilder.PodNameForRun(run.Name)
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, &pod); err != nil {
+		t.Fatalf("get pod: %v", err)
+	}
+	if len(pod.Spec.InitContainers) != 1 ||
+		pod.Spec.InitContainers[0].Image != "kontext-reporter:dev" {
+		t.Fatalf("expected trusted reporter init container, got %#v", pod.Spec.InitContainers)
+	}
+	if got := pod.Spec.Containers[0].Command[0]; got != podbuilder.ReporterBinaryPath {
+		t.Fatalf("expected reporter command, got %q", got)
+	}
+	if pod.Spec.Containers[0].Image != "busybox:1.36.1" {
+		t.Fatalf("workload image changed: %q", pod.Spec.Containers[0].Image)
+	}
+}
+
+func TestAgentRunReconcilerFailsWhenReporterImageIsUnconfigured(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "missing-reporter-image",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:   "busybox:1.36.1",
+				Command: []string{"echo", "hello"},
+				Result: &kontextv1alpha1.RuntimeResultSpec{
+					Source: kontextv1alpha1.ResultSourceStdout,
+					Format: kontextv1alpha1.ResultFormatLastLine,
+				},
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	reconciler := newAgentRunReconciler()
+	reconciler.ReporterImage = ""
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: run.Name, Namespace: run.Namespace},
+	}); err != nil {
+		t.Fatalf("reconcile run: %v", err)
+	}
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: run.Name, Namespace: run.Namespace}, &updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", updated.Status.Phase)
+	}
+	if updated.Status.Message != "Agent run configuration is invalid: reporter image is not configured." ||
+		updated.Status.CompletionTime == nil {
+		t.Fatalf("expected actionable terminal status, got %#v", updated.Status)
+	}
+}
+
+func TestAgentRunRejectsStdoutCaptureWithoutCommand(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "invalid-stdout-capture",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image: "busybox:1.36.1",
+				Result: &kontextv1alpha1.RuntimeResultSpec{
+					Source: kontextv1alpha1.ResultSourceStdout,
+					Format: kontextv1alpha1.ResultFormatLastLine,
+				},
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err == nil {
+		t.Fatalf("expected API validation to require runtime.command")
+	}
+}
+
+func TestAgentRunRejectsStdoutCaptureWithEmptyExecutable(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "empty-stdout-command",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:   "busybox:1.36.1",
+				Command: []string{""},
+				Result: &kontextv1alpha1.RuntimeResultSpec{
+					Source: kontextv1alpha1.ResultSourceStdout,
+					Format: kontextv1alpha1.ResultFormatLastLine,
+				},
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err == nil {
+		t.Fatalf("expected API validation to reject an empty command executable")
 	}
 }
 
@@ -213,7 +356,7 @@ func TestAgentRunReconcilerSurfacesInvalidWallclock(t *testing.T) {
 func TestAgentRunReconcilerObservesRunningPodWithinWallclockBudget(t *testing.T) {
 	ctx := context.Background()
 	podName := podbuilder.PodNameForRun("active-wallclock-run")
-	started := metav1.NewTime(time.Now().Add(-time.Second))
+	started := metav1.NewTime(time.Now().Truncate(time.Second).Add(-time.Second))
 	run := &kontextv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "active-wallclock-run",
@@ -268,12 +411,16 @@ func TestAgentRunReconcilerObservesRunningPodWithinWallclockBudget(t *testing.T)
 	if updated.Status.StartTime == nil {
 		t.Fatalf("expected start time")
 	}
+	if !updated.Status.StartTime.Time.Equal(started.Time) {
+		t.Fatalf("expected runtime container start %s, got %s", started, updated.Status.StartTime)
+	}
 }
 
 func TestAgentRunReconcilerEnforcesWallclockBudget(t *testing.T) {
 	ctx := context.Background()
 	podName := podbuilder.PodNameForRun("wallclock-run")
-	started := metav1.NewTime(time.Now().Add(-2 * time.Minute))
+	started := metav1.NewTime(time.Now().Truncate(time.Second).Add(-2 * time.Minute))
+	recordedStarted := metav1.NewTime(time.Now())
 	run := &kontextv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "wallclock-run",
@@ -293,7 +440,7 @@ func TestAgentRunReconcilerEnforcesWallclockBudget(t *testing.T) {
 	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
 		Phase:     kontextv1alpha1.AgentRunPhaseRunning,
 		PodName:   podName,
-		StartTime: &started,
+		StartTime: &recordedStarted,
 	}); err != nil {
 		t.Fatalf("update run status: %v", err)
 	}
@@ -325,6 +472,9 @@ func TestAgentRunReconcilerEnforcesWallclockBudget(t *testing.T) {
 	}
 	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseBudgetExceeded {
 		t.Fatalf("expected BudgetExceeded, got %s", updated.Status.Phase)
+	}
+	if updated.Status.StartTime == nil || !updated.Status.StartTime.Time.Equal(started.Time) {
+		t.Fatalf("expected actual runtime start %s, got %v", started, updated.Status.StartTime)
 	}
 }
 
