@@ -46,7 +46,6 @@ const (
 type CompletionRequest struct {
 	Model     string
 	Messages  []Message
-	Tools     []string
 	MaxTokens *int64
 }
 

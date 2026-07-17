@@ -21,6 +21,11 @@ func TestResolveSelectsFakeProvider(t *testing.T) {
 	}
 	if _, err := provider.Resolve(config.Config{Provider: "unknown"}); err == nil {
 		t.Fatalf("expected unsupported provider error")
+	} else {
+		var unsupported *provider.UnsupportedError
+		if !errors.As(err, &unsupported) {
+			t.Fatalf("expected typed unsupported error, got %T", err)
+		}
 	}
 }
 
@@ -30,6 +35,11 @@ func TestResolveValidatesFakeScenarios(t *testing.T) {
 		FakeScenario: "other",
 	}); err == nil {
 		t.Fatalf("expected unsupported scenario error")
+	} else {
+		var configurationError *provider.ConfigurationError
+		if !errors.As(err, &configurationError) {
+			t.Fatalf("expected typed configuration error, got %T", err)
+		}
 	}
 	if _, err := provider.Resolve(config.Config{
 		Provider:     "fake",

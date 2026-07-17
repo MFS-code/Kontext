@@ -8,6 +8,7 @@ import (
 
 	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
+	"github.com/kontext-dev/kontext/runtimes/reference/internal/conversation"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/events"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/provider"
 	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
@@ -53,10 +54,11 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 	}
 
 	runner.emit(events.TypeLifecycle, map[string]any{
-		"phase":    "started",
-		"runName":  runtimeConfig.RunName,
-		"provider": runtimeConfig.Provider,
-		"model":    runtimeConfig.Model,
+		"phase":     "started",
+		"runName":   runtimeConfig.RunName,
+		"agentName": runtimeConfig.AgentName,
+		"provider":  runtimeConfig.Provider,
+		"model":     runtimeConfig.Model,
 	})
 	if len(runtimeConfig.Tools) > 0 {
 		runner.emit(events.TypeLifecycle, map[string]any{
@@ -67,34 +69,25 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 
 	selectedProvider, err := resolve(runtimeConfig)
 	if err != nil {
-		runner.emitError("unsupported_provider", err.Error(), nil)
-		return failed("unsupported_provider", err.Error(), nil, metadata(""))
+		code := "unsupported_provider"
+		var configurationError *provider.ConfigurationError
+		if errors.As(err, &configurationError) {
+			code = "invalid_provider_configuration"
+		}
+		runner.emitError(code, err.Error(), nil)
+		return failed(code, err.Error(), nil, metadata(""))
 	}
 
+	state := conversation.New(runtimeConfig.Goal)
 	request := runtimeapi.CompletionRequest{
-		Model: runtimeConfig.Model,
-		Messages: []runtimeapi.Message{
-			{
-				Role: runtimeapi.RoleUser,
-				Content: []runtimeapi.ContentBlock{
-					{Type: runtimeapi.ContentTypeText, Text: runtimeConfig.Goal},
-				},
-			},
-		},
-		Tools:     append([]string(nil), runtimeConfig.Tools...),
+		Model:     runtimeConfig.Model,
+		Messages:  state.Messages(),
 		MaxTokens: runtimeConfig.TokenBudget,
 	}
 
-	providerContext := ctx
-	cancel := func() {}
-	if runtimeConfig.WallclockBudget != nil {
-		providerContext, cancel = context.WithTimeout(ctx, *runtimeConfig.WallclockBudget)
-	}
-	defer cancel()
-
-	response, err := selectedProvider.Complete(providerContext, request)
+	response, err := selectedProvider.Complete(ctx, request)
 	if err != nil {
-		code, message, retryable, requestID := normalizeError(providerContext, err)
+		code, message, retryable, requestID := normalizeError(ctx, err)
 		runner.emitError(code, message, retryable)
 		return failed(code, message, retryable, metadata(requestID))
 	}
@@ -109,6 +102,7 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 		)
 	}
 
+	state.Append(response.Message)
 	completedMetadata := metadata(response.RequestID)
 	runner.emit(events.TypeLifecycle, map[string]any{
 		"phase":          "provider_completed",

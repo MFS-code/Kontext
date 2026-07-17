@@ -23,12 +23,29 @@ type Provider interface {
 	Complete(context.Context, runtimeapi.CompletionRequest) (runtimeapi.CompletionResponse, error)
 }
 
+type UnsupportedError struct {
+	Name string
+}
+
+func (err *UnsupportedError) Error() string {
+	return fmt.Sprintf("unsupported provider %q", err.Name)
+}
+
+type ConfigurationError struct {
+	Provider string
+	Message  string
+}
+
+func (err *ConfigurationError) Error() string {
+	return fmt.Sprintf("%s provider configuration is invalid: %s", err.Provider, err.Message)
+}
+
 func Resolve(runtimeConfig config.Config) (Provider, error) {
 	switch runtimeConfig.Provider {
 	case "fake":
 		return resolveFake(runtimeConfig)
 	default:
-		return nil, fmt.Errorf("unsupported provider %q", runtimeConfig.Provider)
+		return nil, &UnsupportedError{Name: runtimeConfig.Provider}
 	}
 }
 
@@ -41,10 +58,16 @@ func resolveFake(runtimeConfig config.Config) (Provider, error) {
 	case FakeScenarioSuccess, FakeScenarioFailure, FakeScenarioMalformed:
 	case FakeScenarioDelay:
 		if runtimeConfig.FakeDelay <= 0 {
-			return nil, fmt.Errorf("KONTEXT_FAKE_DELAY is required for delay scenario")
+			return nil, &ConfigurationError{
+				Provider: "fake",
+				Message:  "KONTEXT_FAKE_DELAY is required for delay scenario",
+			}
 		}
 	default:
-		return nil, fmt.Errorf("unsupported KONTEXT_FAKE_SCENARIO %q", scenario)
+		return nil, &ConfigurationError{
+			Provider: "fake",
+			Message:  fmt.Sprintf("unsupported KONTEXT_FAKE_SCENARIO %q", scenario),
+		}
 	}
 	return &Fake{
 		Scenario: scenario,

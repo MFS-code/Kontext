@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -34,7 +35,7 @@ func Load(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	model, err := required(getenv, "KONTEXT_MODEL")
+	model, err := requiredOpaque(getenv, "KONTEXT_MODEL")
 	if err != nil {
 		return Config{}, err
 	}
@@ -107,6 +108,14 @@ func required(getenv func(string) string, name string) (string, error) {
 	return value, nil
 }
 
+func requiredOpaque(getenv func(string) string, name string) (string, error) {
+	value := getenv(name)
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("%s is required", name)
+	}
+	return value, nil
+}
+
 func optionalPositiveInt64(value string, name string) (*int64, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -137,7 +146,7 @@ func optionalNonNegativeFloat(value string, name string) (*float64, error) {
 		return nil, nil
 	}
 	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil || parsed < 0 {
+	if err != nil || parsed < 0 || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
 		return nil, fmt.Errorf("%s must be a non-negative number", name)
 	}
 	return &parsed, nil

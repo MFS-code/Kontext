@@ -77,6 +77,19 @@ func TestRunnerRejectsUnsupportedProvider(t *testing.T) {
 	}
 }
 
+func TestRunnerDistinguishesInvalidProviderConfiguration(t *testing.T) {
+	runtimeConfig := baseConfig()
+	runtimeConfig.FakeScenario = "unknown"
+	result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(
+		context.Background(),
+		runtimeConfig,
+	)
+	if result.Envelope.Error == nil ||
+		result.Envelope.Error.Code != "invalid_provider_configuration" {
+		t.Fatalf("unexpected error %#v", result.Envelope.Error)
+	}
+}
+
 func TestRunnerHasNoImplicitWallclockDeadline(t *testing.T) {
 	runtimeConfig := baseConfig()
 	runtimeConfig.FakeScenario = provider.FakeScenarioDelay
@@ -91,16 +104,31 @@ func TestRunnerHasNoImplicitWallclockDeadline(t *testing.T) {
 	}
 }
 
-func TestRunnerAppliesConfiguredWallclockAndCancellation(t *testing.T) {
-	t.Run("deadline", func(t *testing.T) {
+func TestRunnerLeavesWallclockAuthorityWithController(t *testing.T) {
+	runtimeConfig := baseConfig()
+	runtimeConfig.FakeScenario = provider.FakeScenarioDelay
+	runtimeConfig.FakeDelay = 30 * time.Millisecond
+	wallclock := 10 * time.Millisecond
+	runtimeConfig.WallclockBudget = &wallclock
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(ctx, runtimeConfig)
+	if result.ExitCode != 0 {
+		t.Fatalf("runtime must not race controller wallclock enforcement: %#v", result.Envelope.Error)
+	}
+}
+
+func TestRunnerHandlesParentDeadlineAndCancellation(t *testing.T) {
+	t.Run("parent deadline", func(t *testing.T) {
 		runtimeConfig := baseConfig()
 		runtimeConfig.FakeScenario = provider.FakeScenarioDelay
 		runtimeConfig.FakeDelay = time.Second
-		wallclock := 10 * time.Millisecond
-		runtimeConfig.WallclockBudget = &wallclock
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
 
 		result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(
-			context.Background(),
+			ctx,
 			runtimeConfig,
 		)
 		if result.Envelope.Error == nil || result.Envelope.Error.Code != "deadline_exceeded" {

@@ -280,11 +280,12 @@ configuration, conversation, event, result, cancellation, and failure paths
 that real HTTP transports use. `KONTEXT_MODEL` remains opaque and is never
 aliased or rewritten.
 
-Runtime wallclock cancellation is enabled only when
-`KONTEXT_BUDGET_WALLCLOCK` is present. Omission means no runtime deadline; the
-runtime does not invent a five-minute default. Declared tools are recorded in
-lifecycle events but are not exposed to the provider or executed until the
-bounded tool loop is implemented.
+The controller remains authoritative for wallclock enforcement. The runtime
+parses `KONTEXT_BUDGET_WALLCLOCK` but does not start a competing timer; it
+reacts to cancellation when the reporter forwards controller signals.
+Omission means no deadline, and the runtime does not invent a five-minute
+default. Declared tools are recorded in lifecycle events but are not exposed to
+the provider or executed until the bounded tool loop is implemented.
 
 The reference runtime emits versioned JSONL lifecycle, usage, output, and error
 events to stdout. It retains conversation state only in memory for one run and

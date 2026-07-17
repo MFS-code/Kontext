@@ -40,8 +40,10 @@ No private chain-of-thought is emitted.
 | `KONTEXT_FAKE_SCENARIO` | no | `success`, `failure`, `malformed`, or `delay` |
 | `KONTEXT_FAKE_DELAY` | delay only | Positive Go duration such as `250ms` |
 
-There is deliberately no hidden five-minute deadline. The runtime creates a
-timeout only when `KONTEXT_BUDGET_WALLCLOCK` is present.
+There is deliberately no hidden five-minute deadline. The Kubernetes
+controller remains authoritative for `KONTEXT_BUDGET_WALLCLOCK`; the runtime
+parses the value but does not start a competing timer. It reacts promptly when
+the reporter forwards controller cancellation signals.
 
 Model identifiers pass through unchanged.
 

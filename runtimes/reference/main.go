@@ -44,7 +44,7 @@ func run(
 			nil,
 			engine.Metadata{
 				Provider:    strings.TrimSpace(getenv("KONTEXT_PROVIDER")),
-				Model:       strings.TrimSpace(getenv("KONTEXT_MODEL")),
+				Model:       getenv("KONTEXT_MODEL"),
 				StartedAt:   startedAt,
 				CompletedAt: now().UTC(),
 			},

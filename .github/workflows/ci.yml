@@ -85,6 +85,34 @@ jobs:
           cache-from: type=gha,scope=reference
           cache-to: type=gha,mode=max,scope=reference
 
+      - name: Smoke test reference runtime execution
+        run: |
+          success_output="$(
+            docker run --rm \
+              -e KONTEXT_TERMINATION_MESSAGE=/dev/null \
+              -e KONTEXT_GOAL='CI fake success' \
+              -e KONTEXT_PROVIDER=fake \
+              -e KONTEXT_MODEL='opaque/ci-model' \
+              "${KONTEXT_REFERENCE_IMAGE}"
+          )"
+          [[ "${success_output}" == *'"apiVersion":"kontext.dev/event/v1alpha1"'* ]]
+          [[ "${success_output}" == *'KONTEXT_RESULT:'* ]]
+
+          set +e
+          failure_output="$(
+            docker run --rm \
+              -e KONTEXT_TERMINATION_MESSAGE=/dev/null \
+              -e KONTEXT_GOAL='CI fake failure' \
+              -e KONTEXT_PROVIDER=fake \
+              -e KONTEXT_MODEL='opaque/ci-model' \
+              -e KONTEXT_FAKE_SCENARIO=failure \
+              "${KONTEXT_REFERENCE_IMAGE}"
+          )"
+          failure_code=$?
+          set -e
+          [[ "${failure_code}" -eq 1 ]]
+          [[ "${failure_output}" == *'"outcome":"Failed"'* ]]
+
       - name: Build Anthropic reference runtime image
         uses: docker/build-push-action@v6
         with:

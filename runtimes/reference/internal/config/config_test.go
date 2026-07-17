@@ -14,7 +14,7 @@ func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 		"KONTEXT_AGENT_NAME":        "agent-1",
 		"KONTEXT_GOAL":              "explain the contract",
 		"KONTEXT_PROVIDER":          "FAKE",
-		"KONTEXT_MODEL":             "vendor/model@2026:beta",
+		"KONTEXT_MODEL":             " vendor/model@2026:beta ",
 		"KONTEXT_TOOLS":             " one, two ,,",
 		"KONTEXT_BUDGET_TOKENS":     "123",
 		"KONTEXT_BUDGET_WALLCLOCK":  "1m30s",
@@ -25,7 +25,7 @@ func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if loaded.Model != "vendor/model@2026:beta" {
+	if loaded.Model != " vendor/model@2026:beta " {
 		t.Fatalf("model identifier changed: %q", loaded.Model)
 	}
 	if loaded.Provider != "fake" {
@@ -69,6 +69,8 @@ func TestLoadValidatesRequiredAndOptionalConfiguration(t *testing.T) {
 		{name: "invalid tokens", change: func(values map[string]string) { values["KONTEXT_BUDGET_TOKENS"] = "zero" }},
 		{name: "invalid wallclock", change: func(values map[string]string) { values["KONTEXT_BUDGET_WALLCLOCK"] = "5 minutes" }},
 		{name: "negative dollars", change: func(values map[string]string) { values["KONTEXT_BUDGET_DOLLARS"] = "-1" }},
+		{name: "NaN dollars", change: func(values map[string]string) { values["KONTEXT_BUDGET_DOLLARS"] = "NaN" }},
+		{name: "infinite dollars", change: func(values map[string]string) { values["KONTEXT_BUDGET_DOLLARS"] = "+Inf" }},
 		{name: "invalid endpoint", change: func(values map[string]string) { values["KONTEXT_PROVIDER_ENDPOINT"] = "localhost:8080" }},
 		{name: "invalid fake delay", change: func(values map[string]string) { values["KONTEXT_FAKE_DELAY"] = "-3s" }},
 	}
