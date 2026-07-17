@@ -40,6 +40,8 @@ make kind-install       # build operator + echo images, load into kind, install 
 The e2e script proves the two core behaviors:
 
 - a standalone `AgentRun` runs to completion and lands `.status.result`
+- unmodified images can expose last-line or structured stdout results
+- child exit codes and SIGTERM behavior survive reporter injection
 - a `Service`-mode `Agent` re-casts its run after the Pod is deleted
 
 ### Run a one-shot task
@@ -75,6 +77,26 @@ kubectl get agentruns -w
 | [`runtimes/reporter/`](runtimes/reporter) | Reusable PID 1 supervisor. Preserves child logs and process semantics while producing the versioned result envelope. |
 
 Provider credentials are wired by the controller from a Kubernetes Secret into the env vars each provider expects (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, AWS credential pairs for Bedrock, and so on). See `internal/runtimepolicy/`.
+
+### Capture results from an existing image
+
+An existing Linux container can opt into stdout result capture without adding
+Kontext code:
+
+```yaml
+runtime:
+  image: example/agent:v1
+  command: ["python", "-m", "agent"]
+  result:
+    source: Stdout
+    format: LastLine
+```
+
+The command is explicit because Kubernetes cannot recover an image entrypoint
+after Kontext replaces it with the reporter. `LastLine` captures the final
+non-empty stdout line as text; `KontextEnvelope` accepts a
+`KONTEXT_RESULT:`-prefixed structured envelope. Logs remain ordinary
+`kubectl logs` output. If `result` is absent, the image runs unchanged.
 
 ## Governance
 

@@ -37,6 +37,7 @@ Kontext provides generic `Agent` and `AgentRun` primitives. Consumer-specific co
 
 ### M4 — Bring-your-own-runtime hardening
 - Echo runtime shipped (`runtimes/echo/`). Anthropic Python runner remains under `runtimes/python-anthropic/`.
+- Versioned results, the reusable reporter, and optional stdout capture support existing Linux images with explicit commands.
 
 ### M5 — Governance
 - Per-agent ServiceAccount, finalizers, budget enforcement, CEL validation on the CRDs, events on transitions.

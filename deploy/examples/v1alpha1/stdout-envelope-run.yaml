@@ -1,0 +1,20 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: stdout-envelope
+spec:
+  goal: Capture a prefixed structured envelope from an unmodified image.
+  provider: echo
+  model: fixture-model
+  runtime:
+    image: kontext-stdout-fixture:dev
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        echo "ordinary structured workload log"
+        echo 'KONTEXT_RESULT: {"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":{"answer":"structured"}},"usage":{"inputTokens":0,"outputTokens":7,"totalTokens":7}}'
+    result:
+      source: Stdout
+      format: KontextEnvelope
+  budget:
+    wallclock: 2m

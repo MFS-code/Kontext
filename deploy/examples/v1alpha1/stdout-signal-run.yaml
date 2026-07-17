@@ -1,0 +1,21 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: stdout-signal
+spec:
+  goal: Verify SIGTERM reaches an unmodified child process.
+  provider: echo
+  model: fixture-model
+  runtime:
+    image: kontext-stdout-fixture:dev
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        trap 'echo "signal reached child"; exit 0' TERM
+        echo "waiting for signal"
+        while true; do sleep 1; done
+    result:
+      source: Stdout
+      format: LastLine
+  budget:
+    wallclock: 2m

@@ -33,11 +33,18 @@ func main() {
 	var probeAddr string
 	var enableLeaderElection bool
 	var secureMetrics bool
+	var reporterImage string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", false, "If set, the metrics endpoint is served securely.")
+	flag.StringVar(
+		&reporterImage,
+		"reporter-image",
+		envOrDefault("KONTEXT_REPORTER_IMAGE", "kontext-reporter:dev"),
+		"Trusted reporter image used for optional stdout result capture.",
+	)
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -64,8 +71,9 @@ func main() {
 	}
 
 	if err := (&controller.AgentRunReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		ReporterImage: reporterImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AgentRun")
 		os.Exit(1)
@@ -101,4 +109,11 @@ func main() {
 // controller's outbound Kubernetes API client.
 func disableHTTP2(c *tls.Config) {
 	c.NextProtos = []string{"http/1.1"}
+}
+
+func envOrDefault(name string, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
 }

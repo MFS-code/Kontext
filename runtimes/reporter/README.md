@@ -82,4 +82,6 @@ make docker-build-reporter
 ```
 
 Reporter injection into arbitrary workload images is intentionally deferred to
-issue #16.
+the control plane. The internal `--install-to PATH` mode atomically copies the
+running static executable into the shared injection volume; it is used by the
+trusted init container rather than by workload authors.

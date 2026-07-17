@@ -15,14 +15,32 @@ import (
 )
 
 const (
-	LabelRunName   = "kontext.dev/run"
-	LabelAgentName = "kontext.dev/agent"
+	LabelRunName              = "kontext.dev/run"
+	LabelAgentName            = "kontext.dev/agent"
+	RuntimeContainerName      = "runtime"
+	ReporterInitContainerName = "inject-reporter"
+	ReporterVolumeName        = "kontext-reporter-bin"
+	ReporterMountPath         = "/kontext/bin"
+	ReporterBinaryName        = "kontext-reporter"
+	ReporterBinaryPath        = ReporterMountPath + "/" + ReporterBinaryName
+	reporterImageBinaryPath   = "/kontext-reporter"
+	reporterInstallFlag       = "--install-to"
 )
 
 var invalidNameChars = regexp.MustCompile(`[^a-z0-9-]+`)
 
+type Config struct {
+	ReporterImage string
+}
+
 // BuildPod constructs a Pod for the given AgentRun.
 func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
+	pod, _ := BuildPodWithConfig(run, Config{})
+	return pod
+}
+
+// BuildPodWithConfig constructs a Pod with operator-managed runtime integrations.
+func BuildPodWithConfig(run *kontextv1alpha1.AgentRun, config Config) (*corev1.Pod, error) {
 	podName := PodNameForRun(run.Name)
 	labels := map[string]string{
 		"app.kubernetes.io/name":      "kontext-agentrun",
@@ -37,7 +55,7 @@ func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
 	volumes, volumeMounts := buildKnowledgeVolumes(run)
 
 	container := corev1.Container{
-		Name:            "runtime",
+		Name:            RuntimeContainerName,
 		Image:           run.Spec.Runtime.Image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Env:             env,
@@ -60,6 +78,15 @@ func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
 		container.Args = util.CloneSlice(run.Spec.Runtime.Args)
 	}
 
+	var initContainers []corev1.Container
+	if run.Spec.Runtime.Result != nil {
+		var err error
+		container, initContainers, volumes, err = injectReporter(run, config, container, volumes)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -67,9 +94,10 @@ func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
 			Labels:    labels,
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
-			Containers:    []corev1.Container{container},
-			Volumes:       volumes,
+			RestartPolicy:  corev1.RestartPolicyNever,
+			InitContainers: initContainers,
+			Containers:     []corev1.Container{container},
+			Volumes:        volumes,
 		},
 	}
 
@@ -77,7 +105,88 @@ func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
 		pod.Spec.ServiceAccountName = run.Spec.ServiceAccountName
 	}
 
-	return pod
+	return pod, nil
+}
+
+func injectReporter(
+	run *kontextv1alpha1.AgentRun,
+	config Config,
+	container corev1.Container,
+	volumes []corev1.Volume,
+) (corev1.Container, []corev1.Container, []corev1.Volume, error) {
+	result := run.Spec.Runtime.Result
+	if result.Source != kontextv1alpha1.ResultSourceStdout {
+		return container, nil, volumes, fmt.Errorf("unsupported runtime result source %q", result.Source)
+	}
+	if len(run.Spec.Runtime.Command) == 0 {
+		return container, nil, volumes, fmt.Errorf("runtime command is required for stdout result capture")
+	}
+	if strings.TrimSpace(run.Spec.Runtime.Command[0]) == "" {
+		return container, nil, volumes, fmt.Errorf("runtime command executable cannot be empty")
+	}
+	if strings.TrimSpace(config.ReporterImage) == "" {
+		return container, nil, volumes, fmt.Errorf("reporter image is not configured")
+	}
+
+	format, err := reporterFormat(result.Format)
+	if err != nil {
+		return container, nil, volumes, err
+	}
+	childCommand := append(util.CloneSlice(run.Spec.Runtime.Command), run.Spec.Runtime.Args...)
+	container.Command = append(
+		[]string{ReporterBinaryPath, "--format", format, "--"},
+		childCommand...,
+	)
+	container.Args = nil
+	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+		Name:      ReporterVolumeName,
+		MountPath: ReporterBinaryPath,
+		SubPath:   ReporterBinaryName,
+		ReadOnly:  true,
+	})
+
+	volumes = append(volumes, corev1.Volume{
+		Name: ReporterVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+
+	runAsRoot := int64(0)
+	falseValue := false
+	trueValue := true
+	initContainer := corev1.Container{
+		Name:            ReporterInitContainerName,
+		Image:           config.ReporterImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{reporterImageBinaryPath},
+		Args:            []string{reporterInstallFlag, ReporterBinaryPath},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:                &runAsRoot,
+			RunAsNonRoot:             &falseValue,
+			AllowPrivilegeEscalation: &falseValue,
+			ReadOnlyRootFilesystem:   &trueValue,
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: ReporterVolumeName, MountPath: ReporterMountPath},
+		},
+	}
+
+	return container, []corev1.Container{initContainer}, volumes, nil
+}
+
+func reporterFormat(format kontextv1alpha1.ResultFormat) (string, error) {
+	switch format {
+	case kontextv1alpha1.ResultFormatLastLine:
+		return "last-line", nil
+	case kontextv1alpha1.ResultFormatKontextEnvelope:
+		return "kontext-envelope", nil
+	default:
+		return "", fmt.Errorf("unsupported runtime result format %q", format)
+	}
 }
 
 func buildEnv(run *kontextv1alpha1.AgentRun) []corev1.EnvVar {

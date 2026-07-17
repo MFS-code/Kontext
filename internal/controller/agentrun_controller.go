@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,7 +22,8 @@ import (
 // AgentRunReconciler reconciles an AgentRun object.
 type AgentRunReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme        *runtime.Scheme
+	ReporterImage string
 }
 
 // +kubebuilder:rbac:groups=kontext.dev,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
@@ -80,7 +82,12 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 		})
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod, err := podbuilder.BuildPodWithConfig(run, podbuilder.Config{
+		ReporterImage: r.ReporterImage,
+	})
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("build agent run pod: %w", err)
+	}
 	if err := controllerutil.SetControllerReference(run, pod, r.Scheme); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -111,7 +118,10 @@ func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontex
 			next.Usage = observation.Usage
 		}
 		if next.StartTime == nil && observation.Phase == kontextv1alpha1.AgentRunPhaseRunning {
-			next.StartTime = nowPtr()
+			next.StartTime = runtimeContainerStartedAt(pod)
+			if next.StartTime == nil {
+				next.StartTime = nowPtr()
+			}
 		}
 		if status.IsTerminalPhase(observation.Phase) && next.CompletionTime == nil {
 			next.CompletionTime = nowPtr()
@@ -149,14 +159,9 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 	}
 
 	limit := wallclock.Duration
-	startedAt := run.Status.StartTime
+	startedAt := runtimeContainerStartedAt(pod)
 	if startedAt == nil {
-		for _, cs := range pod.Status.ContainerStatuses {
-			if cs.State.Running != nil {
-				startedAt = &cs.State.Running.StartedAt
-				break
-			}
-		}
+		startedAt = run.Status.StartTime
 	}
 	if startedAt == nil {
 		return ctrl.Result{}, false, nil
@@ -176,9 +181,8 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 		next.Phase = kontextv1alpha1.AgentRunPhaseBudgetExceeded
 		next.PodName = pod.Name
 		next.Message = fmt.Sprintf("Wallclock budget exceeded after %s.", limit)
-		if next.StartTime == nil {
-			next.StartTime = run.Status.StartTime
-		}
+		recordedStart := *startedAt
+		next.StartTime = &recordedStart
 		next.CompletionTime = nowPtr()
 		next.Conditions = conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseBudgetExceeded, next.Conditions)
 	})
@@ -186,6 +190,18 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 		return ctrl.Result{}, false, err
 	}
 	return ctrl.Result{}, true, nil
+}
+
+func runtimeContainerStartedAt(pod *corev1.Pod) *metav1.Time {
+	for index := range pod.Status.ContainerStatuses {
+		containerStatus := &pod.Status.ContainerStatuses[index]
+		if containerStatus.Name == podbuilder.RuntimeContainerName &&
+			containerStatus.State.Running != nil {
+			startedAt := containerStatus.State.Running.StartedAt
+			return &startedAt
+		}
+	}
+	return nil
 }
 
 func (r *AgentRunReconciler) patchRunStatus(ctx context.Context, run *kontextv1alpha1.AgentRun, mutate func(*kontextv1alpha1.AgentRunStatus)) (ctrl.Result, error) {

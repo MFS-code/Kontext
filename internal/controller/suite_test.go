@@ -61,8 +61,9 @@ func TestMain(m *testing.M) {
 
 func newAgentRunReconciler() *controller.AgentRunReconciler {
 	return &controller.AgentRunReconciler{
-		Client: k8sClient,
-		Scheme: scheme,
+		Client:        k8sClient,
+		Scheme:        scheme,
+		ReporterImage: "kontext-reporter:dev",
 	}
 }
 

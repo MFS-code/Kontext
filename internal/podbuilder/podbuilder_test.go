@@ -333,6 +333,165 @@ func TestBuildPodAppliesRuntimeCommandArgsAndServiceAccount(t *testing.T) {
 	if len(container.Args) != 2 || container.Args[0] != "--verbose" {
 		t.Fatalf("unexpected args: %#v", container.Args)
 	}
+	if len(pod.Spec.InitContainers) != 0 {
+		t.Fatalf("native runtime must not inject reporter init containers")
+	}
+}
+
+func TestBuildPodInjectsReporterForStdoutCapture(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "stdout-run", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "echo",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:   "example/agent:v1",
+				Command: []string{"python", "-m", "agent"},
+				Args:    []string{"--once"},
+				Result: &kontextv1alpha1.RuntimeResultSpec{
+					Source: kontextv1alpha1.ResultSourceStdout,
+					Format: kontextv1alpha1.ResultFormatLastLine,
+				},
+			},
+		},
+	}
+
+	pod, err := podbuilder.BuildPodWithConfig(run, podbuilder.Config{
+		ReporterImage: "kontext-reporter:dev",
+	})
+	if err != nil {
+		t.Fatalf("build pod: %v", err)
+	}
+	if len(pod.Spec.InitContainers) != 1 {
+		t.Fatalf("expected one reporter init container, got %d", len(pod.Spec.InitContainers))
+	}
+	initContainer := pod.Spec.InitContainers[0]
+	if initContainer.Name != podbuilder.ReporterInitContainerName ||
+		initContainer.Image != "kontext-reporter:dev" {
+		t.Fatalf("unexpected init container %#v", initContainer)
+	}
+	if len(initContainer.Command) != 1 || initContainer.Command[0] != "/kontext-reporter" {
+		t.Fatalf("unexpected init command %#v", initContainer.Command)
+	}
+	if len(initContainer.Args) != 2 || initContainer.Args[1] != podbuilder.ReporterBinaryPath {
+		t.Fatalf("unexpected init args %#v", initContainer.Args)
+	}
+	if initContainer.SecurityContext == nil || initContainer.SecurityContext.RunAsUser == nil ||
+		*initContainer.SecurityContext.RunAsUser != 0 ||
+		initContainer.SecurityContext.AllowPrivilegeEscalation == nil ||
+		*initContainer.SecurityContext.AllowPrivilegeEscalation {
+		t.Fatalf("expected hardened root init container, got %#v", initContainer.SecurityContext)
+	}
+
+	container := pod.Spec.Containers[0]
+	if container.Name != podbuilder.RuntimeContainerName || container.Image != "example/agent:v1" {
+		t.Fatalf("workload container identity changed: %#v", container)
+	}
+	expectedCommand := []string{
+		podbuilder.ReporterBinaryPath,
+		"--format",
+		"last-line",
+		"--",
+		"python",
+		"-m",
+		"agent",
+		"--once",
+	}
+	if strings.Join(container.Command, "\x00") != strings.Join(expectedCommand, "\x00") {
+		t.Fatalf("unexpected wrapped command %#v", container.Command)
+	}
+	if len(container.Args) != 0 {
+		t.Fatalf("expected child args folded into reporter command, got %#v", container.Args)
+	}
+	if len(container.VolumeMounts) != 1 ||
+		container.VolumeMounts[0].Name != podbuilder.ReporterVolumeName ||
+		container.VolumeMounts[0].MountPath != podbuilder.ReporterBinaryPath ||
+		container.VolumeMounts[0].SubPath != podbuilder.ReporterBinaryName ||
+		!container.VolumeMounts[0].ReadOnly {
+		t.Fatalf("unexpected runtime reporter mount %#v", container.VolumeMounts)
+	}
+	if len(pod.Spec.Volumes) != 1 || pod.Spec.Volumes[0].EmptyDir == nil {
+		t.Fatalf("expected reporter emptyDir, got %#v", pod.Spec.Volumes)
+	}
+}
+
+func TestBuildPodMapsKontextEnvelopeFormat(t *testing.T) {
+	run := stdoutCaptureRun(kontextv1alpha1.ResultFormatKontextEnvelope)
+	pod, err := podbuilder.BuildPodWithConfig(run, podbuilder.Config{
+		ReporterImage: "kontext-reporter:dev",
+	})
+	if err != nil {
+		t.Fatalf("build pod: %v", err)
+	}
+	if got := pod.Spec.Containers[0].Command[2]; got != "kontext-envelope" {
+		t.Fatalf("unexpected reporter format %q", got)
+	}
+}
+
+func TestBuildPodRejectsInvalidReporterConfiguration(t *testing.T) {
+	tests := []struct {
+		name          string
+		run           *kontextv1alpha1.AgentRun
+		reporterImage string
+	}{
+		{
+			name:          "missing reporter image",
+			run:           stdoutCaptureRun(kontextv1alpha1.ResultFormatLastLine),
+			reporterImage: "",
+		},
+		{
+			name: "missing command",
+			run: func() *kontextv1alpha1.AgentRun {
+				run := stdoutCaptureRun(kontextv1alpha1.ResultFormatLastLine)
+				run.Spec.Runtime.Command = nil
+				return run
+			}(),
+			reporterImage: "kontext-reporter:dev",
+		},
+		{
+			name: "empty command executable",
+			run: func() *kontextv1alpha1.AgentRun {
+				run := stdoutCaptureRun(kontextv1alpha1.ResultFormatLastLine)
+				run.Spec.Runtime.Command = []string{""}
+				return run
+			}(),
+			reporterImage: "kontext-reporter:dev",
+		},
+		{
+			name:          "unsupported format",
+			run:           stdoutCaptureRun(kontextv1alpha1.ResultFormat("Unknown")),
+			reporterImage: "kontext-reporter:dev",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := podbuilder.BuildPodWithConfig(test.run, podbuilder.Config{
+				ReporterImage: test.reporterImage,
+			}); err == nil {
+				t.Fatalf("expected reporter configuration error")
+			}
+		})
+	}
+}
+
+func stdoutCaptureRun(format kontextv1alpha1.ResultFormat) *kontextv1alpha1.AgentRun {
+	return &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "stdout-run", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "echo",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:   "example/agent:v1",
+				Command: []string{"agent"},
+				Result: &kontextv1alpha1.RuntimeResultSpec{
+					Source: kontextv1alpha1.ResultSourceStdout,
+					Format: format,
+				},
+			},
+		},
+	}
 }
 
 func TestPodNameForRunEmptyFallsBackToRun(t *testing.T) {
