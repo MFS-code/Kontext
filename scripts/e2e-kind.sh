@@ -158,6 +158,9 @@ if [[ "${reference_result}" != "Fake provider completed goal: Explain the Kontex
   echo "unexpected reference result: ${reference_result}" >&2
   exit 1
 fi
+# The fake provider reports word counts: input = words in the goal string from
+# reference-fake-run.yaml (8), output = words in "Fake provider completed
+# goal: <goal>" (12). Adjust both if the example goal changes.
 if [[ "${reference_input_tokens}" != "8" || "${reference_output_tokens}" != "12" ]]; then
   echo "unexpected reference usage: input=${reference_input_tokens} output=${reference_output_tokens}" >&2
   exit 1

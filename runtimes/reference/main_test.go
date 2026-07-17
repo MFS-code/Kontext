@@ -71,11 +71,11 @@ func TestRunEmitsFailureEnvelopeForInvalidConfiguration(t *testing.T) {
 func resultLine(t *testing.T, output string) resultv1alpha1.Envelope {
 	t.Helper()
 	for _, line := range strings.Split(output, "\n") {
-		if !strings.HasPrefix(line, resultv1alpha1.EnvelopeLinePrefix+" ") {
+		payload, found := resultv1alpha1.ExtractEnvelopePayload([]byte(line))
+		if !found {
 			continue
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, resultv1alpha1.EnvelopeLinePrefix))
-		parsed, err := resultv1alpha1.Parse(payload)
+		parsed, err := resultv1alpha1.Parse(string(payload))
 		if err != nil {
 			t.Fatalf("parse result line: %v", err)
 		}
