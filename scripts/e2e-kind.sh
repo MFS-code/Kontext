@@ -51,6 +51,7 @@ kubectl delete agentrun \
   stdout-envelope \
   stdout-failure \
   stdout-signal \
+  reference-fake \
   --ignore-not-found=true \
   --wait=true
 
@@ -143,6 +144,26 @@ wait_for_run_phase stdout-signal Succeeded
 signal_result="$(kubectl get agentrun stdout-signal -o jsonpath='{.status.result}')"
 if [[ "${signal_result}" != "signal reached child" ]]; then
   echo "SIGTERM did not reach child; result=${signal_result}" >&2
+  exit 1
+fi
+
+echo "==> verifying model-agnostic reference runtime"
+kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/reference-fake-run.yaml"
+wait_for_run_phase reference-fake Succeeded
+reference_result="$(kubectl get agentrun reference-fake -o jsonpath='{.status.result}')"
+reference_input_tokens="$(kubectl get agentrun reference-fake -o jsonpath='{.status.usage.inputTokens}')"
+reference_output_tokens="$(kubectl get agentrun reference-fake -o jsonpath='{.status.usage.outputTokens}')"
+reference_logs="$(kubectl logs run-reference-fake -c runtime)"
+if [[ "${reference_result}" != "Fake provider completed goal: Explain the Kontext runtime contract in one sentence." ]]; then
+  echo "unexpected reference result: ${reference_result}" >&2
+  exit 1
+fi
+if [[ "${reference_input_tokens}" != "8" || "${reference_output_tokens}" != "12" ]]; then
+  echo "unexpected reference usage: input=${reference_input_tokens} output=${reference_output_tokens}" >&2
+  exit 1
+fi
+if [[ "${reference_logs}" != *'"apiVersion":"kontext.dev/event/v1alpha1"'* ]]; then
+  echo "reference runtime did not emit versioned JSONL events" >&2
   exit 1
 fi
 

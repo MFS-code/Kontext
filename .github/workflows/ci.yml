@@ -46,9 +46,8 @@ jobs:
       - name: Scan for known Go vulnerabilities
         run: make vulncheck
 
-  # These images are not loaded into kind for PR e2e (keyless echo path only).
-  # Build them here so Dockerfile breakage still fails CI without pretending
-  # they are part of the kind install surface.
+  # Build optional runtime images independently so Dockerfile breakage is
+  # visible even when a specific image is not exercised by every kind scenario.
   image-smoke:
     name: Image smoke
     runs-on: ubuntu-latest
@@ -56,6 +55,7 @@ jobs:
     env:
       KONTEXT_ANTHROPIC_IMAGE: kontext-runtime-anthropic:dev
       KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
+      KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -73,6 +73,17 @@ jobs:
           tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
           cache-from: type=gha,scope=reporter
           cache-to: type=gha,mode=max,scope=reporter
+
+      - name: Build model-agnostic reference runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runtimes/reference/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
+          cache-from: type=gha,scope=reference
+          cache-to: type=gha,mode=max,scope=reference
 
       - name: Build Anthropic reference runtime image
         uses: docker/build-push-action@v6
@@ -96,6 +107,7 @@ jobs:
       KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
       KONTEXT_ECHO_IMAGE: kontext-echo:dev
       KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
+      KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
       KONTEXT_STDOUT_FIXTURE_IMAGE: kontext-stdout-fixture:dev
       KONTEXT_DIAG_DIR: ${{ github.workspace }}/.ci-diagnostics
     steps:
@@ -135,6 +147,17 @@ jobs:
           tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
           cache-from: type=gha,scope=reporter
           cache-to: type=gha,mode=max,scope=reporter
+
+      - name: Build model-agnostic reference runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runtimes/reference/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
+          cache-from: type=gha,scope=reference
+          cache-to: type=gha,mode=max,scope=reference
 
       - name: Build stdout-capture fixture image
         uses: docker/build-push-action@v6

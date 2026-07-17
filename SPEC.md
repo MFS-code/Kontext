@@ -267,6 +267,30 @@ otherwise empty shared volume; it drops capabilities, disables privilege
 escalation, and uses a read-only root filesystem. The workload container's own
 user and security context remain unchanged.
 
+### Maintained reference runtime
+
+`runtimes/reference` is the optional maintained Go runtime. It owns a small
+provider-neutral completion loop behind a normalized provider interface; it is
+not an agent framework. The runtime image bundles the reporter as PID 1 and
+emits its final versioned envelope through the `KONTEXT_RESULT:` stream
+contract.
+
+The initial keyless `fake` provider is deterministic and exercises the same
+configuration, conversation, event, result, cancellation, and failure paths
+that real HTTP transports use. `KONTEXT_MODEL` remains opaque and is never
+aliased or rewritten.
+
+Runtime wallclock cancellation is enabled only when
+`KONTEXT_BUDGET_WALLCLOCK` is present. Omission means no runtime deadline; the
+runtime does not invent a five-minute default. Declared tools are recorded in
+lifecycle events but are not exposed to the provider or executed until the
+bounded tool loop is implemented.
+
+The reference runtime emits versioned JSONL lifecycle, usage, output, and error
+events to stdout. It retains conversation state only in memory for one run and
+does not provide retries, planning, memory, retrieval, subagents, or background
+orchestration.
+
 ### Mode expectations for the image
 
 - **Task / Scheduled run image:** does its work, writes result, exits. Pod `restartPolicy: Never`.

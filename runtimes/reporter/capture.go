@@ -2,9 +2,9 @@ package main
 
 import (
 	"bytes"
-)
 
-const KontextEnvelopePrefix = "KONTEXT_RESULT:"
+	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
+)
 
 type CapturedResult struct {
 	Data          []byte
@@ -89,11 +89,9 @@ func (capture *Capture) completeLine() {
 				OriginalBytes: capture.currentTotal,
 			}
 		case CaptureFormatKontextEnvelope:
-			trimmed := bytes.TrimSpace(line)
-			if bytes.HasPrefix(trimmed, []byte(KontextEnvelopePrefix)) {
-				candidate := bytes.TrimSpace(trimmed[len(KontextEnvelopePrefix):])
+			if payload, found := resultv1alpha1.ExtractEnvelopePayload(line); found {
 				capture.candidate = CapturedResult{
-					Data:          append([]byte(nil), candidate...),
+					Data:          append([]byte(nil), payload...),
 					Found:         true,
 					Truncated:     capture.currentTruncated,
 					OriginalBytes: capture.currentTotal,

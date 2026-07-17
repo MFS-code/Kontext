@@ -73,6 +73,7 @@ kubectl get agentruns -w
 | Image | Purpose |
 |---|---|
 | [`runtimes/echo/`](runtimes/echo) | Keyless test runtime. Exercises the full contract (stdout thoughts, termination-log result, service heartbeat) without any API key. |
+| [`runtimes/reference/`](runtimes/reference) | Maintained model-agnostic Go runtime. Issue #17 provides a deterministic fake provider; real HTTP transports follow separately. |
 | [`runtimes/python-anthropic/`](runtimes/python-anthropic) | Real runtime backed by the Anthropic Messages API. Needs an `ANTHROPIC_API_KEY` secret via `spec.secretRef`. |
 | [`runtimes/reporter/`](runtimes/reporter) | Reusable PID 1 supervisor. Preserves child logs and process semantics while producing the versioned result envelope. |
 
@@ -116,6 +117,7 @@ make test              # unit + envtest reconciler tests
 make vulncheck         # scan reachable Go code for known vulnerabilities
 make docker-build-all  # operator + all maintained runtime images
 make docker-build-reporter  # build the reusable result reporter image
+make docker-build-reference # build the model-agnostic reference runtime
 make kind-install      # build operator + echo, load into kind, install controller
 make build             # compile operator binary to bin/manager
 make run               # run the controller locally against your kubeconfig
