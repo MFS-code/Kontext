@@ -103,7 +103,8 @@ func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontex
 		next.Phase = observation.Phase
 		next.PodName = podName
 		next.Message = observation.Message
-		if observation.Result != "" {
+		if observation.Output != nil {
+			next.Output = observation.Output
 			next.Result = observation.Result
 		}
 		if observation.Usage != nil {

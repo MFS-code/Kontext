@@ -97,17 +97,24 @@ When created from an `Agent`, the controller snapshots/resolves these fields so 
 ### `status`
 
 
-| Field            | Type                                                           | Notes                        |
-| ---------------- | -------------------------------------------------------------- | ---------------------------- |
-| `phase`          | enum `Pending`|`Running`|`Succeeded`|`Failed`|`BudgetExceeded` |                              |
-| `podName`        | string                                                         |                              |
-| `result`         | string                                                         | Final answer/output.         |
-| `usage.tokens`   | int                                                            |                              |
-| `usage.dollars`  | number                                                         |                              |
-| `startTime`      | time                                                           |                              |
-| `completionTime` | time                                                           |                              |
-| `message`        | string                                                         | Human-readable status/error. |
-| `conditions`     | []Condition                                                    |                              |
+| Field                | Type                                                           | Notes                                                       |
+| -------------------- | -------------------------------------------------------------- | ----------------------------------------------------------- |
+| `phase`              | enum `Pending`|`Running`|`Succeeded`|`Failed`|`BudgetExceeded` |                                                             |
+| `podName`            | string                                                         |                                                             |
+| `output.mediaType`   | string                                                         | Media type for the structured terminal output.              |
+| `output.value`       | arbitrary JSON                                                 | Authoritative structured output.                            |
+| `result`             | string                                                         | Backward-compatible deterministic projection of `output`.   |
+| `usage.tokens`       | int                                                            | Total tokens when measured.                                 |
+| `usage.inputTokens`  | int                                                            | Input tokens when measured.                                 |
+| `usage.outputTokens` | int                                                            | Output tokens when measured.                                |
+| `usage.dollars`      | number                                                         | Authoritative reported cost when measured.                  |
+| `startTime`          | time                                                           |                                                             |
+| `completionTime`     | time                                                           |                                                             |
+| `message`            | string                                                         | Human-readable status/error.                                |
+| `conditions`         | []Condition                                                    |                                                             |
+
+Usage fields are optional independently. A missing field means the runtime or
+provider did not measure it; a present zero means it measured zero.
 
 
 ### Ownership
@@ -128,19 +135,87 @@ The controller injects, on the Pod:
 - Optionally a mounted `/kontext/input.json` with the same data (richer/structured payloads).
 - Provider credentials mounted from `secretRef` as env (e.g. `ANTHROPIC_API_KEY`).
 
-### Output — thoughts
+### Output — logs and execution events
 
-- Write reasoning/progress to **stdout**, line-buffered. This is the `kubectl logs -f` magic moment.
+- Write operational progress to **stdout** and diagnostics to **stderr**,
+  line-buffered. Both remain ordinary container logs observable with
+  `kubectl logs`.
+- Runtimes that expose detailed execution events write one JSON object per line.
+  Event objects use `apiVersion: kontext.dev/event/v1alpha1`, an RFC3339
+  `timestamp`, a `type` (`lifecycle`, `output`, `usage`, `tool`, or `error`),
+  and type-specific `data`. Events may include tool calls, bounded tool output,
+  timing, provider usage, errors, and final responses.
+- Do not emit private chain-of-thought. Operational summaries and explicit
+  model/tool outputs are sufficient.
 
 ### Output — result
 
-- On completion, write JSON to `/dev/termination-log` (and optionally `/kontext/result.json`):
+- On completion, write a compact versioned envelope to
+  `/dev/termination-log` (and optionally `/kontext/result.json`):
+
+```json
+{
+  "apiVersion": "kontext.dev/result/v1alpha1",
+  "outcome": "Succeeded",
+  "output": {
+    "mediaType": "application/json",
+    "value": { "answer": "final output" }
+  },
+  "usage": {
+    "inputTokens": 1000,
+    "outputTokens": 234,
+    "totalTokens": 1234
+  },
+  "timing": {
+    "durationMillis": 1750
+  },
+  "execution": {
+    "provider": "anthropic",
+    "model": "provider-defined-model-id",
+    "requestId": "request-id"
+  }
+}
+```
+
+The envelope fields are:
+
+- `apiVersion` — exactly `kontext.dev/result/v1alpha1`.
+- `outcome` — `Succeeded` or `Failed`. A failed outcome includes
+  `error.message` and may include a stable `error.code` and `error.retryable`.
+- `output` — an optional media type plus any valid JSON value.
+- `usage` — optional typed metrics. Missing values are never inferred as zero.
+- `timing` — optional start/completion timestamps and measured durations.
+- `execution` — optional non-secret provider, model, request, turn, and tool
+  metadata.
+- `artifacts` — optional references to data stored outside Kubernetes status.
+- `extensions` — optional provider/runtime-specific JSON under namespaced keys
+  such as `anthropic.com/request`.
+- `truncation` — explicit metadata added when fields were removed to fit the
+  Kubernetes termination-message limit.
+
+The termination message is a terminal summary, not a transcript. Producers
+must compact it below 4096 bytes while preserving valid JSON and setting
+`truncation`. Full execution events remain in the JSONL log stream.
+
+`status.output` preserves `output`. The compatibility field `status.result` is
+projected deterministically: JSON strings with a `text/*` media type become
+their unquoted value; every other JSON value becomes compact JSON text; absent
+output becomes an empty string.
+
+The controller continues to accept the legacy payload during the v1alpha1
+transition:
 
 ```json
 { "result": "<final output>", "tokensUsed": 1234, "dollarsUsed": 0.0 }
 ```
 
-- Exit `0` = success, non-zero = failure. The controller reconciles the termination message into `AgentRun.status`.
+Legacy text becomes `text/plain` structured output. Legacy usage fields are
+recorded only when they are present in the payload.
+
+Exit `0` plus a successful envelope means success. A non-zero process exit
+always fails the run. A failed envelope also fails the run even if the process
+exits zero. Malformed or partially written JSON is an actionable failure, not
+a successful plain-text result.
 
 ### Mode expectations for the image
 

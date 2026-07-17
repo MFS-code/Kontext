@@ -1,17 +1,21 @@
 package status
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
 )
 
-// TerminationPayload is the JSON written to /dev/termination-log by runtime images.
+// TerminationPayload is the normalized terminal summary reported by a runtime.
 type TerminationPayload struct {
-	Result      string  `json:"result"`
-	TokensUsed  int32   `json:"tokensUsed"`
-	DollarsUsed float64 `json:"dollarsUsed"`
-	Error       string  `json:"error"`
+	Result   string
+	Output   *resultv1alpha1.Output
+	Usage    *resultv1alpha1.Usage
+	Error    string
+	Outcome  resultv1alpha1.Outcome
+	Envelope *resultv1alpha1.Envelope
+	Legacy   bool
 }
 
 // ParseTerminationMessage decodes a Pod termination message into a payload.
@@ -24,16 +28,20 @@ type TerminationPayload struct {
 // surface the failure instead of silently accepting a broken payload.
 func ParseTerminationMessage(message string) (TerminationPayload, error) {
 	message = strings.TrimSpace(message)
-	if message == "" {
-		return TerminationPayload{}, nil
+	parsed, err := resultv1alpha1.Parse(message)
+	if err != nil {
+		return TerminationPayload{Result: message}, fmt.Errorf("parse termination payload: %w", err)
 	}
-
-	var payload TerminationPayload
-	if err := json.Unmarshal([]byte(message), &payload); err != nil {
-		if strings.HasPrefix(message, "{") {
-			return TerminationPayload{Result: message}, fmt.Errorf("decode termination payload: %w", err)
-		}
-		return TerminationPayload{Result: message}, nil
+	payload := TerminationPayload{
+		Result:   resultv1alpha1.ProjectLegacyResult(parsed.Output),
+		Output:   parsed.Output,
+		Usage:    parsed.Usage,
+		Outcome:  parsed.Outcome,
+		Envelope: parsed.Envelope,
+		Legacy:   parsed.Legacy,
+	}
+	if parsed.Error != nil {
+		payload.Error = parsed.Error.Message
 	}
 	return payload, nil
 }
