@@ -3,6 +3,7 @@ IMG ?= kontext-operator:dev
 ECHO_IMG ?= kontext-echo:dev
 ANTHROPIC_IMG ?= kontext-runtime-anthropic:dev
 REPORTER_IMG ?= kontext-reporter:dev
+REFERENCE_IMG ?= kontext-reference:dev
 STDOUT_FIXTURE_IMG ?= kontext-stdout-fixture:dev
 
 # Get the currently used golang version
@@ -107,15 +108,19 @@ docker-build-anthropic: ## Build docker image for the Anthropic reference runtim
 docker-build-reporter: ## Build the reusable result reporter image.
 	docker build -f runtimes/reporter/Dockerfile -t ${REPORTER_IMG} .
 
+.PHONY: docker-build-reference
+docker-build-reference: ## Build the model-agnostic reference runtime image.
+	docker build -f runtimes/reference/Dockerfile -t ${REFERENCE_IMG} .
+
 .PHONY: docker-build-stdout-fixture
 docker-build-stdout-fixture: ## Build the generic image used by stdout-capture e2e.
 	docker build -t ${STDOUT_FIXTURE_IMG} runtimes/stdout-fixture
 
 .PHONY: docker-build-all
-docker-build-all: docker-build docker-build-echo docker-build-anthropic docker-build-reporter ## Build operator and runtime images.
+docker-build-all: docker-build docker-build-echo docker-build-anthropic docker-build-reporter docker-build-reference ## Build operator and runtime images.
 
 .PHONY: kind-install
-kind-install: docker-build docker-build-echo docker-build-reporter docker-build-stdout-fixture ## Build kind images and install the operator into kind.
+kind-install: docker-build docker-build-echo docker-build-reporter docker-build-reference docker-build-stdout-fixture ## Build kind images and install the operator into kind.
 	./scripts/install-go-kind.sh
 
 .PHONY: docker-push
