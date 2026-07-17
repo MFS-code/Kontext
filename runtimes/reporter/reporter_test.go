@@ -45,6 +45,28 @@ func TestEnvelopeFromLastLine(t *testing.T) {
 	if empty.Outcome != resultv1alpha1.OutcomeSucceeded || empty.Output != nil {
 		t.Fatalf("expected successful empty output, got %#v", empty)
 	}
+
+	truncated := envelopeFromCapture(
+		CaptureFormatLastLine,
+		CapturedResult{
+			Data:          []byte("partial"),
+			Found:         true,
+			Truncated:     true,
+			OriginalBytes: 8192,
+		},
+		0,
+	)
+	if truncated.Outcome != resultv1alpha1.OutcomeSucceeded {
+		t.Fatalf("expected successful truncated result, got %s", truncated.Outcome)
+	}
+	if truncated.Truncation == nil || !truncated.Truncation.OutputTruncated ||
+		truncated.Truncation.OriginalBytes != 8192 {
+		t.Fatalf("expected explicit truncation metadata, got %#v", truncated.Truncation)
+	}
+	if truncated.Output == nil || truncated.Output.MediaType != truncatedOutputMediaType ||
+		string(truncated.Output.Value) != truncatedOutputJSON {
+		t.Fatalf("unexpected truncated output %#v", truncated.Output)
+	}
 }
 
 func TestEnvelopeFromPrefixedCandidate(t *testing.T) {

@@ -7,9 +7,10 @@ import (
 const KontextEnvelopePrefix = "KONTEXT_RESULT:"
 
 type CapturedResult struct {
-	Data      []byte
-	Found     bool
-	Truncated bool
+	Data          []byte
+	Found         bool
+	Truncated     bool
+	OriginalBytes int
 }
 
 type Capture struct {
@@ -82,18 +83,20 @@ func (capture *Capture) completeLine() {
 		switch capture.format {
 		case CaptureFormatLastLine:
 			capture.lastLine = CapturedResult{
-				Data:      append([]byte(nil), line...),
-				Found:     true,
-				Truncated: capture.currentTruncated,
+				Data:          append([]byte(nil), line...),
+				Found:         true,
+				Truncated:     capture.currentTruncated,
+				OriginalBytes: capture.currentTotal,
 			}
 		case CaptureFormatKontextEnvelope:
 			trimmed := bytes.TrimSpace(line)
 			if bytes.HasPrefix(trimmed, []byte(KontextEnvelopePrefix)) {
 				candidate := bytes.TrimSpace(trimmed[len(KontextEnvelopePrefix):])
 				capture.candidate = CapturedResult{
-					Data:      append([]byte(nil), candidate...),
-					Found:     true,
-					Truncated: capture.currentTruncated,
+					Data:          append([]byte(nil), candidate...),
+					Found:         true,
+					Truncated:     capture.currentTruncated,
+					OriginalBytes: capture.currentTotal,
 				}
 			}
 		}

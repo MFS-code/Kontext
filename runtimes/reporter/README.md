@@ -30,7 +30,9 @@ entrypoint.
 
 The last non-empty stdout line becomes `text/plain` output. Empty stdout
 produces a successful envelope with no output. This mode is intentionally
-heuristic and cannot infer usage metrics.
+heuristic and cannot infer usage metrics. A line larger than the capture limit
+produces a successful envelope with an explicit truncated-output marker instead
+of silently returning partial text.
 
 ### `kontext-envelope`
 

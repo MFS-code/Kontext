@@ -51,6 +51,9 @@ func TestCaptureBoundsLongLines(t *testing.T) {
 	if len(result.Data) != 4096 {
 		t.Fatalf("expected 4096 retained bytes, got %d", len(result.Data))
 	}
+	if result.OriginalBytes != 8192 {
+		t.Fatalf("expected original length 8192, got %d", result.OriginalBytes)
+	}
 }
 
 func TestCaptureDoesNotTreatOrdinaryLogsAsEnvelope(t *testing.T) {

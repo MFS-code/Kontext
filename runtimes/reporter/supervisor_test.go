@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -124,6 +125,44 @@ func TestRunChildCleansUpRemainingProcessGroup(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("descendant process %d survived reporter cleanup", pid)
+}
+
+func TestWaitForStreamCopiesClosesPipesAfterCleanupFailure(t *testing.T) {
+	stdoutReader, stdoutWriter := io.Pipe()
+	stderrReader, stderrWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = stdoutWriter.Close()
+		_ = stderrWriter.Close()
+	})
+
+	var copies sync.WaitGroup
+	copies.Add(2)
+	go func() {
+		defer copies.Done()
+		_, _ = io.Copy(io.Discard, stdoutReader)
+	}()
+	go func() {
+		defer copies.Done()
+		_, _ = io.Copy(io.Discard, stderrReader)
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		waitForStreamCopies(
+			&copies,
+			stdoutReader,
+			stderrReader,
+			nil,
+			errors.New("reap timeout"),
+		)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("stream copies remained blocked after cleanup failure")
+	}
 }
 
 type notifyingBuffer struct {

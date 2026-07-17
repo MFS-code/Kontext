@@ -84,7 +84,7 @@ func runChild(
 
 	cleanupErr := cleanupProcessGroup(processGroupID)
 	reapErr := reapRemainingProcesses()
-	copies.Wait()
+	waitForStreamCopies(&copies, stdoutPipe, stderrPipe, cleanupErr, reapErr)
 	close(copyErrors)
 	copyErr := errors.Join(channelErrors(copyErrors)...)
 	result := ChildResult{ExitCode: exitCode(status)}
@@ -109,6 +109,25 @@ func runChild(
 	}
 
 	return result, nil
+}
+
+func waitForStreamCopies(
+	copies *sync.WaitGroup,
+	stdoutPipe io.Closer,
+	stderrPipe io.Closer,
+	cleanupErr error,
+	reapErr error,
+) {
+	if cleanupErr != nil || reapErr != nil {
+		// A descendant may still hold the write end of either pipe (for
+		// example while stuck in uninterruptible sleep). Close our readers so
+		// log-copy goroutines cannot block reporter shutdown indefinitely.
+		_ = stdoutPipe.Close()
+		_ = stderrPipe.Close()
+	}
+	copies.Wait()
+	_ = stdoutPipe.Close()
+	_ = stderrPipe.Close()
 }
 
 func copyChildStream(
