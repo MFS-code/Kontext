@@ -96,7 +96,9 @@ The command is explicit because Kubernetes cannot recover an image entrypoint
 after Kontext replaces it with the reporter. `LastLine` captures the final
 non-empty stdout line as text; `KontextEnvelope` accepts a
 `KONTEXT_RESULT:`-prefixed structured envelope. Logs remain ordinary
-`kubectl logs` output. If `result` is absent, the image runs unchanged.
+`kubectl logs` output. If `result` is absent, the image runs unchanged. Cluster
+installations must configure `KONTEXT_REPORTER_IMAGE`; `make kind-install`
+wires the locally built reporter automatically.
 
 ## Governance
 

@@ -31,7 +31,7 @@ spec:
             - /manager
           env:
             - name: KONTEXT_REPORTER_IMAGE
-              value: kontext-reporter:dev
+              value: ""
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

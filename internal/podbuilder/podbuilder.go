@@ -33,9 +33,17 @@ type Config struct {
 	ReporterImage string
 }
 
-// BuildPod constructs a Pod for the given AgentRun.
+// BuildPod constructs a Pod without optional operator-managed integrations.
+// Tests and native-runtime callers may use this helper; result capture requires
+// BuildPodWithConfig so the trusted reporter image is explicit.
 func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
-	pod, _ := BuildPodWithConfig(run, Config{})
+	if run.Spec.Runtime.Result != nil {
+		panic("BuildPod: runtime.result requires BuildPodWithConfig")
+	}
+	pod, err := BuildPodWithConfig(run, Config{})
+	if err != nil {
+		panic(fmt.Sprintf("BuildPod: %v", err))
+	}
 	return pod
 }
 

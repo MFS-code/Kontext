@@ -42,7 +42,7 @@ func main() {
 	flag.StringVar(
 		&reporterImage,
 		"reporter-image",
-		envOrDefault("KONTEXT_REPORTER_IMAGE", "kontext-reporter:dev"),
+		envOrDefault("KONTEXT_REPORTER_IMAGE", ""),
 		"Trusted reporter image used for optional stdout result capture.",
 	)
 	opts := zap.Options{Development: true}

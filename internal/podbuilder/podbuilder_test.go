@@ -429,6 +429,15 @@ func TestBuildPodMapsKontextEnvelopeFormat(t *testing.T) {
 	}
 }
 
+func TestBuildPodRequiresConfiguredBuilderForResultCapture(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatalf("expected BuildPod to reject result capture without operator config")
+		}
+	}()
+	podbuilder.BuildPod(stdoutCaptureRun(kontextv1alpha1.ResultFormatLastLine))
+}
+
 func TestBuildPodRejectsInvalidReporterConfiguration(t *testing.T) {
 	tests := []struct {
 		name          string
