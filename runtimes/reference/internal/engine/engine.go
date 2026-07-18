@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -53,8 +54,7 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 	if resolveTools == nil {
 		resolveTools = func(runtimeConfig config.Config) (ToolExecutor, error) {
 			return tools.New(tools.Config{
-				Allowed:          runtimeConfig.Tools,
-				MaxCapturedBytes: toolCaptureLimit(runtimeConfig),
+				Allowed: runtimeConfig.Tools,
 			})
 		}
 	}
@@ -245,6 +245,30 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 			)
 		}
 
+		if batchExceedsLimit(
+			runtimeConfig.MaxToolCalls,
+			int64(toolCalls),
+			int64(len(calls)),
+		) {
+			return runner.limitFailure(
+				"tool_call_limit_exceeded",
+				"maximum tool calls reached before final output",
+				totalUsage,
+				metadata(response.RequestID),
+			)
+		}
+		if limitReached(
+			runtimeConfig.MaxTotalToolOutputBytes,
+			totalToolOutputBytes,
+		) {
+			return runner.limitFailure(
+				"tool_output_limit_exceeded",
+				"total tool-output limit reached before final output",
+				totalUsage,
+				metadata(response.RequestID),
+			)
+		}
+
 		resultBlocks := make([]runtimeapi.ContentBlock, 0, len(calls))
 		for _, call := range calls {
 			if limitReached(runtimeConfig.MaxToolCalls, int64(toolCalls)) {
@@ -328,15 +352,16 @@ func terminalStopFailure(reason runtimeapi.StopReason) (string, string) {
 	}
 }
 
-func toolCaptureLimit(runtimeConfig config.Config) int64 {
-	if runtimeConfig.MaxToolResultBytes != nil {
-		return *runtimeConfig.MaxToolResultBytes
-	}
-	return 0
-}
-
 func limitReached(limit *int64, value int64) bool {
 	return limit != nil && value >= *limit
+}
+
+func batchExceedsLimit(limit *int64, consumed int64, requested int64) bool {
+	if limit == nil {
+		return false
+	}
+	remaining := *limit - consumed
+	return remaining < 0 || requested > remaining
 }
 
 func remainingTokenBudget(limit *int64, consumed int64) *int64 {
@@ -417,14 +442,46 @@ func applyToolOutputLimits(
 		maxBytes = 0
 	}
 	if int64(len(result.Content)) > maxBytes {
-		result.Content = truncateUTF8(result.Content, maxBytes)
+		result.Content = truncateToolContent(result.Content, maxBytes)
 		result.Truncated = true
-	}
-	if result.Truncated {
-		result.Content = markTruncated(result.Content, maxBytes)
 	}
 	*totalBytes += int64(len(result.Content))
 	return result
+}
+
+func truncateToolContent(value string, maxBytes int64) string {
+	if !json.Valid([]byte(value)) {
+		return truncateUTF8(value, maxBytes)
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+	if maxBytes == 1 {
+		return "0"
+	}
+
+	const emptyPartial = `{"partial":""}`
+	if maxBytes < int64(len(emptyPartial)) {
+		return "{}"
+	}
+
+	low := 0
+	high := len(value)
+	best := emptyPartial
+	for low <= high {
+		middle := low + (high-low)/2
+		prefix := truncateUTF8(value, int64(middle))
+		encoded, _ := json.Marshal(struct {
+			Partial string `json:"partial"`
+		}{Partial: prefix})
+		if int64(len(encoded)) <= maxBytes {
+			best = string(encoded)
+			low = middle + 1
+			continue
+		}
+		high = middle - 1
+	}
+	return best
 }
 
 func truncateUTF8(value string, maxBytes int64) string {
@@ -439,18 +496,6 @@ func truncateUTF8(value string, maxBytes int64) string {
 		end--
 	}
 	return value[:end]
-}
-
-func markTruncated(value string, maxBytes int64) string {
-	const marker = "\n[tool output truncated]"
-	if maxBytes <= 0 {
-		return ""
-	}
-	if int64(len(marker)) >= maxBytes {
-		return value
-	}
-	contentBytes := maxBytes - int64(len(marker))
-	return truncateUTF8(value, contentBytes) + marker
 }
 
 func (runner Runner) limitFailure(

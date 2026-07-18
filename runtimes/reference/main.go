@@ -60,15 +60,10 @@ func run(
 		Emitter: emitter,
 		Now:     now,
 		ResolveTools: func(runtimeConfig config.Config) (engine.ToolExecutor, error) {
-			maxCapturedBytes := int64(0)
-			if runtimeConfig.MaxToolResultBytes != nil {
-				maxCapturedBytes = *runtimeConfig.MaxToolResultBytes
-			}
 			return tools.New(tools.Config{
-				Allowed:          runtimeConfig.Tools,
-				MaxCapturedBytes: maxCapturedBytes,
-				Stdout:           stdout,
-				Stderr:           stderr,
+				Allowed: runtimeConfig.Tools,
+				Stdout:  stdout,
+				Stderr:  stderr,
 			})
 		},
 	}.Run(ctx, runtimeConfig)

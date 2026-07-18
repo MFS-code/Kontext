@@ -189,6 +189,15 @@ func (tool *kubernetesTool) Execute(
 	truncated := int64(len(body)) > tool.maxBytes
 	if truncated {
 		body = body[:tool.maxBytes]
+		body, err = json.Marshal(struct {
+			Partial string `json:"partial"`
+		}{Partial: string(body)})
+		if err != nil {
+			return outcome{}, &Error{
+				Code:    "kubernetes_response_failed",
+				Message: fmt.Sprintf("encode truncated Kubernetes response: %v", err),
+			}
+		}
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		code := "kubernetes_request_rejected"

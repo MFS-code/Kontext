@@ -19,8 +19,10 @@ const (
 )
 
 type Config struct {
-	Allowed          []string
-	KnowledgeRoot    string
+	Allowed       []string
+	KnowledgeRoot string
+	// MaxCapturedBytes overrides the fixed capture safety ceiling in tests.
+	// Runtime-configured provider-output limits are enforced by the engine.
 	MaxCapturedBytes int64
 	Stdout           io.Writer
 	Stderr           io.Writer

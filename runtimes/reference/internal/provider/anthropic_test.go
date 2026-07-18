@@ -323,9 +323,10 @@ func TestAnthropicSerializesToolsCallsAndResults(t *testing.T) {
 				{
 					Type: runtimeapi.ContentTypeToolResult,
 					ToolResult: &runtimeapi.ToolResult{
-						CallID:  "call-1",
-						Name:    "lookup",
-						Content: `{"status":"ok"}`,
+						CallID:    "call-1",
+						Name:      "lookup",
+						Content:   `{"partial":"{\"status\":"}`,
+						Truncated: true,
 					},
 				},
 			},
@@ -345,6 +346,19 @@ func TestAnthropicSerializesToolsCallsAndResults(t *testing.T) {
 		received.Messages[2].Content[0].Type != "tool_result" ||
 		received.Messages[2].Content[0].ToolUseID != "call-1" {
 		t.Fatalf("unexpected messages %#v", received.Messages)
+	}
+	var toolResult struct {
+		Content   string `json:"content"`
+		Truncated bool   `json:"truncated"`
+	}
+	if err := json.Unmarshal(
+		[]byte(received.Messages[2].Content[0].Content),
+		&toolResult,
+	); err != nil {
+		t.Fatalf("decode tool result: %v", err)
+	}
+	if !toolResult.Truncated || !json.Valid([]byte(toolResult.Content)) {
+		t.Fatalf("invalid truncated tool result %#v", toolResult)
 	}
 }
 

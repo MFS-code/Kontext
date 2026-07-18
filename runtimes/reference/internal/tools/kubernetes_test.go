@@ -141,8 +141,15 @@ func TestKubernetesReadReturnsRBACDenialToModel(t *testing.T) {
 	if !result.IsError ||
 		result.ErrorCode != "kubernetes_rbac_denied" ||
 		!result.Truncated ||
-		len(result.Content) != 8 {
+		!json.Valid([]byte(result.Content)) {
 		t.Fatalf("unexpected result %#v", result)
+	}
+	var bounded struct {
+		Partial string `json:"partial"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &bounded); err != nil ||
+		bounded.Partial != `{"messag` {
+		t.Fatalf("unexpected truncated response content=%q err=%v", result.Content, err)
 	}
 }
 

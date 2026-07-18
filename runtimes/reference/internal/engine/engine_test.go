@@ -308,8 +308,76 @@ func TestRunnerEnforcesTurnAndToolCallLimits(t *testing.T) {
 			result.Envelope.Error.Code != "tool_call_limit_exceeded" {
 			t.Fatalf("unexpected result %#v", result.Envelope.Error)
 		}
+		if len(executor.calls) != 0 {
+			t.Fatalf("oversized batch executed %d tools", len(executor.calls))
+		}
+	})
+
+	t.Run("tool call batch exactly fits remaining limit", func(t *testing.T) {
+		response := toolCallResponse("call-1")
+		response.Message.Content = append(
+			response.Message.Content,
+			runtimeapi.ContentBlock{
+				Type: runtimeapi.ContentTypeToolCall,
+				ToolCall: &runtimeapi.ToolCall{
+					ID:        "call-2",
+					Name:      "lookup",
+					Arguments: json.RawMessage(`{}`),
+				},
+			},
+		)
+		selectedProvider := &scriptedProvider{
+			responses: []runtimeapi.CompletionResponse{
+				response,
+				finalResponse("done"),
+			},
+		}
+		executor := lookupExecutor(runtimeapi.ToolResult{Content: "ok"})
+		runtimeConfig := baseConfig()
+		maxToolCalls := int64(2)
+		runtimeConfig.MaxToolCalls = &maxToolCalls
+		result := runnerWithTools(selectedProvider, executor).Run(
+			context.Background(),
+			runtimeConfig,
+		)
+		if result.ExitCode != 0 || len(executor.calls) != 2 {
+			t.Fatalf("exact-fit batch failed: result=%#v calls=%d", result, len(executor.calls))
+		}
+	})
+
+	t.Run("tool call batch exceeds remaining limit", func(t *testing.T) {
+		secondBatch := toolCallResponse("call-2")
+		secondBatch.Message.Content = append(
+			secondBatch.Message.Content,
+			runtimeapi.ContentBlock{
+				Type: runtimeapi.ContentTypeToolCall,
+				ToolCall: &runtimeapi.ToolCall{
+					ID:        "call-3",
+					Name:      "lookup",
+					Arguments: json.RawMessage(`{}`),
+				},
+			},
+		)
+		selectedProvider := &scriptedProvider{
+			responses: []runtimeapi.CompletionResponse{
+				toolCallResponse("call-1"),
+				secondBatch,
+			},
+		}
+		executor := lookupExecutor(runtimeapi.ToolResult{Content: "ok"})
+		runtimeConfig := baseConfig()
+		maxToolCalls := int64(2)
+		runtimeConfig.MaxToolCalls = &maxToolCalls
+		result := runnerWithTools(selectedProvider, executor).Run(
+			context.Background(),
+			runtimeConfig,
+		)
+		if result.Envelope.Error == nil ||
+			result.Envelope.Error.Code != "tool_call_limit_exceeded" {
+			t.Fatalf("unexpected result %#v", result.Envelope.Error)
+		}
 		if len(executor.calls) != 1 {
-			t.Fatalf("expected one executed tool, got %d", len(executor.calls))
+			t.Fatalf("oversized second batch changed call count to %d", len(executor.calls))
 		}
 	})
 }
@@ -356,6 +424,72 @@ func TestRunnerBoundsToolOutputAndReturnsToolErrors(t *testing.T) {
 			!results[0].Truncated ||
 			!results[1].Truncated {
 			t.Fatalf("unexpected bounded results %#v", results)
+		}
+	})
+
+	t.Run("tiny result limit keeps structured content valid", func(t *testing.T) {
+		selectedProvider := &scriptedProvider{
+			responses: []runtimeapi.CompletionResponse{
+				toolCallResponse("call-1"),
+				finalResponse("done"),
+			},
+		}
+		executor := lookupExecutor(runtimeapi.ToolResult{
+			Content: `{"status":"ok"}`,
+		})
+		runtimeConfig := baseConfig()
+		perResult := int64(1)
+		runtimeConfig.MaxToolResultBytes = &perResult
+		result := runnerWithTools(selectedProvider, executor).Run(
+			context.Background(),
+			runtimeConfig,
+		)
+		if result.ExitCode != 0 {
+			t.Fatalf("unexpected failure %#v", result.Envelope.Error)
+		}
+		results := runtimeapi.MessageToolResults(
+			selectedProvider.requests[1].Messages[len(selectedProvider.requests[1].Messages)-1],
+		)
+		if len(results) != 1 ||
+			results[0].Content != "0" ||
+			!json.Valid([]byte(results[0].Content)) ||
+			!results[0].Truncated {
+			t.Fatalf("unexpected tiny structured result %#v", results)
+		}
+	})
+
+	t.Run("structured shell result remains valid near boundary", func(t *testing.T) {
+		shellResult := `{"exitCode":0,"stdout":"123456","stderr":""}`
+		selectedProvider := &scriptedProvider{
+			responses: []runtimeapi.CompletionResponse{
+				toolCallResponse("call-1"),
+				finalResponse("done"),
+			},
+		}
+		executor := lookupExecutor(runtimeapi.ToolResult{Content: shellResult})
+		runtimeConfig := baseConfig()
+		perResult := int64(len(shellResult) - 1)
+		runtimeConfig.MaxToolResultBytes = &perResult
+		result := runnerWithTools(selectedProvider, executor).Run(
+			context.Background(),
+			runtimeConfig,
+		)
+		if result.ExitCode != 0 {
+			t.Fatalf("unexpected failure %#v", result.Envelope.Error)
+		}
+		results := runtimeapi.MessageToolResults(
+			selectedProvider.requests[1].Messages[len(selectedProvider.requests[1].Messages)-1],
+		)
+		if len(results) != 1 ||
+			!json.Valid([]byte(results[0].Content)) ||
+			int64(len(results[0].Content)) > perResult ||
+			!results[0].Truncated {
+			t.Fatalf("unexpected structured result %#v", results)
+		}
+		var bounded map[string]string
+		if err := json.Unmarshal([]byte(results[0].Content), &bounded); err != nil ||
+			bounded["partial"] == "" {
+			t.Fatalf("structured prefix was not preserved: content=%q err=%v", results[0].Content, err)
 		}
 	})
 

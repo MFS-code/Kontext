@@ -339,7 +339,7 @@ func TestOpenAISerializesToolsCallsAndResults(t *testing.T) {
 					ToolResult: &runtimeapi.ToolResult{
 						CallID:    "call-1",
 						Name:      "lookup",
-						Content:   "lookup failed",
+						Content:   `{"partial":"{\"exitCode\":0"}`,
 						IsError:   true,
 						ErrorCode: "lookup_failed",
 						Truncated: true,
@@ -372,6 +372,10 @@ func TestOpenAISerializesToolsCallsAndResults(t *testing.T) {
 		toolResult["errorCode"] != "lookup_failed" ||
 		toolResult["truncated"] != true {
 		t.Fatalf("tool error metadata was lost: %#v", toolResult)
+	}
+	content, ok := toolResult["content"].(string)
+	if !ok || !json.Valid([]byte(content)) {
+		t.Fatalf("structured tool content became invalid: %#v", toolResult["content"])
 	}
 }
 
