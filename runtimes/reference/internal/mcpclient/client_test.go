@@ -396,6 +396,29 @@ func TestHTTPCrossOriginRedirectDoesNotForwardAuthorization(t *testing.T) {
 	}
 }
 
+func TestHTTPOriginNormalizesDefaultPorts(t *testing.T) {
+	tests := []struct {
+		left  string
+		right string
+	}{
+		{left: "https://example.com/mcp", right: "https://example.com:443/other"},
+		{left: "http://example.com/mcp", right: "http://example.com:80/other"},
+	}
+	for _, test := range tests {
+		left := mustParseURL(t, test.left)
+		right := mustParseURL(t, test.right)
+		if origin(left) != origin(right) {
+			t.Fatalf("default port changed origin: %q != %q", origin(left), origin(right))
+		}
+		if err := sameOriginRedirectPolicy(left)(
+			&http.Request{URL: right},
+			[]*http.Request{{URL: left}},
+		); err != nil {
+			t.Fatalf("same-origin default-port redirect was rejected: %v", err)
+		}
+	}
+}
+
 func TestHTTPTransportInjectsHeadersOnlyForConfiguredOrigin(t *testing.T) {
 	var observed string
 	transport := &boundedHTTPTransport{

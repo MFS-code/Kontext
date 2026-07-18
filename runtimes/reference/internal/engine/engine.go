@@ -130,7 +130,7 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 				state,
 				runtimeConfig,
 			)
-			if result.ExitCode == 0 {
+			if result.Envelope.Output != nil {
 				runner.emit(events.TypeOutput, map[string]any{
 					"mediaType": resultv1alpha1.DefaultMediaType,
 					"value":     runtimeapi.MessageText(outcome.response.Message),
@@ -183,7 +183,7 @@ func (runner Runner) cleanupToolExecutor(
 		const code = "tool_cleanup_failed"
 		message := truncateUTF8(fmt.Sprintf("tool cleanup failed: %v", err), 4<<10)
 		if result.ExitCode == 0 {
-			return state.failure(
+			failure := state.failure(
 				runner,
 				runtimeConfig,
 				code,
@@ -191,6 +191,8 @@ func (runner Runner) cleanupToolExecutor(
 				nil,
 				state.lastRequestID,
 			)
+			failure.Envelope.Output = result.Envelope.Output
+			return failure
 		}
 		runner.emitError(code, message, nil)
 	}

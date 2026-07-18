@@ -1,10 +1,11 @@
-//go:build js || plan9 || wasip1 || windows
+//go:build aix || android || dragonfly || freebsd || illumos || ios || netbsd || openbsd || solaris
 
 package mcpclient
 
 import (
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 func prepareMCPProcess(_ *exec.Cmd) {}
@@ -14,7 +15,7 @@ func signalMCPProcessGroup(processID int) error {
 	if err != nil {
 		return err
 	}
-	return process.Signal(os.Interrupt)
+	return process.Signal(syscall.SIGTERM)
 }
 
 func killMCPProcessGroup(processID int) error {

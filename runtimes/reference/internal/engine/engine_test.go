@@ -254,8 +254,11 @@ func TestRunnerClosesToolsWithFreshContextAndReportsCleanupFailure(t *testing.T)
 	if executor.closeCalls != 1 {
 		t.Fatalf("expected one cleanup call, got %d", executor.closeCalls)
 	}
-	if emitter.has(events.TypeOutput) {
-		t.Fatalf("success output was emitted before failed cleanup: %#v", emitter.types)
+	if result.Envelope.Output == nil || string(result.Envelope.Output.Value) != `"done"` {
+		t.Fatalf("cleanup failure discarded completed output: %#v", result.Envelope.Output)
+	}
+	if !emitter.has(events.TypeOutput) {
+		t.Fatalf("completed output was not emitted after failed cleanup: %#v", emitter.types)
 	}
 	if !emitter.has(events.TypeError) {
 		t.Fatalf("cleanup failure was not observable: %#v", emitter.types)

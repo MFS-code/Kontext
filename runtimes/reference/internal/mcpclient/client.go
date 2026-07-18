@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -890,7 +891,21 @@ func origin(value *url.URL) string {
 	if value == nil {
 		return ""
 	}
-	return strings.ToLower(value.Scheme) + "://" + strings.ToLower(value.Host)
+	scheme := strings.ToLower(value.Scheme)
+	port := value.Port()
+	if port == "" {
+		switch scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	host := strings.ToLower(value.Hostname())
+	if port == "" {
+		return scheme + "://" + host
+	}
+	return scheme + "://" + net.JoinHostPort(host, port)
 }
 
 func cloneStrings(values map[string]string) map[string]string {
