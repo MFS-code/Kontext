@@ -33,7 +33,7 @@ No private chain-of-thought is emitted.
 | `KONTEXT_RUN_NAME` | no | Run metadata; defaults to `unknown-run` |
 | `KONTEXT_AGENT_NAME` | no | Agent metadata; defaults to run name |
 | `KONTEXT_TOOLS` | no | Comma-separated built-in tool allowlist |
-| `KONTEXT_BUDGET_TOKENS` | no | Positive cumulative measured token limit |
+| `KONTEXT_BUDGET_TOKENS` | no | Cumulative provider-reported token limit across all requests |
 | `KONTEXT_BUDGET_WALLCLOCK` | no | Optional Go duration; omitted means disabled |
 | `KONTEXT_BUDGET_DOLLARS` | no | Optional non-negative recorded budget |
 | `KONTEXT_MAX_TURNS` | no | Maximum provider completions in one run |
@@ -61,6 +61,31 @@ Model identifiers pass through unchanged.
 exclusive. A base URL may contain a path prefix. The runtime appends
 `/v1/messages` for Anthropic or `/chat/completions` for OpenAI-compatible
 providers. An exact endpoint is used without modification.
+
+## Token accounting
+
+The token budget covers the whole run, not one provider request. After each
+response, the runtime adds that request's reported input and output usage. If
+the provider also reports a larger total, the runtime uses that total for the
+budget check. Missing usage is not estimated.
+
+Tool loops resend the goal, prior assistant messages, tool calls, bounded tool
+results, and tool definitions. Providers therefore count some conversation
+and tool context again on every follow-up request. Reasoning models may also
+include reasoning tokens in completion usage even when the visible answer is
+short.
+
+The runtime sends the remaining budget as the provider's completion limit
+where the API supports one, then checks measured cumulative usage after the
+response. Provider completion limits do not include every kind of input usage,
+so a response may push the measured run total over budget. In that case the
+run fails with `token_limit_exceeded`; the token budget is not a provider-side
+hard cap.
+
+Leave headroom for repeated context, tool results, and provider-specific
+reasoning usage. Exact usage can vary between otherwise identical live runs as
+models and provider accounting change. The example budgets are starting
+points, not sizing guarantees.
 
 ## Maintained HTTP compatibility
 
@@ -125,24 +150,35 @@ mounted volumes, filesystem permissions, and NetworkPolicy determine what a
 tool can actually access.
 
 Environment filtering is defense in depth, not a Secret boundary. The shell
-runs in the same container as the runtime and may access files or process
-metadata available to that container. Do not expose `shell` to workloads that
-must not access the runtime container's credentials.
+runs in the same container as the runtime. Filtering changes only the direct
+child's environment; it does not isolate files, sibling process metadata, or
+other resources available inside that container. Do not expose `shell` to
+workloads that must not access the runtime container's credentials.
 
 Tool errors are returned to the model so it may recover within the remaining
-limits. Cancellation terminates the shell process group and fails the run.
-Unknown or non-allowlisted calls return structured tool errors and are never
-executed.
+limits. A tool error alone does not fail the run. The model may still produce a
+successful final response. Unknown or non-allowlisted calls follow this path
+as structured tool errors and are never executed. Cancellation and runtime or
+provider failures fail the run immediately.
+
+Assistant text from a turn that requests tools is conversation context, not
+the run's final output. The runtime publishes output only from a terminal
+provider response with no tool calls and a successful terminal stop reason. If
+a configured limit is reached before that response, the run fails without
+promoting earlier assistant text to final output.
 
 Tool events include identity, timing, byte count, error code, and truncation
 metadata. Tool content is omitted from events unless
 `KONTEXT_EMIT_TOOL_OUTPUT=true` because event logs may leave the workload's
 namespace or retention boundary.
 
-The turn, tool-call, per-result, and total-output limits are disabled when
-their environment variables are omitted or set to `0`. Examples use finite
-values. Built-in file and process capture still use an 8 MiB safety ceiling
-when no lower result limit is configured.
+The turn, tool-call, per-result, and total-output limits are configurable run
+limits. They are disabled when their environment variables are omitted or set
+to `0`; examples use finite values. The result limits bound content returned to
+the model. Separately, each built-in tool has a fixed 8 MiB capture safety
+ceiling. Disabling a configured result limit does not remove that ceiling, and
+the per-result setting cannot raise it. Shell stdout and stderr continue to
+stream to container logs after model-facing capture reaches the ceiling.
 
 ## Local fake-provider run
 

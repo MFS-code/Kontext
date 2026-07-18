@@ -112,7 +112,7 @@ wires the locally built reporter automatically.
 
 Every run is bounded and auditable:
 
-- **Budgets** — `spec.budget.wallclock` is enforced by the controller (the Pod is killed and the run marked `BudgetExceeded`); token and dollar usage are reported by the runtime and recorded in `.status.usage`.
+- **Budgets** — `spec.budget.wallclock` is enforced by the controller (the Pod is killed and the run marked `BudgetExceeded`); token and dollar usage are reported by the runtime and recorded in `.status.usage`. The reference runtime checks token budgets against cumulative measured usage across provider requests. Tool follow-ups resend conversation context, and reasoning usage can exceed the visible output, so live model budgets need provider-specific headroom.
 - **Immutable run specs** — an `AgentRun` snapshots its configuration at creation, so history doesn't drift when the `Agent` changes.
 - **Standard lifecycle** — owner references give you GC cascade, conditions record transitions, and `kubectl` is the debugging surface.
 

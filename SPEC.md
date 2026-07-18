@@ -305,15 +305,35 @@ output, cancellation, failure, or a configured turn, token, tool-call, or
 tool-output limit. Omitted or zero runtime limits are disabled. Built-in tools
 are `read_knowledge`, `kubernetes_read`, and `shell`.
 
+The reference runtime applies `KONTEXT_BUDGET_TOKENS` to cumulative measured
+provider usage across every request in the run. Each tool follow-up resends the
+conversation, including prior tool calls and bounded results, so providers may
+count that context again. Provider-reported reasoning or completion usage also
+counts even when it does not appear in the final text. The runtime sends the
+remaining budget as a provider completion limit where supported, but checks
+actual usage only after each response. A response can therefore exceed the run
+budget and fail with `token_limit_exceeded`. Missing usage is not estimated.
+Budgets need headroom because provider and model usage can vary between live
+runs.
+
 `read_knowledge` is confined to `/kontext/knowledge`. `kubernetes_read` has a
 fixed current-namespace get/list allowlist and never reads Secrets. `shell`
 uses an explicit working directory, filters its direct child environment,
 streams logs, bounds captured output, and cleans up its process group on
 cancellation. These runtime checks prevent accidental exposure; Kubernetes
 RBAC, workload security context, mounted data, and container isolation remain
-the security boundaries. Tool events omit result content by default; the
-maintained runtime requires an explicit opt-in before placing bounded tool
-content in the event stream.
+the security boundaries. In particular, `shell` shares the runtime container;
+environment filtering does not isolate its filesystem or process view. Tool
+events omit result content by default; the maintained runtime requires an
+explicit opt-in before placing bounded tool content in the event stream.
+
+Configured per-result and cumulative tool-output limits bound content returned
+to the model. Omission or zero disables those configured limits, but built-in
+tools still enforce a fixed 8 MiB capture safety ceiling per call. Tool errors
+become structured results that the model may recover from; they do not fail the
+run by themselves. Only a successful terminal provider response without tool
+calls becomes final output. Cancellation, execution failures, or reaching a
+configured limit before final output fail the run.
 
 The reference runtime emits versioned JSONL lifecycle, usage, tool, output, and
 error events to stdout. It retains conversation state only in memory for one

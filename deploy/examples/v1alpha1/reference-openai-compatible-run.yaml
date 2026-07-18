@@ -15,5 +15,6 @@ spec:
     - name: KONTEXT_PROVIDER_BASE_URL
       value: http://openai-compatible.default.svc:8000/v1
   budget:
-    tokens: 512
+    # Reasoning and completion usage may exceed the visible one-line answer.
+    tokens: 4096
     wallclock: 2m
