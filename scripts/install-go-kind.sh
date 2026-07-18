@@ -26,6 +26,7 @@ if ! docker image inspect "${OPERATOR_IMAGE}" >/dev/null 2>&1; then
   echo "missing local image ${OPERATOR_IMAGE}; build with: make docker-build" >&2
   exit 1
 fi
+OPERATOR_IMAGE_ID="$(docker image inspect "${OPERATOR_IMAGE}" --format '{{.Id}}')"
 if ! docker image inspect "${ECHO_IMAGE}" >/dev/null 2>&1; then
   echo "missing local image ${ECHO_IMAGE}; build with: make docker-build-echo" >&2
   exit 1
@@ -58,6 +59,15 @@ kind load docker-image "${REFERENCE_IMAGE}" --name "${CLUSTER_NAME}"
 kind load docker-image "${STDOUT_FIXTURE_IMAGE}" --name "${CLUSTER_NAME}"
 
 echo "==> installing v1alpha1 CRDs and Go controller"
+CONTROLLER_POD_UID_BEFORE="$(
+  kubectl get pods -n kontext-system -l control-plane=controller-manager \
+    -o jsonpath='{.items[0].metadata.uid}' 2>/dev/null || true
+)"
+DEPLOYED_IMAGE_ID_BEFORE="$(
+  kubectl get deployment controller-manager -n kontext-system \
+    -o jsonpath='{.spec.template.metadata.annotations.kontext\.dev/local-operator-image-id}' \
+    2>/dev/null || true
+)"
 if kubectl get crd agents.kontext.dev >/dev/null 2>&1; then
   STORED_VERSION="$(kubectl get crd agents.kontext.dev -o jsonpath='{.spec.versions[?(@.storage==true)].name}' 2>/dev/null || true)"
   if [[ "${STORED_VERSION}" == "v1" ]]; then
@@ -70,10 +80,36 @@ kubectl delete deployment kontext-controller -n default --ignore-not-found=true
 kubectl apply -k "${ROOT_DIR}/config/default"
 kubectl set env deployment/controller-manager -n kontext-system \
   "KONTEXT_REPORTER_IMAGE=${REPORTER_IMAGE}"
+kubectl patch deployment/controller-manager -n kontext-system --type=merge -p \
+  "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"kontext.dev/local-operator-image-id\":\"${OPERATOR_IMAGE_ID}\"}}}}}"
 
 echo "==> waiting for controller rollout"
 kubectl rollout status deployment/controller-manager -n kontext-system --timeout=120s
 
+if [[ -n "${CONTROLLER_POD_UID_BEFORE}" &&
+  "${DEPLOYED_IMAGE_ID_BEFORE}" != "${OPERATOR_IMAGE_ID}" ]]; then
+  CONTROLLER_POD_UID_AFTER=""
+  for _ in $(seq 1 30); do
+    CONTROLLER_POD_UID_AFTER="$(
+      kubectl get pods -n kontext-system -l control-plane=controller-manager \
+        -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}'
+    )"
+    if [[ -n "${CONTROLLER_POD_UID_AFTER}" &&
+      "${CONTROLLER_POD_UID_AFTER}" != *"${CONTROLLER_POD_UID_BEFORE}"* ]]; then
+      break
+    fi
+    sleep 1
+  done
+  if [[ -z "${CONTROLLER_POD_UID_AFTER}" ||
+    "${CONTROLLER_POD_UID_AFTER}" == *"${CONTROLLER_POD_UID_BEFORE}"* ]]; then
+    echo "controller image changed but no new ready Pod was observed" >&2
+    exit 1
+  fi
+fi
+
 echo "==> ready"
 kubectl get crd agents.kontext.dev agentruns.kontext.dev
 kubectl get deploy -n kontext-system controller-manager
+echo "controller local image identity: ${OPERATOR_IMAGE_ID}"
+kubectl get pods -n kontext-system -l control-plane=controller-manager \
+  -o custom-columns='NAME:.metadata.name,IMAGE:.spec.containers[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,READY:.status.containerStatuses[0].ready'

@@ -4,6 +4,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TOOLS_NAMESPACE="kontext-e2e-tools"
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -22,9 +23,13 @@ is_terminal_failure_phase() {
 wait_for_run_phase() {
   local name="$1"
   local expected="$2"
+  local namespace="${3:-default}"
   local phase=""
   for _ in $(seq 1 60); do
-    phase="$(kubectl get agentrun "${name}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    phase="$(
+      kubectl get agentrun "${name}" -n "${namespace}" \
+        -o jsonpath='{.status.phase}' 2>/dev/null || true
+    )"
     if [[ "${phase}" == "${expected}" ]]; then
       return 0
     fi
@@ -41,21 +46,47 @@ wait_for_run_phase() {
   return 1
 }
 
+cleanup_e2e_resources() {
+  local status=0
+  kubectl delete agent echo-service --ignore-not-found=true --wait=true || status=1
+  kubectl delete agentrun \
+    echo-review \
+    stdout-last-line \
+    stdout-envelope \
+    stdout-failure \
+    stdout-signal \
+    reference-fake \
+    reference-fake-tool \
+    --ignore-not-found=true \
+    --wait=true || status=1
+  kubectl delete configmap reference-tool-knowledge \
+    --ignore-not-found=true || status=1
+  kubectl delete namespace "${TOOLS_NAMESPACE}" \
+    --ignore-not-found=true \
+    --wait=true \
+    --timeout=60s || status=1
+  return "${status}"
+}
+
+on_exit() {
+  local status=$?
+  if [[ "${status}" -eq 0 ]]; then
+    echo "==> cleaning completed e2e resources"
+    set +e
+    cleanup_e2e_resources
+    status=$?
+    set -e
+  else
+    echo "==> preserving failed e2e resources for diagnostics" >&2
+  fi
+  return "${status}"
+}
+
 need kubectl
+trap on_exit EXIT
 
 echo "==> cleaning previous e2e resources"
-kubectl delete agent echo-service --ignore-not-found=true --wait=true
-kubectl delete agentrun \
-  echo-review \
-  stdout-last-line \
-  stdout-envelope \
-  stdout-failure \
-  stdout-signal \
-  reference-fake \
-  reference-fake-tool \
-  --ignore-not-found=true \
-  --wait=true
-kubectl delete configmap reference-tool-knowledge --ignore-not-found=true
+cleanup_e2e_resources
 
 echo "==> applying standalone echo task run"
 kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/echo-task-run.yaml"
@@ -184,6 +215,95 @@ fi
 if [[ "${tool_logs}" != *'"type":"tool"'* ||
   "${tool_logs}" != *'"name":"read_knowledge"'* ]]; then
   echo "tool loop did not emit the expected execution event" >&2
+  exit 1
+fi
+
+echo "==> verifying Kubernetes read policy and restricted shell execution"
+kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/reference-kind-policy-runs.yaml"
+
+wait_for_run_phase reference-kubernetes-pods Succeeded "${TOOLS_NAMESPACE}"
+pods_logs="$(
+  kubectl logs run-reference-kubernetes-pods -n "${TOOLS_NAMESPACE}" -c runtime
+)"
+pods_service_account="$(
+  kubectl get pod run-reference-kubernetes-pods -n "${TOOLS_NAMESPACE}" \
+    -o jsonpath='{.spec.serviceAccountName}'
+)"
+if [[ "${pods_logs}" != *'"name":"kubernetes_read"'* ||
+  "${pods_logs}" != *'"errorCode":"","isError":false'* ||
+  "${pods_service_account}" != "reference-kubernetes-reader" ]]; then
+  echo "current-namespace Pod list did not succeed through kubernetes_read" >&2
+  exit 1
+fi
+
+wait_for_run_phase reference-kubernetes-secrets Succeeded "${TOOLS_NAMESPACE}"
+secrets_logs="$(
+  kubectl logs run-reference-kubernetes-secrets -n "${TOOLS_NAMESPACE}" -c runtime
+)"
+if [[ "${secrets_logs}" != *'"name":"kubernetes_read"'* ||
+  "${secrets_logs}" != *'"errorCode":"kubernetes_resource_denied"'* ]]; then
+  echo "Secrets were not rejected by the runtime resource allowlist" >&2
+  exit 1
+fi
+
+wait_for_run_phase reference-kubernetes-configmaps Succeeded "${TOOLS_NAMESPACE}"
+configmaps_logs="$(
+  kubectl logs run-reference-kubernetes-configmaps -n "${TOOLS_NAMESPACE}" -c runtime
+)"
+if [[ "${configmaps_logs}" != *'"name":"kubernetes_read"'* ||
+  "${configmaps_logs}" != *'"errorCode":"kubernetes_rbac_denied"'* ]]; then
+  echo "ungranted ConfigMap list did not reach Kubernetes RBAC" >&2
+  exit 1
+fi
+
+wait_for_run_phase reference-restricted-shell Succeeded "${TOOLS_NAMESPACE}"
+shell_result="$(
+  kubectl get agentrun reference-restricted-shell -n "${TOOLS_NAMESPACE}" \
+    -o jsonpath='{.status.result}'
+)"
+shell_pod="run-reference-restricted-shell"
+shell_run_as_non_root="$(
+  kubectl get pod "${shell_pod}" -n "${TOOLS_NAMESPACE}" \
+    -o jsonpath='{.spec.containers[?(@.name=="runtime")].securityContext.runAsNonRoot}'
+)"
+shell_allow_privilege_escalation="$(
+  kubectl get pod "${shell_pod}" -n "${TOOLS_NAMESPACE}" \
+    -o jsonpath='{.spec.containers[?(@.name=="runtime")].securityContext.allowPrivilegeEscalation}'
+)"
+shell_dropped_capabilities="$(
+  kubectl get pod "${shell_pod}" -n "${TOOLS_NAMESPACE}" \
+    -o jsonpath='{.spec.containers[?(@.name=="runtime")].securityContext.capabilities.drop[*]}'
+)"
+shell_seccomp_profile="$(
+  kubectl get pod "${shell_pod}" -n "${TOOLS_NAMESPACE}" \
+    -o jsonpath='{.spec.containers[?(@.name=="runtime")].securityContext.seccompProfile.type}'
+)"
+shell_volume_names="$(
+  kubectl get pod "${shell_pod}" -n "${TOOLS_NAMESPACE}" \
+    -o jsonpath='{.spec.volumes[*].name}'
+)"
+if [[ "${shell_result}" != *"restricted-shell-ok"* ||
+  "${shell_run_as_non_root}" != "true" ||
+  "${shell_allow_privilege_escalation}" != "false" ||
+  "${shell_dropped_capabilities}" != "ALL" ||
+  "${shell_seccomp_profile}" != "RuntimeDefault" ||
+  "${shell_volume_names}" == *"kube-api-access-"* ]]; then
+  echo "restricted shell Pod did not preserve the required security settings" >&2
+  exit 1
+fi
+
+wait_for_run_phase reference-wallclock-shell BudgetExceeded "${TOOLS_NAMESPACE}"
+sleep 5
+wallclock_phase="$(
+  kubectl get agentrun reference-wallclock-shell -n "${TOOLS_NAMESPACE}" \
+    -o jsonpath='{.status.phase}'
+)"
+wallclock_pod="$(
+  kubectl get pod run-reference-wallclock-shell -n "${TOOLS_NAMESPACE}" \
+    -o name 2>/dev/null || true
+)"
+if [[ "${wallclock_phase}" != "BudgetExceeded" || -n "${wallclock_pod}" ]]; then
+  echo "wallclock cancellation did not remain terminally BudgetExceeded" >&2
   exit 1
 fi
 
