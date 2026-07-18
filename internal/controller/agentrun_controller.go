@@ -144,6 +144,12 @@ func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontex
 }
 
 func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv1alpha1.AgentRun, pod *corev1.Pod) (ctrl.Result, bool, error) {
+	if run.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
+		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, true, err
+		}
+		return ctrl.Result{}, true, nil
+	}
 	if run.Spec.Budget == nil || run.Spec.Budget.Wallclock == "" {
 		return ctrl.Result{}, false, nil
 	}
@@ -181,10 +187,6 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 		return ctrl.Result{RequeueAfter: remaining + time.Second}, false, nil
 	}
 
-	if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, false, err
-	}
-
 	_, err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 		next.Phase = kontextv1alpha1.AgentRunPhaseBudgetExceeded
 		next.PodName = pod.Name
@@ -196,6 +198,9 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 	})
 	if err != nil {
 		return ctrl.Result{}, false, err
+	}
+	if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, true, err
 	}
 	return ctrl.Result{}, true, nil
 }
