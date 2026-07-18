@@ -108,7 +108,9 @@ jobs:
         if: failure()
         run: |
           ./scripts/collect-kind-diagnostics.sh "${RUNNER_TEMP}/provider-diagnostics"
-          rm -f "${RUNNER_TEMP}/provider-diagnostics/agent-workloads.txt"
+          rm -f \
+            "${RUNNER_TEMP}/provider-diagnostics/agent-workloads.txt" \
+            "${RUNNER_TEMP}/provider-diagnostics/kontext-resources.txt"
 
       - name: Upload failure diagnostics
         if: failure()

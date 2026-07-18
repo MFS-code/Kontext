@@ -244,10 +244,12 @@ tokens, but this is not a hard billing ceiling: usage is checked only after a
 response, provider token accounting varies, and the repeated tool context can
 cross the configured budget. Before approval, select a small non-reasoning
 model, verify its current pricing and the endpoint, and do not use this
-workflow for untrusted code. Failure artifacts omit Secret objects and
-workload logs, and are retained briefly; maintainers should still review them
-before sharing. The model and endpoint inputs are visible workflow metadata;
-an endpoint must never contain a credential or signed query string.
+workflow for untrusted code. Failure artifacts omit workload logs and
+Agent/AgentRun descriptions that can contain runtime environment values, and
+are retained briefly; maintainers should still review them before sharing. The
+model and endpoint inputs are visible workflow metadata. The acceptance script
+rejects endpoint userinfo, queries, fragments, and whitespace so credentials
+cannot be embedded there.
 
 ## Dependency inventory
 

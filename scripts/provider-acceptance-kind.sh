@@ -18,6 +18,20 @@ run_name="provider-${scenario}"
 secret_name="provider-acceptance-credentials"
 knowledge_name="provider-acceptance-knowledge"
 
+if [[ -n "${endpoint}" ]]; then
+  if [[ "${endpoint}" != http://* && "${endpoint}" != https://* ]]; then
+    echo "provider endpoint must be an absolute HTTP(S) URL" >&2
+    exit 1
+  fi
+  if [[ "${endpoint}" == *"@"* ||
+    "${endpoint}" == *"?"* ||
+    "${endpoint}" == *"#"* ||
+    "${endpoint}" =~ [[:space:]] ]]; then
+    echo "provider acceptance endpoint cannot contain credentials, query parameters, fragments, or whitespace" >&2
+    exit 1
+  fi
+fi
+
 case "${provider}" in
   anthropic)
     credential_env="ANTHROPIC_API_KEY"
@@ -212,6 +226,10 @@ if ! jq -e '
 fi
 
 pod_name="$(jq -r '.status.podName' <<<"${run_json}")"
+if [[ -z "${pod_name}" || "${pod_name}" == "null" ]]; then
+  echo "AgentRun did not record a pod name in status" >&2
+  exit 1
+fi
 pod_json="$(
   kubectl get pod "${pod_name}" \
     --namespace "${namespace}" \
