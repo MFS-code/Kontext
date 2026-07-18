@@ -159,3 +159,13 @@ func TestStatusResultMatchModes(t *testing.T) {
 		t.Fatalf("contains/not-contains graders failed: %#v", record.Grades)
 	}
 }
+
+func TestGradeRecordRejectsUnvalidatedGraders(t *testing.T) {
+	record := Record{}
+	GradeRecord(&record, []Grader{{Type: GraderEnvelopeTurns}})
+	if len(record.Grades) != 1 ||
+		record.Grades[0].Pass ||
+		!strings.Contains(record.Grades[0].Message, "invalid grader") {
+		t.Fatalf("unvalidated grader was not rejected safely: %#v", record.Grades)
+	}
+}

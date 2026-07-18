@@ -19,6 +19,8 @@ const (
 	MaxJudgeRationale   = 4096
 )
 
+var errJudgeOutputLimit = errors.New("judge output exceeded configured limit")
+
 type Judge interface {
 	Evaluate(context.Context, JudgeObservation) (JudgeResult, error)
 }
@@ -142,16 +144,23 @@ type limitedWriter struct {
 }
 
 func (writer *limitedWriter) Write(data []byte) (int, error) {
-	original := len(data)
 	if writer.Remaining <= 0 {
-		return original, nil
+		return 0, errJudgeOutputLimit
 	}
+	originalLength := len(data)
 	if len(data) > writer.Remaining {
 		data = data[:writer.Remaining]
 	}
-	if _, err := writer.Writer.Write(data); err != nil {
-		return 0, err
+	written, err := writer.Writer.Write(data)
+	writer.Remaining -= written
+	if err != nil {
+		return written, err
 	}
-	writer.Remaining -= len(data)
-	return original, nil
+	if written != len(data) {
+		return written, io.ErrShortWrite
+	}
+	if written != originalLength {
+		return written, errJudgeOutputLimit
+	}
+	return written, nil
 }

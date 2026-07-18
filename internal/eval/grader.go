@@ -15,6 +15,10 @@ func GradeRecord(record *Record, graders []Grader) {
 
 func grade(record *Record, grader Grader) Grade {
 	result := Grade{Type: grader.Type}
+	if err := validateGrader(grader); err != nil {
+		result.Message = fmt.Sprintf("invalid grader: %v", err)
+		return result
+	}
 	switch grader.Type {
 	case GraderTerminalPhase:
 		result.Expected = grader.Phase

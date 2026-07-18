@@ -53,10 +53,12 @@ wait_for_service() {
 cleanup() {
   local status=$?
   if [[ "${status}" -eq 0 ]]; then
-    kubectl delete namespace "${EVAL_NAMESPACE}" \
+    if ! kubectl delete namespace "${EVAL_NAMESPACE}" \
       --ignore-not-found=true \
       --wait=true \
-      --timeout=60s >/dev/null
+      --timeout=60s >/dev/null; then
+      echo "warning: evaluation passed but namespace cleanup did not finish" >&2
+    fi
   else
     echo "preserving namespace ${EVAL_NAMESPACE} for diagnostics" >&2
     kubectl get agent,agentrun,pod -n "${EVAL_NAMESPACE}" -o wide >&2 || true

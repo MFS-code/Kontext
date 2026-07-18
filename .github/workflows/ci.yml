@@ -266,6 +266,7 @@ jobs:
           name: keyless-evals-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.KONTEXT_EVAL_DIR }}
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 5
 
       - name: Collect diagnostics on failure

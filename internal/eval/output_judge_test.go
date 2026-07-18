@@ -1,8 +1,10 @@
 package eval
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,6 +80,22 @@ func TestCommandJudgeBoundsAndResponseValidation(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "requires") {
 		t.Fatalf("expected incomplete response error, got %v", err)
+	}
+}
+
+func TestLimitedWriterReportsOutputLimit(t *testing.T) {
+	var output bytes.Buffer
+	writer := &limitedWriter{Writer: &output, Remaining: 3}
+	written, err := writer.Write([]byte("hello"))
+	if written != 3 || !errors.Is(err, errJudgeOutputLimit) {
+		t.Fatalf("first write = (%d, %v), want (3, output limit)", written, err)
+	}
+	if output.String() != "hel" {
+		t.Fatalf("bounded output = %q, want hel", output.String())
+	}
+	written, err = writer.Write([]byte("again"))
+	if written != 0 || !errors.Is(err, errJudgeOutputLimit) {
+		t.Fatalf("second write = (%d, %v), want (0, output limit)", written, err)
 	}
 }
 
