@@ -14,6 +14,7 @@ import (
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/engine"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/events"
+	"github.com/kontext-dev/kontext/runtimes/reference/internal/tools"
 )
 
 func main() {
@@ -58,6 +59,13 @@ func run(
 	execution := engine.Runner{
 		Emitter: emitter,
 		Now:     now,
+		ResolveTools: func(runtimeConfig config.Config) (engine.ToolExecutor, error) {
+			return tools.New(tools.Config{
+				Allowed: runtimeConfig.Tools,
+				Stdout:  stdout,
+				Stderr:  stderr,
+			})
+		},
 	}.Run(ctx, runtimeConfig)
 	if err := resultv1alpha1.WriteEnvelopeLine(stdout, execution.Envelope); err != nil {
 		fmt.Fprintf(stderr, "kontext reference runtime: emit result: %v\n", err)

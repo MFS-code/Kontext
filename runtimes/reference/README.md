@@ -32,16 +32,23 @@ No private chain-of-thought is emitted.
 | `KONTEXT_MODEL` | yes | Opaque provider model identifier |
 | `KONTEXT_RUN_NAME` | no | Run metadata; defaults to `unknown-run` |
 | `KONTEXT_AGENT_NAME` | no | Agent metadata; defaults to run name |
-| `KONTEXT_TOOLS` | no | Declared allowlist; recorded but not executed yet |
-| `KONTEXT_BUDGET_TOKENS` | no | Positive requested output/token limit |
+| `KONTEXT_TOOLS` | no | Comma-separated built-in tool allowlist |
+| `KONTEXT_BUDGET_TOKENS` | no | Cumulative provider-reported token limit across all requests |
 | `KONTEXT_BUDGET_WALLCLOCK` | no | Optional Go duration; omitted means disabled |
 | `KONTEXT_BUDGET_DOLLARS` | no | Optional non-negative recorded budget |
+| `KONTEXT_MAX_TURNS` | no | Maximum provider completions in one run |
+| `KONTEXT_MAX_TOOL_CALLS` | no | Maximum executed tool calls in one run |
+| `KONTEXT_MAX_TOOL_RESULT_BYTES` | no | Maximum bytes returned from one tool call |
+| `KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES` | no | Maximum tool-result bytes returned across the run |
+| `KONTEXT_EMIT_TOOL_OUTPUT` | no | Include bounded tool content in events; defaults to `false` |
 | `KONTEXT_PROVIDER_ENDPOINT` | no | Exact absolute HTTP(S) request endpoint |
 | `KONTEXT_PROVIDER_BASE_URL` | no | Absolute HTTP(S) base URL; provider path is appended |
 | `ANTHROPIC_API_KEY` | Anthropic only | Anthropic API key, normally injected from a Secret |
 | `OPENAI_API_KEY` | OpenAI-compatible only | Bearer token, normally injected from a Secret |
-| `KONTEXT_FAKE_SCENARIO` | no | `success`, `failure`, `malformed`, or `delay` |
+| `KONTEXT_FAKE_SCENARIO` | no | `success`, `failure`, `malformed`, `delay`, or `tool` |
 | `KONTEXT_FAKE_DELAY` | delay only | Positive Go duration such as `250ms` |
+| `KONTEXT_FAKE_TOOL_NAME` | tool only | Deterministic fake-provider tool name |
+| `KONTEXT_FAKE_TOOL_ARGUMENTS` | tool only | Deterministic fake-provider JSON arguments |
 
 There is deliberately no hidden five-minute deadline. The Kubernetes
 controller remains authoritative for `KONTEXT_BUDGET_WALLCLOCK`; the runtime
@@ -54,6 +61,31 @@ Model identifiers pass through unchanged.
 exclusive. A base URL may contain a path prefix. The runtime appends
 `/v1/messages` for Anthropic or `/chat/completions` for OpenAI-compatible
 providers. An exact endpoint is used without modification.
+
+## Token accounting
+
+The token budget covers the whole run, not one provider request. After each
+response, the runtime adds that request's reported input and output usage. If
+the provider also reports a larger total, the runtime uses that total for the
+budget check. Missing usage is not estimated.
+
+Tool loops resend the goal, prior assistant messages, tool calls, bounded tool
+results, and tool definitions. Providers therefore count some conversation
+and tool context again on every follow-up request. Reasoning models may also
+include reasoning tokens in completion usage even when the visible answer is
+short.
+
+The runtime sends the remaining budget as the provider's completion limit
+where the API supports one, then checks measured cumulative usage after the
+response. Provider completion limits do not include every kind of input usage,
+so a response may push the measured run total over budget. In that case the
+run fails with `token_limit_exceeded`; the token budget is not a provider-side
+hard cap.
+
+Leave headroom for repeated context, tool results, and provider-specific
+reasoning usage. Exact usage can vary between otherwise identical live runs as
+models and provider accounting change. The example budgets are starting
+points, not sizing guarantees.
 
 ## Maintained HTTP compatibility
 
@@ -92,17 +124,68 @@ extensions. Endpoint operators are responsible for accepting a bearer token
 in `Authorization`; a non-secret placeholder may be used only when an
 in-cluster endpoint ignores auth.
 
-The runtime currently does not send declared tools or execute returned tool
-calls. Tool calls are normalized so the transport boundary remains explicit,
-but this one-turn runtime is intended for text tasks until the bounded tool
-loop is implemented.
+Both transports receive only the tools explicitly listed in `KONTEXT_TOOLS`.
+The runtime executes normalized calls, returns normalized results to the
+provider, and continues until final output or a configured limit.
 
 HTTP failures use stable result error codes including
 `authentication_failed`, `rate_limited`, `provider_timeout`,
 `provider_network_error`, `provider_endpoint_error`,
 `provider_request_rejected`, and `invalid_provider_response`. Retryability,
-HTTP status, and provider request IDs are retained where available. Response
+and provider request IDs are retained where available. HTTP status informs the
+normalized error code but is not included in the terminal envelope. Response
 bodies are bounded to 4 MiB.
+
+## Built-in tools
+
+The maintained runtime includes three tools:
+
+- `read_knowledge` reads one UTF-8 file below `/kontext/knowledge`. Absolute
+  paths, parent traversal, escaping symlinks, directories, and oversized reads
+  are rejected or truncated.
+- `kubernetes_read` performs current-namespace `get` or `list` operations for
+  a fixed resource allowlist. It has no namespace argument and never permits
+  Secrets. Kubernetes RBAC remains authoritative.
+- `shell` runs `/bin/sh -c` as the runtime container user in a required
+  absolute working directory. Its direct child environment excludes provider,
+  Kubernetes, and other credential-shaped variables. Stdout and stderr stream
+  to container logs while the result returned to the model remains bounded.
+
+Allowlisting a tool makes it visible to the model; it does not grant new
+infrastructure permissions. The Pod's ServiceAccount, security context,
+mounted volumes, filesystem permissions, and NetworkPolicy determine what a
+tool can actually access.
+
+Environment filtering is defense in depth, not a Secret boundary. The shell
+runs in the same container as the runtime. Filtering changes only the direct
+child's environment; it does not isolate files, sibling process metadata, or
+other resources available inside that container. Do not expose `shell` to
+workloads that must not access the runtime container's credentials.
+
+Tool errors are returned to the model so it may recover within the remaining
+limits. A tool error alone does not fail the run. The model may still produce a
+successful final response. Unknown or non-allowlisted calls follow this path
+as structured tool errors and are never executed. Cancellation and runtime or
+provider failures fail the run immediately.
+
+Assistant text from a turn that requests tools is conversation context, not
+the run's final output. The runtime publishes output only from a terminal
+provider response with no tool calls and a successful terminal stop reason. If
+a configured limit is reached before that response, the run fails without
+promoting earlier assistant text to final output.
+
+Tool events include identity, timing, byte count, error code, and truncation
+metadata. Tool content is omitted from events unless
+`KONTEXT_EMIT_TOOL_OUTPUT=true` because event logs may leave the workload's
+namespace or retention boundary.
+
+The turn, tool-call, per-result, and total-output limits are configurable run
+limits. They are disabled when their environment variables are omitted or set
+to `0`; examples use finite values. The result limits bound content returned to
+the model. Separately, each built-in tool has a fixed 8 MiB capture safety
+ceiling. Disabling a configured result limit does not remove that ceiling, and
+the per-result setting cannot raise it. Shell stdout and stderr continue to
+stream to container logs after model-facing capture reaches the ceiling.
 
 ## Local fake-provider run
 
@@ -138,6 +221,8 @@ Example templates live in `deploy/examples/v1alpha1/`:
 - `provider-secrets.example.yaml`
 - `reference-anthropic-run.yaml`
 - `reference-openai-compatible-run.yaml`
+- `reference-fake-tool-run.yaml`
+- `reference-tools-run.yaml`
 
 The `Provider acceptance` GitHub Actions workflow is dispatch-only and uses
 the `provider-acceptance` environment. Repository maintainers must protect
@@ -152,16 +237,18 @@ Kontext packages. The bundled reporter additionally uses `golang.org/x/sys`
 for Linux process supervision. The production image contains:
 
 - `gcr.io/distroless/static:nonroot`
+- BusyBox `sh` and applets copied into the final image for the allowlisted
+  shell tool
 - `/kontext-reporter`
 - `/kontext-reference`
 
-It contains no shell, package manager, agent framework, retrieval system, or
+It contains no package manager, agent framework, retrieval system, or
 persistent storage.
 
 ## Explicit limits
 
-- One provider completion per run.
+- Provider turns and tool calls continue only within configured limits.
 - Conversation state exists only in memory for that run.
-- Tools are declared but not executed.
+- Tool results are bounded and full shell output remains in container logs.
 - No retries, planning, memory, retrieval, subagents, background work, or
   provider-specific model aliases.

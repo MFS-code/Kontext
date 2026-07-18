@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reference-tool-knowledge
+data:
+  guide.txt: tool loop works
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-fake-tool
+spec:
+  goal: Read the mounted guide and report its contents.
+  provider: fake
+  model: vendor/opaque-tool-model@2026
+  tools:
+    - read_knowledge
+  knowledgeConfigMapRef:
+    name: reference-tool-knowledge
+  runtime:
+    image: kontext-reference:dev
+  env:
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool
+    - name: KONTEXT_FAKE_TOOL_NAME
+      value: read_knowledge
+    - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+      value: '{"path":"guide.txt"}'
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "1024"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "2048"
+  budget:
+    wallclock: 2m

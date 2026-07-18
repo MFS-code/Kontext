@@ -19,6 +19,7 @@ type AgentRef struct {
 }
 
 // AgentRunSpec defines the desired state of AgentRun.
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="AgentRun spec is immutable"
 type AgentRunSpec struct {
 	AgentRef *AgentRef `json:"agentRef,omitempty"`
 

@@ -16,8 +16,16 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath -ldflags="-s -w" -o /kontext-reference ./runtimes/reference
 
+FROM busybox:stable-musl AS shell
+RUN mkdir /busybox-bin && \
+    cp /bin/busybox /busybox-bin/busybox && \
+    for applet in $(/bin/busybox --list); do \
+      ln -s busybox "/busybox-bin/${applet}"; \
+    done
+
 FROM gcr.io/distroless/static:nonroot
 
+COPY --from=shell /busybox-bin/ /bin/
 COPY --from=builder /kontext-reporter /kontext-reporter
 COPY --from=builder /kontext-reference /kontext-reference
 

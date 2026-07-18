@@ -59,7 +59,10 @@ func BuildPodWithConfig(run *kontextv1alpha1.AgentRun, config Config) (*corev1.P
 		labels[LabelAgentName] = run.Spec.AgentRef.Name
 	}
 
-	env := buildEnv(run)
+	env, err := buildEnv(run)
+	if err != nil {
+		return nil, err
+	}
 	volumes, volumeMounts := buildKnowledgeVolumes(run)
 
 	container := corev1.Container{
@@ -68,6 +71,7 @@ func BuildPodWithConfig(run *kontextv1alpha1.AgentRun, config Config) (*corev1.P
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Env:             env,
 		VolumeMounts:    volumeMounts,
+		SecurityContext: runtimeSecurityContext(run.Spec.Runtime.SecurityContext),
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceCPU:    resourceQuantity("50m"),
@@ -114,6 +118,44 @@ func BuildPodWithConfig(run *kontextv1alpha1.AgentRun, config Config) (*corev1.P
 	}
 
 	return pod, nil
+}
+
+func runtimeSecurityContext(
+	config *kontextv1alpha1.RuntimeSecurityContext,
+) *corev1.SecurityContext {
+	if config == nil {
+		return nil
+	}
+	securityContext := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: config.AllowPrivilegeEscalation,
+		ReadOnlyRootFilesystem:   config.ReadOnlyRootFilesystem,
+		RunAsNonRoot:             config.RunAsNonRoot,
+	}
+	if config.Capabilities != nil {
+		securityContext.Capabilities = &corev1.Capabilities{
+			Drop: make(
+				[]corev1.Capability,
+				len(config.Capabilities.Drop),
+			),
+		}
+		for index, capability := range config.Capabilities.Drop {
+			securityContext.Capabilities.Drop[index] = corev1.Capability(capability)
+		}
+	}
+	if config.SeccompProfile != nil {
+		securityContext.SeccompProfile = &corev1.SeccompProfile{
+			Type:             corev1.SeccompProfileType(config.SeccompProfile.Type),
+			LocalhostProfile: stringPointer(config.SeccompProfile.LocalhostProfile),
+		}
+		if config.SeccompProfile.LocalhostProfile == "" {
+			securityContext.SeccompProfile.LocalhostProfile = nil
+		}
+	}
+	return securityContext
+}
+
+func stringPointer(value string) *string {
+	return &value
 }
 
 func injectReporter(
@@ -197,7 +239,7 @@ func reporterFormat(format kontextv1alpha1.ResultFormat) (string, error) {
 	}
 }
 
-func buildEnv(run *kontextv1alpha1.AgentRun) []corev1.EnvVar {
+func buildEnv(run *kontextv1alpha1.AgentRun) ([]corev1.EnvVar, error) {
 	provider := runtimepolicy.NormalizeProvider(run.Spec.Provider)
 	tools := strings.Join(run.Spec.Tools, ",")
 	budget := run.Spec.Budget
@@ -213,8 +255,21 @@ func buildEnv(run *kontextv1alpha1.AgentRun) []corev1.EnvVar {
 		{Name: "KONTEXT_BUDGET_WALLCLOCK", Value: budgetField(budget, "wallclock")},
 		{Name: "KONTEXT_BUDGET_DOLLARS", Value: budgetField(budget, "dollars")},
 	}
+	reserved := make(map[string]struct{}, len(env))
+	for _, item := range env {
+		reserved[item.Name] = struct{}{}
+	}
+	for _, credential := range runtimepolicy.Credentials(provider) {
+		reserved[credential.EnvVarName] = struct{}{}
+	}
 
 	for _, extra := range run.Spec.Env {
+		if _, exists := reserved[extra.Name]; exists {
+			return nil, fmt.Errorf(
+				"spec.env cannot override controller-managed variable %q",
+				extra.Name,
+			)
+		}
 		env = append(env, corev1.EnvVar{Name: extra.Name, Value: extra.Value})
 	}
 
@@ -233,7 +288,7 @@ func buildEnv(run *kontextv1alpha1.AgentRun) []corev1.EnvVar {
 		}
 	}
 
-	return env
+	return env, nil
 }
 
 func buildKnowledgeVolumes(run *kontextv1alpha1.AgentRun) ([]corev1.Volume, []corev1.VolumeMount) {

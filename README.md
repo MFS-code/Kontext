@@ -73,7 +73,7 @@ kubectl get agentruns -w
 | Image | Purpose |
 |---|---|
 | [`runtimes/echo/`](runtimes/echo) | Keyless test runtime. Exercises the full contract (stdout thoughts, termination-log result, service heartbeat) without any API key. |
-| [`runtimes/reference/`](runtimes/reference) | Maintained provider-neutral Go runtime with fake, Anthropic, and OpenAI-compatible HTTP transports. |
+| [`runtimes/reference/`](runtimes/reference) | Maintained provider-neutral Go runtime with fake, Anthropic, and OpenAI-compatible transports plus a bounded built-in tool loop. |
 | [`runtimes/python-anthropic/`](runtimes/python-anthropic) | Real runtime backed by the Anthropic Messages API. Needs an `ANTHROPIC_API_KEY` secret via `spec.secretRef`. |
 | [`runtimes/reporter/`](runtimes/reporter) | Reusable PID 1 supervisor. Preserves child logs and process semantics while producing the versioned result envelope. |
 
@@ -82,6 +82,9 @@ the env vars each provider expects. The maintained reference transports use
 `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`; see its
 [compatibility and Secret documentation](runtimes/reference/README.md).
 Credentialed acceptance is dispatch-only and protected from pull-request CI.
+The reference runtime exposes only tools listed in `spec.tools`; Kubernetes
+RBAC, mounts, security context, and NetworkPolicy remain the authority for
+what those tools may access.
 
 ### Capture results from an existing image
 
@@ -109,7 +112,7 @@ wires the locally built reporter automatically.
 
 Every run is bounded and auditable:
 
-- **Budgets** — `spec.budget.wallclock` is enforced by the controller (the Pod is killed and the run marked `BudgetExceeded`); token and dollar usage are reported by the runtime and recorded in `.status.usage`.
+- **Budgets** — `spec.budget.wallclock` is enforced by the controller (the Pod is killed and the run marked `BudgetExceeded`); token and dollar usage are reported by the runtime and recorded in `.status.usage`. The reference runtime checks token budgets against cumulative measured usage across provider requests. Tool follow-ups resend conversation context, and reasoning usage can exceed the visible output, so live model budgets need provider-specific headroom.
 - **Immutable run specs** — an `AgentRun` snapshots its configuration at creation, so history doesn't drift when the `Agent` changes.
 - **Standard lifecycle** — owner references give you GC cascade, conditions record transitions, and `kubectl` is the debugging surface.
 

@@ -1,0 +1,151 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kontext-network-policy-e2e
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: reference-network-reader
+  namespace: kontext-network-policy-e2e
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: reference-network-pod-reader
+  namespace: kontext-network-policy-e2e
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: reference-network-pod-reader
+  namespace: kontext-network-policy-e2e
+subjects:
+  - kind: ServiceAccount
+    name: reference-network-reader
+    namespace: kontext-network-policy-e2e
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: reference-network-pod-reader
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: network-policy-http-content
+  namespace: kontext-network-policy-e2e
+data:
+  allowed.txt: |
+    allowed
+  blocked.txt: |
+    blocked
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: network-policy-http
+  namespace: kontext-network-policy-e2e
+  labels:
+    app.kubernetes.io/name: network-policy-http
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Always
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: allowed
+      image: kontext-reference:dev
+      command: ["/bin/httpd"]
+      args: ["-f", "-p", "8080", "-h", "/www"]
+      ports:
+        - name: allowed
+          containerPort: 8080
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+      volumeMounts:
+        - name: content
+          mountPath: /www
+          readOnly: true
+    - name: blocked
+      image: kontext-reference:dev
+      command: ["/bin/httpd"]
+      args: ["-f", "-p", "8081", "-h", "/www"]
+      ports:
+        - name: blocked
+          containerPort: 8081
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+      volumeMounts:
+        - name: content
+          mountPath: /www
+          readOnly: true
+  volumes:
+    - name: content
+      configMap:
+        name: network-policy-http-content
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: network-policy-http
+  namespace: kontext-network-policy-e2e
+spec:
+  selector:
+    app.kubernetes.io/name: network-policy-http
+  ports:
+    - name: allowed
+      port: 8080
+      targetPort: allowed
+    - name: blocked
+      port: 8081
+      targetPort: blocked
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: reference-runtime-egress
+  namespace: kontext-network-policy-e2e
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kontext-agentrun
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: network-policy-http
+      ports:
+        - protocol: TCP
+          port: 8080
+    # The acceptance script appends exact /32 rules for the Kubernetes Service
+    # and kind control-plane IPs after cluster creation. Keeping dynamic API
+    # endpoints out of this static fixture avoids broad external HTTPS egress.

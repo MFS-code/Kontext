@@ -10,18 +10,23 @@ import (
 
 func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 	values := map[string]string{
-		"KONTEXT_RUN_NAME":          "run-1",
-		"KONTEXT_AGENT_NAME":        "agent-1",
-		"KONTEXT_GOAL":              "explain the contract",
-		"KONTEXT_PROVIDER":          "FAKE",
-		"KONTEXT_MODEL":             " vendor/model@2026:beta ",
-		"KONTEXT_TOOLS":             " one, two ,,",
-		"KONTEXT_BUDGET_TOKENS":     "123",
-		"KONTEXT_BUDGET_WALLCLOCK":  "1m30s",
-		"KONTEXT_BUDGET_DOLLARS":    "0",
-		"KONTEXT_PROVIDER_ENDPOINT": "http://provider.default.svc:8080/v1",
-		"ANTHROPIC_API_KEY":         "anthropic-secret",
-		"OPENAI_API_KEY":            "openai-secret",
+		"KONTEXT_RUN_NAME":                    "run-1",
+		"KONTEXT_AGENT_NAME":                  "agent-1",
+		"KONTEXT_GOAL":                        "explain the contract",
+		"KONTEXT_PROVIDER":                    "FAKE",
+		"KONTEXT_MODEL":                       " vendor/model@2026:beta ",
+		"KONTEXT_TOOLS":                       " one, two ,,",
+		"KONTEXT_BUDGET_TOKENS":               "123",
+		"KONTEXT_BUDGET_WALLCLOCK":            "1m30s",
+		"KONTEXT_BUDGET_DOLLARS":              "0",
+		"KONTEXT_MAX_TURNS":                   "4",
+		"KONTEXT_MAX_TOOL_CALLS":              "8",
+		"KONTEXT_MAX_TOOL_RESULT_BYTES":       "1024",
+		"KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES": "4096",
+		"KONTEXT_EMIT_TOOL_OUTPUT":            "true",
+		"KONTEXT_PROVIDER_ENDPOINT":           "http://provider.default.svc:8080/v1",
+		"ANTHROPIC_API_KEY":                   "anthropic-secret",
+		"OPENAI_API_KEY":                      "openai-secret",
 	}
 	loaded, err := config.Load(lookup(values))
 	if err != nil {
@@ -45,6 +50,15 @@ func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 	if loaded.DollarBudget == nil || *loaded.DollarBudget != 0 {
 		t.Fatalf("expected measured zero dollar budget, got %v", loaded.DollarBudget)
 	}
+	if loaded.MaxTurns == nil || *loaded.MaxTurns != 4 ||
+		loaded.MaxToolCalls == nil || *loaded.MaxToolCalls != 8 ||
+		loaded.MaxToolResultBytes == nil || *loaded.MaxToolResultBytes != 1024 ||
+		loaded.MaxTotalToolOutputBytes == nil || *loaded.MaxTotalToolOutputBytes != 4096 {
+		t.Fatalf("unexpected tool limits: %#v", loaded)
+	}
+	if !loaded.EmitToolOutput {
+		t.Fatal("expected tool output event opt-in")
+	}
 	if loaded.ProviderEndpoint != "http://provider.default.svc:8080/v1" {
 		t.Fatalf("unexpected endpoint %q", loaded.ProviderEndpoint)
 	}
@@ -59,8 +73,36 @@ func TestLoadLeavesLimitsDisabledWhenOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if loaded.TokenBudget != nil || loaded.WallclockBudget != nil || loaded.DollarBudget != nil {
+	if loaded.TokenBudget != nil ||
+		loaded.WallclockBudget != nil ||
+		loaded.DollarBudget != nil ||
+		loaded.MaxTurns != nil ||
+		loaded.MaxToolCalls != nil ||
+		loaded.MaxToolResultBytes != nil ||
+		loaded.MaxTotalToolOutputBytes != nil {
 		t.Fatalf("omitted limits must remain disabled: %#v", loaded)
+	}
+}
+
+func TestLoadTreatsZeroLimitsAsDisabled(t *testing.T) {
+	values := requiredValues()
+	values["KONTEXT_BUDGET_TOKENS"] = "0"
+	values["KONTEXT_BUDGET_WALLCLOCK"] = "0s"
+	values["KONTEXT_MAX_TURNS"] = "0"
+	values["KONTEXT_MAX_TOOL_CALLS"] = "0"
+	values["KONTEXT_MAX_TOOL_RESULT_BYTES"] = "0"
+	values["KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES"] = "0"
+	loaded, err := config.Load(lookup(values))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.TokenBudget != nil ||
+		loaded.WallclockBudget != nil ||
+		loaded.MaxTurns != nil ||
+		loaded.MaxToolCalls != nil ||
+		loaded.MaxToolResultBytes != nil ||
+		loaded.MaxTotalToolOutputBytes != nil {
+		t.Fatalf("zero limits must remain disabled: %#v", loaded)
 	}
 }
 
@@ -77,6 +119,14 @@ func TestLoadValidatesRequiredAndOptionalConfiguration(t *testing.T) {
 		{name: "negative dollars", change: func(values map[string]string) { values["KONTEXT_BUDGET_DOLLARS"] = "-1" }},
 		{name: "NaN dollars", change: func(values map[string]string) { values["KONTEXT_BUDGET_DOLLARS"] = "NaN" }},
 		{name: "infinite dollars", change: func(values map[string]string) { values["KONTEXT_BUDGET_DOLLARS"] = "+Inf" }},
+		{name: "negative max turns", change: func(values map[string]string) { values["KONTEXT_MAX_TURNS"] = "-1" }},
+		{name: "invalid max tool calls", change: func(values map[string]string) { values["KONTEXT_MAX_TOOL_CALLS"] = "many" }},
+		{name: "oversized tool result limit", change: func(values map[string]string) {
+			values["KONTEXT_MAX_TOOL_RESULT_BYTES"] = "8388609"
+		}},
+		{name: "invalid tool output opt-in", change: func(values map[string]string) {
+			values["KONTEXT_EMIT_TOOL_OUTPUT"] = "sometimes"
+		}},
 		{name: "invalid endpoint", change: func(values map[string]string) { values["KONTEXT_PROVIDER_ENDPOINT"] = "localhost:8080" }},
 		{name: "invalid base URL", change: func(values map[string]string) { values["KONTEXT_PROVIDER_BASE_URL"] = "localhost:8080" }},
 		{name: "embedded endpoint credentials", change: func(values map[string]string) {
