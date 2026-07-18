@@ -50,10 +50,35 @@ type AgentMode string
 // +kubebuilder:validation:XValidation:rule="!has(self.result) || (has(self.command) && size(self.command) > 0 && size(self.command[0]) > 0)",message="runtime.command must provide a non-empty executable when runtime.result is configured"
 type RuntimeSpec struct {
 	// +kubebuilder:validation:MinLength=1
-	Image   string             `json:"image"`
-	Command []string           `json:"command,omitempty"`
-	Args    []string           `json:"args,omitempty"`
-	Result  *RuntimeResultSpec `json:"result,omitempty"`
+	Image           string                  `json:"image"`
+	Command         []string                `json:"command,omitempty"`
+	Args            []string                `json:"args,omitempty"`
+	Result          *RuntimeResultSpec      `json:"result,omitempty"`
+	SecurityContext *RuntimeSecurityContext `json:"securityContext,omitempty"`
+}
+
+// RuntimeSecurityContext exposes the portable container hardening fields used
+// by Kontext examples without allowing privilege grants through this API.
+// +kubebuilder:validation:XValidation:rule="!has(self.allowPrivilegeEscalation) || self.allowPrivilegeEscalation == false",message="allowPrivilegeEscalation may only be false"
+// +kubebuilder:validation:XValidation:rule="!has(self.runAsNonRoot) || self.runAsNonRoot == true",message="runAsNonRoot may only be true"
+type RuntimeSecurityContext struct {
+	AllowPrivilegeEscalation *bool                  `json:"allowPrivilegeEscalation,omitempty"`
+	ReadOnlyRootFilesystem   *bool                  `json:"readOnlyRootFilesystem,omitempty"`
+	RunAsNonRoot             *bool                  `json:"runAsNonRoot,omitempty"`
+	Capabilities             *RuntimeCapabilities   `json:"capabilities,omitempty"`
+	SeccompProfile           *RuntimeSeccompProfile `json:"seccompProfile,omitempty"`
+}
+
+type RuntimeCapabilities struct {
+	Drop []string `json:"drop,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="self.type == 'Localhost' ? has(self.localhostProfile) && self.localhostProfile.size() > 0 && !self.localhostProfile.startsWith('/') && !self.localhostProfile.contains('..') : !has(self.localhostProfile)",message="localhostProfile is required as a safe relative path only for Localhost seccomp profiles"
+type RuntimeSeccompProfile struct {
+	// +kubebuilder:validation:Enum=RuntimeDefault;Localhost
+	Type string `json:"type"`
+
+	LocalhostProfile string `json:"localhostProfile,omitempty"`
 }
 
 // RuntimeResultSpec opts an existing runtime image into result capture.

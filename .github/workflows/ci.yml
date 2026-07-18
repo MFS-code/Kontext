@@ -98,6 +98,24 @@ jobs:
           [[ "${success_output}" == *'"apiVersion":"kontext.dev/event/v1alpha1"'* ]]
           [[ "${success_output}" == *'KONTEXT_RESULT:'* ]]
 
+          tool_output="$(
+            docker run --rm \
+              -e KONTEXT_TERMINATION_MESSAGE=/dev/null \
+              -e KONTEXT_GOAL='CI shell tool' \
+              -e KONTEXT_PROVIDER=fake \
+              -e KONTEXT_MODEL='opaque/ci-model' \
+              -e KONTEXT_TOOLS=shell \
+              -e KONTEXT_FAKE_SCENARIO=tool \
+              -e KONTEXT_FAKE_TOOL_NAME=shell \
+              -e 'KONTEXT_FAKE_TOOL_ARGUMENTS={"command":"ls /bin >/dev/null && printf tool-ok","working_directory":"/tmp"}' \
+              -e KONTEXT_MAX_TURNS=3 \
+              -e KONTEXT_MAX_TOOL_CALLS=2 \
+              "${KONTEXT_REFERENCE_IMAGE}"
+          )"
+          [[ "${tool_output}" == *'"type":"tool"'* ]]
+          [[ "${tool_output}" == *'tool-ok'* ]]
+          [[ "${tool_output}" == *'"toolCalls":1'* ]]
+
           set +e
           failure_output="$(
             docker run --rm \

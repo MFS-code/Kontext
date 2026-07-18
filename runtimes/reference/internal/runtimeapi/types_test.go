@@ -2,6 +2,7 @@ package runtimeapi_test
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
@@ -105,6 +106,45 @@ func TestValidateResponseRejectsMalformedToolCall(t *testing.T) {
 	}
 	if err := runtimeapi.ValidateResponse(response); err == nil {
 		t.Fatal("expected invalid tool arguments")
+	}
+}
+
+func TestValidateResponseRejectsInvalidUsage(t *testing.T) {
+	base := runtimeapi.CompletionResponse{
+		Message: runtimeapi.Message{
+			Role: runtimeapi.RoleAssistant,
+			Content: []runtimeapi.ContentBlock{
+				{Type: runtimeapi.ContentTypeText, Text: "answer"},
+			},
+		},
+		StopReason: runtimeapi.StopReasonEndTurn,
+	}
+	negative := int64(-1)
+	base.Usage.InputTokens = &negative
+	if err := runtimeapi.ValidateResponse(base); err == nil {
+		t.Fatal("expected negative usage rejection")
+	}
+
+	input := int64(4)
+	output := int64(3)
+	total := int64(5)
+	base.Usage = runtimeapi.Usage{
+		InputTokens:  &input,
+		OutputTokens: &output,
+		TotalTokens:  &total,
+	}
+	if err := runtimeapi.ValidateResponse(base); err == nil {
+		t.Fatal("expected inconsistent total usage rejection")
+	}
+
+	maximum := int64(math.MaxInt64)
+	one := int64(1)
+	base.Usage = runtimeapi.Usage{
+		InputTokens:  &maximum,
+		OutputTokens: &one,
+	}
+	if err := runtimeapi.ValidateResponse(base); err == nil {
+		t.Fatal("expected usage overflow rejection")
 	}
 }
 

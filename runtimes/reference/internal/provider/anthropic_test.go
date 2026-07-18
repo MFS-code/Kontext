@@ -258,6 +258,96 @@ func TestAnthropicRejectsInvalidResponsesAndTimesOut(t *testing.T) {
 	})
 }
 
+func TestAnthropicSerializesToolsCallsAndResults(t *testing.T) {
+	var received struct {
+		Tools []struct {
+			Name        string          `json:"name"`
+			InputSchema json.RawMessage `json:"input_schema"`
+		} `json:"tools"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type      string          `json:"type"`
+				ID        string          `json:"id"`
+				Name      string          `json:"name"`
+				Input     json.RawMessage `json:"input"`
+				ToolUseID string          `json:"tool_use_id"`
+				Content   string          `json:"content"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, _ = writer.Write([]byte(`{
+			"role":"assistant",
+			"content":[{"type":"text","text":"done"}],
+			"stop_reason":"end_turn"
+		}`))
+	}))
+	defer server.Close()
+	selected, err := provider.NewAnthropic(provider.AnthropicConfig{
+		APIKey:   "key",
+		Endpoint: server.URL,
+		Client:   server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	request := completionRequest("model")
+	request.Tools = []runtimeapi.ToolDefinition{
+		{
+			Name:        "lookup",
+			Description: "Look up a status.",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		},
+	}
+	request.Messages = append(request.Messages,
+		runtimeapi.Message{
+			Role: runtimeapi.RoleAssistant,
+			Content: []runtimeapi.ContentBlock{
+				{
+					Type: runtimeapi.ContentTypeToolCall,
+					ToolCall: &runtimeapi.ToolCall{
+						ID:        "call-1",
+						Name:      "lookup",
+						Arguments: json.RawMessage(`{"query":"status"}`),
+					},
+				},
+			},
+		},
+		runtimeapi.Message{
+			Role: runtimeapi.RoleTool,
+			Content: []runtimeapi.ContentBlock{
+				{
+					Type: runtimeapi.ContentTypeToolResult,
+					ToolResult: &runtimeapi.ToolResult{
+						CallID:  "call-1",
+						Name:    "lookup",
+						Content: `{"status":"ok"}`,
+					},
+				},
+			},
+		},
+	)
+	if _, err := selected.Complete(context.Background(), request); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if len(received.Tools) != 1 ||
+		received.Tools[0].Name != "lookup" ||
+		!json.Valid(received.Tools[0].InputSchema) {
+		t.Fatalf("unexpected tools %#v", received.Tools)
+	}
+	if len(received.Messages) != 3 ||
+		received.Messages[1].Content[0].Type != "tool_use" ||
+		received.Messages[2].Role != "user" ||
+		received.Messages[2].Content[0].Type != "tool_result" ||
+		received.Messages[2].Content[0].ToolUseID != "call-1" {
+		t.Fatalf("unexpected messages %#v", received.Messages)
+	}
+}
+
 func TestAnthropicRequiresWellFormedCredentials(t *testing.T) {
 	for _, apiKey := range []string{"", " key-with-spaces ", "key\ninjected"} {
 		_, err := provider.NewAnthropic(provider.AnthropicConfig{APIKey: apiKey})

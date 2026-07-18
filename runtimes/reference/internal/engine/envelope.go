@@ -14,13 +14,15 @@ type Metadata struct {
 	RequestID   string
 	StartedAt   time.Time
 	CompletedAt time.Time
+	Turns       int32
+	ToolCalls   int32
 }
 
 func Success(response runtimeapi.CompletionResponse, metadata Metadata) resultv1alpha1.Envelope {
 	text := runtimeapi.MessageText(response.Message)
 	value, _ := json.Marshal(text)
-	turns := int32(1)
-	toolCalls := int32(len(runtimeapi.MessageToolCalls(response.Message)))
+	turns := metadata.Turns
+	toolCalls := metadata.ToolCalls
 	durationMillis := metadata.CompletedAt.Sub(metadata.StartedAt).Milliseconds()
 
 	return resultv1alpha1.Envelope{
@@ -53,6 +55,8 @@ func Failure(
 	metadata Metadata,
 ) resultv1alpha1.Envelope {
 	durationMillis := metadata.CompletedAt.Sub(metadata.StartedAt).Milliseconds()
+	turns := metadata.Turns
+	toolCalls := metadata.ToolCalls
 	return resultv1alpha1.Envelope{
 		APIVersion: resultv1alpha1.APIVersion,
 		Outcome:    resultv1alpha1.OutcomeFailed,
@@ -65,6 +69,8 @@ func Failure(
 			Provider:  metadata.Provider,
 			Model:     metadata.Model,
 			RequestID: metadata.RequestID,
+			Turns:     &turns,
+			ToolCalls: &toolCalls,
 		},
 		Error: &resultv1alpha1.ErrorInfo{
 			Code:      code,

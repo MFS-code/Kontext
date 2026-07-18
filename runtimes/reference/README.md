@@ -32,16 +32,22 @@ No private chain-of-thought is emitted.
 | `KONTEXT_MODEL` | yes | Opaque provider model identifier |
 | `KONTEXT_RUN_NAME` | no | Run metadata; defaults to `unknown-run` |
 | `KONTEXT_AGENT_NAME` | no | Agent metadata; defaults to run name |
-| `KONTEXT_TOOLS` | no | Declared allowlist; recorded but not executed yet |
-| `KONTEXT_BUDGET_TOKENS` | no | Positive requested output/token limit |
+| `KONTEXT_TOOLS` | no | Comma-separated built-in tool allowlist |
+| `KONTEXT_BUDGET_TOKENS` | no | Positive cumulative measured token limit |
 | `KONTEXT_BUDGET_WALLCLOCK` | no | Optional Go duration; omitted means disabled |
 | `KONTEXT_BUDGET_DOLLARS` | no | Optional non-negative recorded budget |
+| `KONTEXT_MAX_TURNS` | no | Maximum provider completions in one run |
+| `KONTEXT_MAX_TOOL_CALLS` | no | Maximum executed tool calls in one run |
+| `KONTEXT_MAX_TOOL_RESULT_BYTES` | no | Maximum bytes returned from one tool call |
+| `KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES` | no | Maximum tool-result bytes returned across the run |
 | `KONTEXT_PROVIDER_ENDPOINT` | no | Exact absolute HTTP(S) request endpoint |
 | `KONTEXT_PROVIDER_BASE_URL` | no | Absolute HTTP(S) base URL; provider path is appended |
 | `ANTHROPIC_API_KEY` | Anthropic only | Anthropic API key, normally injected from a Secret |
 | `OPENAI_API_KEY` | OpenAI-compatible only | Bearer token, normally injected from a Secret |
-| `KONTEXT_FAKE_SCENARIO` | no | `success`, `failure`, `malformed`, or `delay` |
+| `KONTEXT_FAKE_SCENARIO` | no | `success`, `failure`, `malformed`, `delay`, or `tool` |
 | `KONTEXT_FAKE_DELAY` | delay only | Positive Go duration such as `250ms` |
+| `KONTEXT_FAKE_TOOL_NAME` | tool only | Deterministic fake-provider tool name |
+| `KONTEXT_FAKE_TOOL_ARGUMENTS` | tool only | Deterministic fake-provider JSON arguments |
 
 There is deliberately no hidden five-minute deadline. The Kubernetes
 controller remains authoritative for `KONTEXT_BUDGET_WALLCLOCK`; the runtime
@@ -85,17 +91,52 @@ extensions. Endpoint operators are responsible for accepting a bearer token
 in `Authorization`; a non-secret placeholder may be used only when an
 in-cluster endpoint ignores auth.
 
-The runtime currently does not send declared tools or execute returned tool
-calls. Tool calls are normalized so the transport boundary remains explicit,
-but this one-turn runtime is intended for text tasks until the bounded tool
-loop is implemented.
+Both transports receive only the tools explicitly listed in `KONTEXT_TOOLS`.
+The runtime executes normalized calls, returns normalized results to the
+provider, and continues until final output or a configured limit.
 
 HTTP failures use stable result error codes including
 `authentication_failed`, `rate_limited`, `provider_timeout`,
 `provider_network_error`, `provider_endpoint_error`,
 `provider_request_rejected`, and `invalid_provider_response`. Retryability,
-HTTP status, and provider request IDs are retained where available. Response
+and provider request IDs are retained where available. HTTP status informs the
+normalized error code but is not included in the terminal envelope. Response
 bodies are bounded to 4 MiB.
+
+## Built-in tools
+
+The maintained runtime includes three tools:
+
+- `read_knowledge` reads one UTF-8 file below `/kontext/knowledge`. Absolute
+  paths, parent traversal, escaping symlinks, directories, and oversized reads
+  are rejected or truncated.
+- `kubernetes_read` performs current-namespace `get` or `list` operations for
+  a fixed resource allowlist. It has no namespace argument and never permits
+  Secrets. Kubernetes RBAC remains authoritative.
+- `shell` runs `/bin/sh -c` as the runtime container user in a required
+  absolute working directory. Its direct child environment excludes provider,
+  Kubernetes, and other credential-shaped variables. Stdout and stderr stream
+  to container logs while the result returned to the model remains bounded.
+
+Allowlisting a tool makes it visible to the model; it does not grant new
+infrastructure permissions. The Pod's ServiceAccount, security context,
+mounted volumes, filesystem permissions, and NetworkPolicy determine what a
+tool can actually access.
+
+Environment filtering is defense in depth, not a Secret boundary. The shell
+runs in the same container as the runtime and may access files or process
+metadata available to that container. Do not expose `shell` to workloads that
+must not access the runtime container's credentials.
+
+Tool errors are returned to the model so it may recover within the remaining
+limits. Cancellation terminates the shell process group and fails the run.
+Unknown or non-allowlisted calls return structured tool errors and are never
+executed.
+
+The turn, tool-call, per-result, and total-output limits are disabled when
+their environment variables are omitted or set to `0`. Examples use finite
+values. Built-in file and process capture still use an 8 MiB safety ceiling
+when no lower result limit is configured.
 
 ## Local fake-provider run
 
@@ -131,6 +172,8 @@ Example templates live in `deploy/examples/v1alpha1/`:
 - `provider-secrets.example.yaml`
 - `reference-anthropic-run.yaml`
 - `reference-openai-compatible-run.yaml`
+- `reference-fake-tool-run.yaml`
+- `reference-tools-run.yaml`
 
 The `Provider acceptance` GitHub Actions workflow is dispatch-only and uses
 the `provider-acceptance` environment. Repository maintainers must protect
@@ -145,16 +188,18 @@ Kontext packages. The bundled reporter additionally uses `golang.org/x/sys`
 for Linux process supervision. The production image contains:
 
 - `gcr.io/distroless/static:nonroot`
+- BusyBox `sh` and applets copied into the final image for the allowlisted
+  shell tool
 - `/kontext-reporter`
 - `/kontext-reference`
 
-It contains no shell, package manager, agent framework, retrieval system, or
+It contains no package manager, agent framework, retrieval system, or
 persistent storage.
 
 ## Explicit limits
 
-- One provider completion per run.
+- Provider turns and tool calls continue only within configured limits.
 - Conversation state exists only in memory for that run.
-- Tools are declared but not executed.
+- Tool results are bounded and full shell output remains in container logs.
 - No retries, planning, memory, retrieval, subagents, background work, or
   provider-specific model aliases.

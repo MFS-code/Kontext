@@ -16,7 +16,7 @@ func TestRunEmitsJSONLAndVersionedResult(t *testing.T) {
 		"KONTEXT_GOAL":     "explain the contract",
 		"KONTEXT_PROVIDER": "fake",
 		"KONTEXT_MODEL":    "opaque/model:id",
-		"KONTEXT_TOOLS":    "declared-only",
+		"KONTEXT_TOOLS":    "read_knowledge",
 	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

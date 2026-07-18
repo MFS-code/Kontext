@@ -113,6 +113,7 @@ type anthropicRequestPayload struct {
 	Model     string                    `json:"model"`
 	MaxTokens int64                     `json:"max_tokens"`
 	Messages  []anthropicRequestMessage `json:"messages"`
+	Tools     []anthropicToolDefinition `json:"tools,omitempty"`
 }
 
 type anthropicRequestMessage struct {
@@ -121,8 +122,20 @@ type anthropicRequestMessage struct {
 }
 
 type anthropicRequestContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
+}
+
+type anthropicToolDefinition struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"input_schema"`
 }
 
 func anthropicRequest(request runtimeapi.CompletionRequest) (anthropicRequestPayload, error) {
@@ -134,21 +147,81 @@ func anthropicRequest(request runtimeapi.CompletionRequest) (anthropicRequestPay
 		Model:     request.Model,
 		MaxTokens: maxTokens,
 		Messages:  make([]anthropicRequestMessage, 0, len(request.Messages)),
+		Tools:     make([]anthropicToolDefinition, 0, len(request.Tools)),
+	}
+	for index, definition := range request.Tools {
+		if strings.TrimSpace(definition.Name) == "" ||
+			strings.TrimSpace(definition.Description) == "" ||
+			!json.Valid(definition.InputSchema) {
+			return anthropicRequestPayload{}, fmt.Errorf("tool definition %d is invalid", index)
+		}
+		payload.Tools = append(payload.Tools, anthropicToolDefinition{
+			Name:        definition.Name,
+			Description: definition.Description,
+			InputSchema: append(json.RawMessage(nil), definition.InputSchema...),
+		})
 	}
 	for messageIndex, message := range request.Messages {
-		if message.Role != runtimeapi.RoleUser && message.Role != runtimeapi.RoleAssistant {
+		if message.Role != runtimeapi.RoleUser &&
+			message.Role != runtimeapi.RoleAssistant &&
+			message.Role != runtimeapi.RoleTool {
 			return anthropicRequestPayload{}, fmt.Errorf(
 				"message %d has unsupported role %q",
 				messageIndex,
 				message.Role,
 			)
 		}
+		role := string(message.Role)
+		if message.Role == runtimeapi.RoleTool {
+			role = string(runtimeapi.RoleUser)
+		}
 		normalized := anthropicRequestMessage{
-			Role:    string(message.Role),
+			Role:    role,
 			Content: make([]anthropicRequestContent, 0, len(message.Content)),
 		}
 		for blockIndex, block := range message.Content {
-			if block.Type != runtimeapi.ContentTypeText {
+			switch block.Type {
+			case runtimeapi.ContentTypeText:
+				if message.Role == runtimeapi.RoleTool {
+					return anthropicRequestPayload{}, fmt.Errorf(
+						"tool message %d content block %d must be a tool result",
+						messageIndex,
+						blockIndex,
+					)
+				}
+				normalized.Content = append(normalized.Content, anthropicRequestContent{
+					Type: "text",
+					Text: block.Text,
+				})
+			case runtimeapi.ContentTypeToolCall:
+				if message.Role != runtimeapi.RoleAssistant || block.ToolCall == nil {
+					return anthropicRequestPayload{}, fmt.Errorf(
+						"message %d content block %d has invalid tool call",
+						messageIndex,
+						blockIndex,
+					)
+				}
+				normalized.Content = append(normalized.Content, anthropicRequestContent{
+					Type:  "tool_use",
+					ID:    block.ToolCall.ID,
+					Name:  block.ToolCall.Name,
+					Input: append(json.RawMessage(nil), block.ToolCall.Arguments...),
+				})
+			case runtimeapi.ContentTypeToolResult:
+				if message.Role != runtimeapi.RoleTool || block.ToolResult == nil {
+					return anthropicRequestPayload{}, fmt.Errorf(
+						"message %d content block %d has invalid tool result",
+						messageIndex,
+						blockIndex,
+					)
+				}
+				normalized.Content = append(normalized.Content, anthropicRequestContent{
+					Type:      "tool_result",
+					ToolUseID: block.ToolResult.CallID,
+					Content:   providerToolResultContent(block.ToolResult),
+					IsError:   block.ToolResult.IsError,
+				})
+			default:
 				return anthropicRequestPayload{}, fmt.Errorf(
 					"message %d content block %d has unsupported type %q",
 					messageIndex,
@@ -156,10 +229,6 @@ func anthropicRequest(request runtimeapi.CompletionRequest) (anthropicRequestPay
 					block.Type,
 				)
 			}
-			normalized.Content = append(normalized.Content, anthropicRequestContent{
-				Type: "text",
-				Text: block.Text,
-			})
 		}
 		payload.Messages = append(payload.Messages, normalized)
 	}

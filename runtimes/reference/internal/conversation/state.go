@@ -35,6 +35,18 @@ func (state *State) Messages() []runtimeapi.Message {
 
 func cloneMessage(message runtimeapi.Message) runtimeapi.Message {
 	cloned := message
-	cloned.Content = append([]runtimeapi.ContentBlock(nil), message.Content...)
+	cloned.Content = make([]runtimeapi.ContentBlock, len(message.Content))
+	for index, block := range message.Content {
+		cloned.Content[index] = block
+		if block.ToolCall != nil {
+			call := *block.ToolCall
+			call.Arguments = append([]byte(nil), block.ToolCall.Arguments...)
+			cloned.Content[index].ToolCall = &call
+		}
+		if block.ToolResult != nil {
+			result := *block.ToolResult
+			cloned.Content[index].ToolResult = &result
+		}
+	}
 	return cloned
 }

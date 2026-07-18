@@ -52,8 +52,10 @@ kubectl delete agentrun \
   stdout-failure \
   stdout-signal \
   reference-fake \
+  reference-fake-tool \
   --ignore-not-found=true \
   --wait=true
+kubectl delete configmap reference-tool-knowledge --ignore-not-found=true
 
 echo "==> applying standalone echo task run"
 kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/echo-task-run.yaml"
@@ -167,6 +169,21 @@ if [[ "${reference_input_tokens}" != "8" || "${reference_output_tokens}" != "12"
 fi
 if [[ "${reference_logs}" != *'"apiVersion":"kontext.dev/event/v1alpha1"'* ]]; then
   echo "reference runtime did not emit versioned JSONL events" >&2
+  exit 1
+fi
+
+echo "==> verifying bounded reference-runtime tool loop"
+kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/reference-fake-tool-run.yaml"
+wait_for_run_phase reference-fake-tool Succeeded
+tool_result="$(kubectl get agentrun reference-fake-tool -o jsonpath='{.status.result}')"
+tool_logs="$(kubectl logs run-reference-fake-tool -c runtime)"
+if [[ "${tool_result}" != "Fake provider received read_knowledge result: tool loop works" ]]; then
+  echo "unexpected tool-loop result: ${tool_result}" >&2
+  exit 1
+fi
+if [[ "${tool_logs}" != *'"type":"tool"'* ||
+  "${tool_logs}" != *'"name":"read_knowledge"'* ]]; then
+  echo "tool loop did not emit the expected execution event" >&2
   exit 1
 fi
 

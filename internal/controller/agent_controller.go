@@ -186,7 +186,7 @@ func (r *AgentReconciler) buildServiceRun(agent *kontextv1alpha1.Agent, runName 
 			Model:    agent.Spec.Model,
 			Tools:    util.CloneSlice(agent.Spec.Tools),
 			Budget:   agent.Spec.Budget,
-			Runtime:  agent.Spec.Runtime,
+			Runtime:  *agent.Spec.Runtime.DeepCopy(),
 			Env:      util.CloneSlice(agent.Spec.Env),
 		},
 	}

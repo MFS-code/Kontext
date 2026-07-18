@@ -41,6 +41,7 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `runtime.command`    | []string                              | no  | Override entrypoint.                                           |
 | `runtime.args`       | []string                              | no  |                                                                |
 | `runtime.result`     | object                                | no  | Optional stdout result capture policy.                         |
+| `runtime.securityContext` | restricted security context     | no  | Portable non-root, capability-drop, filesystem, and seccomp settings. |
 | `goal`               | string                                | no* | Default/persistent goal. Required for `Service`/`Scheduled`.   |
 | `goalTemplate`       | string                                | no  | Parameterized goal for templated runs (`Task`).                |
 | `provider`           | string                                | no  | Default `anthropic`.                                           |
@@ -94,6 +95,7 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 | `runtime.command`    | []string | no  | Required when stdout capture is configured.      |
 | `runtime.args`       | []string | no  | Appended to the declared command.                |
 | `runtime.result`     | object   | no  | Optional stdout result capture policy.           |
+| `runtime.securityContext` | restricted security context | no | Portable non-root, capability-drop, filesystem, and seccomp settings. |
 
 
 When created from an `Agent`, the controller snapshots/resolves these fields so the run does not drift if the `Agent` changes later.
@@ -295,13 +297,26 @@ The controller remains authoritative for wallclock enforcement. The runtime
 parses `KONTEXT_BUDGET_WALLCLOCK` but does not start a competing timer; it
 reacts to cancellation when the reporter forwards controller signals.
 Omission means no deadline, and the runtime does not invent a five-minute
-default. Declared tools are recorded in lifecycle events but are not exposed to
-the provider or executed until the bounded tool loop is implemented.
+default.
 
-The reference runtime emits versioned JSONL lifecycle, usage, output, and error
-events to stdout. It retains conversation state only in memory for one run and
-does not provide retries, planning, memory, retrieval, subagents, or background
-orchestration.
+The maintained runtime exposes only tools named in `KONTEXT_TOOLS`. It owns a
+bounded provider-neutral loop that returns normalized tool results until final
+output, cancellation, failure, or a configured turn, token, tool-call, or
+tool-output limit. Omitted or zero runtime limits are disabled. Built-in tools
+are `read_knowledge`, `kubernetes_read`, and `shell`.
+
+`read_knowledge` is confined to `/kontext/knowledge`. `kubernetes_read` has a
+fixed current-namespace get/list allowlist and never reads Secrets. `shell`
+uses an explicit working directory, filters its direct child environment,
+streams logs, bounds captured output, and cleans up its process group on
+cancellation. These runtime checks prevent accidental exposure; Kubernetes
+RBAC, workload security context, mounted data, and container isolation remain
+the security boundaries.
+
+The reference runtime emits versioned JSONL lifecycle, usage, tool, output, and
+error events to stdout. It retains conversation state only in memory for one
+run and does not provide retries, planning, persistent memory, retrieval,
+subagents, or background orchestration.
 
 ### Mode expectations for the image
 

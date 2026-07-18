@@ -138,6 +138,49 @@ spec:
                     - format
                     - source
                     type: object
+                  securityContext:
+                    description: |-
+                      RuntimeSecurityContext exposes the portable container hardening fields used
+                      by Kontext examples without allowing privilege grants through this API.
+                    properties:
+                      allowPrivilegeEscalation:
+                        type: boolean
+                      capabilities:
+                        properties:
+                          drop:
+                            items:
+                              type: string
+                            type: array
+                        type: object
+                      readOnlyRootFilesystem:
+                        type: boolean
+                      runAsNonRoot:
+                        type: boolean
+                      seccompProfile:
+                        properties:
+                          localhostProfile:
+                            type: string
+                          type:
+                            enum:
+                            - RuntimeDefault
+                            - Localhost
+                            type: string
+                        required:
+                        - type
+                        type: object
+                        x-kubernetes-validations:
+                        - message: localhostProfile is required as a safe relative
+                            path only for Localhost seccomp profiles
+                          rule: 'self.type == ''Localhost'' ? has(self.localhostProfile)
+                            && self.localhostProfile.size() > 0 && !self.localhostProfile.startsWith(''/'')
+                            && !self.localhostProfile.contains(''..'') : !has(self.localhostProfile)'
+                    type: object
+                    x-kubernetes-validations:
+                    - message: allowPrivilegeEscalation may only be false
+                      rule: '!has(self.allowPrivilegeEscalation) || self.allowPrivilegeEscalation
+                        == false'
+                    - message: runAsNonRoot may only be true
+                      rule: '!has(self.runAsNonRoot) || self.runAsNonRoot == true'
                 required:
                 - image
                 type: object
@@ -166,6 +209,9 @@ spec:
             - model
             - runtime
             type: object
+            x-kubernetes-validations:
+            - message: AgentRun spec is immutable
+              rule: self == oldSelf
           status:
             description: AgentRunStatus defines the observed state of AgentRun.
             properties:

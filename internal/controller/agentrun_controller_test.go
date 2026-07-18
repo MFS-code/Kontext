@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +48,71 @@ func TestAgentRunReconcilerCreatesPod(t *testing.T) {
 	pod := &corev1.Pod{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, pod); err != nil {
 		t.Fatalf("expected pod %s: %v", podName, err)
+	}
+}
+
+func TestAgentRunSpecIsImmutable(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "immutable-run", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "original goal",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	run.Spec.Goal = "changed goal"
+	if err := k8sClient.Update(ctx, run); err == nil {
+		t.Fatal("expected immutable AgentRun spec update to be rejected")
+	}
+}
+
+func TestAgentRunRejectsUnsafeRuntimeSecurityContext(t *testing.T) {
+	trueValue := true
+	tests := []struct {
+		name            string
+		securityContext *kontextv1alpha1.RuntimeSecurityContext
+	}{
+		{
+			name: "privilege escalation",
+			securityContext: &kontextv1alpha1.RuntimeSecurityContext{
+				AllowPrivilegeEscalation: &trueValue,
+			},
+		},
+		{
+			name: "localhost seccomp without profile",
+			securityContext: &kontextv1alpha1.RuntimeSecurityContext{
+				SeccompProfile: &kontextv1alpha1.RuntimeSeccompProfile{
+					Type: "Localhost",
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			run := &kontextv1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "unsafe-" + strings.ReplaceAll(test.name, " ", "-"),
+					Namespace: "default",
+				},
+				Spec: kontextv1alpha1.AgentRunSpec{
+					Goal:     "goal",
+					Provider: "echo",
+					Model:    "echo-model",
+					Runtime: kontextv1alpha1.RuntimeSpec{
+						Image:           "runtime:dev",
+						SecurityContext: test.securityContext,
+					},
+				},
+			}
+			if err := k8sClient.Create(context.Background(), run); err == nil {
+				t.Fatal("expected unsafe security context to be rejected")
+			}
+		})
 	}
 }
 
