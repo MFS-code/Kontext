@@ -547,6 +547,38 @@ func TestRunnerSaturatesCumulativeUsageWithoutOverflow(t *testing.T) {
 	}
 }
 
+func TestRunnerAggregatesReasoningUsageAcrossTurns(t *testing.T) {
+	first := toolCallResponse("call-1")
+	zero := int64(0)
+	firstOutput := int64(5)
+	first.Usage.OutputTokens = &firstOutput
+	first.Usage.ReasoningTokens = &zero
+
+	second := finalResponse("done")
+	secondOutput := int64(10)
+	secondReasoning := int64(7)
+	second.Usage.OutputTokens = &secondOutput
+	second.Usage.ReasoningTokens = &secondReasoning
+
+	selectedProvider := &scriptedProvider{
+		responses: []runtimeapi.CompletionResponse{first, second},
+	}
+	result := runnerWithTools(
+		selectedProvider,
+		lookupExecutor(runtimeapi.ToolResult{Content: "ok"}),
+	).Run(context.Background(), baseConfig())
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected failure %#v", result.Envelope.Error)
+	}
+	if result.Envelope.Usage == nil ||
+		result.Envelope.Usage.OutputTokens == nil ||
+		*result.Envelope.Usage.OutputTokens != 15 ||
+		result.Envelope.Usage.ReasoningTokens == nil ||
+		*result.Envelope.Usage.ReasoningTokens != 7 {
+		t.Fatalf("reasoning usage did not aggregate: %#v", result.Envelope.Usage)
+	}
+}
+
 func TestRunnerHasNoImplicitWallclockDeadline(t *testing.T) {
 	runtimeConfig := baseConfig()
 	runtimeConfig.FakeScenario = provider.FakeScenarioDelay

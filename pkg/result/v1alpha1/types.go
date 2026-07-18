@@ -173,6 +173,15 @@ func validateUsage(usage Usage) error {
 			return fmt.Errorf("result usage %s cannot be negative", name)
 		}
 	}
+	if usage.OutputTokens != nil &&
+		usage.ReasoningTokens != nil &&
+		*usage.ReasoningTokens > *usage.OutputTokens {
+		return fmt.Errorf(
+			"result usage reasoningTokens %d exceeds outputTokens %d",
+			*usage.ReasoningTokens,
+			*usage.OutputTokens,
+		)
+	}
 	if usage.Dollars != nil && *usage.Dollars < 0 {
 		return errors.New("result usage dollars cannot be negative")
 	}

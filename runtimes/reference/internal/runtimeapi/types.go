@@ -175,6 +175,7 @@ func validateUsage(usage Usage) error {
 		{name: "input", value: usage.InputTokens},
 		{name: "output", value: usage.OutputTokens},
 		{name: "total", value: usage.TotalTokens},
+		{name: "reasoning", value: usage.ReasoningTokens},
 	} {
 		if metric.value != nil && *metric.value < 0 {
 			return fmt.Errorf("%s token usage cannot be negative", metric.name)
@@ -198,6 +199,15 @@ func validateUsage(usage Usage) error {
 				measuredParts,
 			)
 		}
+	}
+	if usage.OutputTokens != nil &&
+		usage.ReasoningTokens != nil &&
+		*usage.ReasoningTokens > *usage.OutputTokens {
+		return fmt.Errorf(
+			"reasoning token usage %d exceeds output token usage %d",
+			*usage.ReasoningTokens,
+			*usage.OutputTokens,
+		)
 	}
 	return nil
 }

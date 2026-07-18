@@ -135,6 +135,8 @@ func TestParseRejectsInvalidEnvelope(t *testing.T) {
 		`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Unknown"}`,
 		`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Failed"}`,
 		`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":`,
+		`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","usage":{"reasoningTokens":-1}}`,
+		`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","usage":{"outputTokens":4,"reasoningTokens":5}}`,
 	}
 	for _, message := range cases {
 		t.Run(message, func(t *testing.T) {
