@@ -5,6 +5,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${KIND_CLUSTER_NAME:-kontext}"
+IMAGE_SET="${KONTEXT_KIND_IMAGE_SET:-full}"
 OPERATOR_IMAGE="${KONTEXT_OPERATOR_IMAGE:-kontext-operator:dev}"
 ECHO_IMAGE="${KONTEXT_ECHO_IMAGE:-kontext-echo:dev}"
 REPORTER_IMAGE="${KONTEXT_REPORTER_IMAGE:-kontext-reporter:dev}"
@@ -22,15 +23,19 @@ need docker
 need kind
 need kubectl
 
+case "${IMAGE_SET}" in
+  full|network-policy) ;;
+  *)
+    echo "unsupported KONTEXT_KIND_IMAGE_SET: ${IMAGE_SET}" >&2
+    exit 1
+    ;;
+esac
+
 if ! docker image inspect "${OPERATOR_IMAGE}" >/dev/null 2>&1; then
   echo "missing local image ${OPERATOR_IMAGE}; build with: make docker-build" >&2
   exit 1
 fi
 OPERATOR_IMAGE_ID="$(docker image inspect "${OPERATOR_IMAGE}" --format '{{.Id}}')"
-if ! docker image inspect "${ECHO_IMAGE}" >/dev/null 2>&1; then
-  echo "missing local image ${ECHO_IMAGE}; build with: make docker-build-echo" >&2
-  exit 1
-fi
 if ! docker image inspect "${REPORTER_IMAGE}" >/dev/null 2>&1; then
   echo "missing local image ${REPORTER_IMAGE}; build with: make docker-build-reporter" >&2
   exit 1
@@ -39,9 +44,15 @@ if ! docker image inspect "${REFERENCE_IMAGE}" >/dev/null 2>&1; then
   echo "missing local image ${REFERENCE_IMAGE}; build with: make docker-build-reference" >&2
   exit 1
 fi
-if ! docker image inspect "${STDOUT_FIXTURE_IMAGE}" >/dev/null 2>&1; then
-  echo "missing local image ${STDOUT_FIXTURE_IMAGE}; build with: make docker-build-stdout-fixture" >&2
-  exit 1
+if [[ "${IMAGE_SET}" == "full" ]]; then
+  if ! docker image inspect "${ECHO_IMAGE}" >/dev/null 2>&1; then
+    echo "missing local image ${ECHO_IMAGE}; build with: make docker-build-echo" >&2
+    exit 1
+  fi
+  if ! docker image inspect "${STDOUT_FIXTURE_IMAGE}" >/dev/null 2>&1; then
+    echo "missing local image ${STDOUT_FIXTURE_IMAGE}; build with: make docker-build-stdout-fixture" >&2
+    exit 1
+  fi
 fi
 
 if ! kind get clusters | grep -qx "${CLUSTER_NAME}"; then
@@ -53,10 +64,12 @@ fi
 
 echo "==> loading images into kind/${CLUSTER_NAME}"
 kind load docker-image "${OPERATOR_IMAGE}" --name "${CLUSTER_NAME}"
-kind load docker-image "${ECHO_IMAGE}" --name "${CLUSTER_NAME}"
 kind load docker-image "${REPORTER_IMAGE}" --name "${CLUSTER_NAME}"
 kind load docker-image "${REFERENCE_IMAGE}" --name "${CLUSTER_NAME}"
-kind load docker-image "${STDOUT_FIXTURE_IMAGE}" --name "${CLUSTER_NAME}"
+if [[ "${IMAGE_SET}" == "full" ]]; then
+  kind load docker-image "${ECHO_IMAGE}" --name "${CLUSTER_NAME}"
+  kind load docker-image "${STDOUT_FIXTURE_IMAGE}" --name "${CLUSTER_NAME}"
+fi
 
 echo "==> installing v1alpha1 CRDs and Go controller"
 CONTROLLER_POD_UID_BEFORE="$(
