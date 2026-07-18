@@ -16,6 +16,7 @@ const (
 	TypeLifecycle Type = "lifecycle"
 	TypeOutput    Type = "output"
 	TypeUsage     Type = "usage"
+	TypeTool      Type = "tool"
 	TypeError     Type = "error"
 )
 

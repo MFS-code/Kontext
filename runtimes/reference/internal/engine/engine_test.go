@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/engine"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/events"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/provider"
+	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
 )
 
 func TestRunnerCompletesFakeConversation(t *testing.T) {
@@ -90,6 +92,62 @@ func TestRunnerDistinguishesInvalidProviderConfiguration(t *testing.T) {
 	}
 }
 
+func TestRunnerReportsMissingProviderCredentials(t *testing.T) {
+	for _, providerName := range []string{"anthropic", "openai", "openai-compatible"} {
+		t.Run(providerName, func(t *testing.T) {
+			runtimeConfig := baseConfig()
+			runtimeConfig.Provider = providerName
+			result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(
+				context.Background(),
+				runtimeConfig,
+			)
+			if result.Envelope.Error == nil ||
+				result.Envelope.Error.Code != "missing_provider_credentials" {
+				t.Fatalf("unexpected error %#v", result.Envelope.Error)
+			}
+		})
+	}
+}
+
+func TestRunnerRecordsNormalizedToolCallsWithoutExecutingThem(t *testing.T) {
+	emitter := &recordingEmitter{}
+	response := runtimeapi.CompletionResponse{
+		Message: runtimeapi.Message{
+			Role: runtimeapi.RoleAssistant,
+			Content: []runtimeapi.ContentBlock{
+				{Type: runtimeapi.ContentTypeText, Text: "tool requested"},
+				{
+					Type: runtimeapi.ContentTypeToolCall,
+					ToolCall: &runtimeapi.ToolCall{
+						ID:        "call-1",
+						Name:      "lookup",
+						Arguments: json.RawMessage(`{"query":"status"}`),
+					},
+				},
+			},
+		},
+		StopReason: runtimeapi.StopReasonToolUse,
+	}
+	runner := engine.Runner{
+		Emitter: emitter,
+		Resolve: func(config.Config) (provider.Provider, error) {
+			return staticProvider{response: response}, nil
+		},
+	}
+	result := runner.Run(context.Background(), baseConfig())
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected failure %#v", result.Envelope.Error)
+	}
+	if result.Envelope.Execution == nil ||
+		result.Envelope.Execution.ToolCalls == nil ||
+		*result.Envelope.Execution.ToolCalls != 1 {
+		t.Fatalf("unexpected execution metadata %#v", result.Envelope.Execution)
+	}
+	if !emitter.has(events.TypeTool) {
+		t.Fatalf("expected tool event, got %#v", emitter.types)
+	}
+}
+
 func TestRunnerHasNoImplicitWallclockDeadline(t *testing.T) {
 	runtimeConfig := baseConfig()
 	runtimeConfig.FakeScenario = provider.FakeScenarioDelay
@@ -164,6 +222,21 @@ func baseConfig() config.Config {
 
 type recordingEmitter struct {
 	types []events.Type
+}
+
+type staticProvider struct {
+	response runtimeapi.CompletionResponse
+}
+
+func (static staticProvider) Name() string {
+	return "static"
+}
+
+func (static staticProvider) Complete(
+	context.Context,
+	runtimeapi.CompletionRequest,
+) (runtimeapi.CompletionResponse, error) {
+	return static.response, nil
 }
 
 func (emitter *recordingEmitter) Emit(eventType events.Type, _ any) {

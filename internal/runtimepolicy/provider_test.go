@@ -22,7 +22,7 @@ func TestNeedsAPIKey(t *testing.T) {
 			t.Fatalf("expected %s to be keyless", provider)
 		}
 	}
-	for _, provider := range []string{"anthropic", "openai", "google", "gemini", "azure-openai", "mistral", "groq", "cohere", "bedrock"} {
+	for _, provider := range []string{"anthropic", "openai", "openai-compatible", "google", "gemini", "azure-openai", "mistral", "groq", "cohere", "bedrock"} {
 		if !runtimepolicy.NeedsAPIKey(provider) {
 			t.Fatalf("expected %s to require a key", provider)
 		}
@@ -31,13 +31,14 @@ func TestNeedsAPIKey(t *testing.T) {
 
 func TestCredentialsForKnownProviders(t *testing.T) {
 	cases := map[string]string{
-		"anthropic": "ANTHROPIC_API_KEY",
-		"openai":    "OPENAI_API_KEY",
-		"google":    "GOOGLE_API_KEY",
-		"gemini":    "GOOGLE_API_KEY",
-		"mistral":   "MISTRAL_API_KEY",
-		"groq":      "GROQ_API_KEY",
-		"cohere":    "COHERE_API_KEY",
+		"anthropic":         "ANTHROPIC_API_KEY",
+		"openai":            "OPENAI_API_KEY",
+		"openai-compatible": "OPENAI_API_KEY",
+		"google":            "GOOGLE_API_KEY",
+		"gemini":            "GOOGLE_API_KEY",
+		"mistral":           "MISTRAL_API_KEY",
+		"groq":              "GROQ_API_KEY",
+		"cohere":            "COHERE_API_KEY",
 	}
 	for provider, envName := range cases {
 		creds := runtimepolicy.Credentials(provider)

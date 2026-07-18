@@ -22,6 +22,9 @@ type Config struct {
 	DollarBudget    *float64
 
 	ProviderEndpoint string
+	ProviderBaseURL  string
+	AnthropicAPIKey  string
+	OpenAIAPIKey     string
 	FakeScenario     string
 	FakeDelay        time.Duration
 }
@@ -58,9 +61,24 @@ func Load(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	endpoint, err := optionalEndpoint(getenv("KONTEXT_PROVIDER_ENDPOINT"))
+	endpoint, err := optionalEndpoint(
+		getenv("KONTEXT_PROVIDER_ENDPOINT"),
+		"KONTEXT_PROVIDER_ENDPOINT",
+	)
 	if err != nil {
 		return Config{}, err
+	}
+	baseURL, err := optionalEndpoint(
+		getenv("KONTEXT_PROVIDER_BASE_URL"),
+		"KONTEXT_PROVIDER_BASE_URL",
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	if endpoint != "" && baseURL != "" {
+		return Config{}, fmt.Errorf(
+			"KONTEXT_PROVIDER_ENDPOINT and KONTEXT_PROVIDER_BASE_URL are mutually exclusive",
+		)
 	}
 
 	runName := strings.TrimSpace(getenv("KONTEXT_RUN_NAME"))
@@ -95,6 +113,9 @@ func Load(getenv func(string) string) (Config, error) {
 		WallclockBudget:  wallclockBudget,
 		DollarBudget:     dollarBudget,
 		ProviderEndpoint: endpoint,
+		ProviderBaseURL:  baseURL,
+		AnthropicAPIKey:  getenv("ANTHROPIC_API_KEY"),
+		OpenAIAPIKey:     getenv("OPENAI_API_KEY"),
 		FakeScenario:     fakeScenario,
 		FakeDelay:        fakeDelay,
 	}, nil
@@ -152,14 +173,19 @@ func optionalNonNegativeFloat(value string, name string) (*float64, error) {
 	return &parsed, nil
 }
 
-func optionalEndpoint(value string) (string, error) {
+func optionalEndpoint(value string, name string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil
 	}
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", fmt.Errorf("KONTEXT_PROVIDER_ENDPOINT must be an absolute HTTP(S) URL")
+	if err != nil ||
+		parsed.Host == "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", fmt.Errorf("%s must be an absolute HTTP(S) URL", name)
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("%s must not contain embedded credentials", name)
 	}
 	return value, nil
 }

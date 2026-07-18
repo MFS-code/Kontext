@@ -1,0 +1,19 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-openai-compatible
+spec:
+  goal: Explain the Kontext runtime contract in one sentence.
+  provider: openai-compatible
+  model: replace-with-provider-model-id
+  secretRef:
+    name: kontext-openai
+  runtime:
+    image: kontext-reference:dev
+  env:
+    # Remove this override to use OpenAI's hosted Chat Completions endpoint.
+    - name: KONTEXT_PROVIDER_BASE_URL
+      value: http://openai-compatible.default.svc:8000/v1
+  budget:
+    tokens: 512
+    wallclock: 2m
