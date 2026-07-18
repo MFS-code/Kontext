@@ -1,0 +1,78 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-network-http
+  namespace: kontext-network-policy-e2e
+spec:
+  goal: Prove that the runtime egress policy allows DNS and only the fixture allowlist.
+  provider: fake
+  model: vendor/opaque-tool-model@2026
+  tools: [shell]
+  serviceAccountName: reference-network-reader
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool
+    - name: KONTEXT_FAKE_TOOL_NAME
+      value: shell
+    - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+      value: >-
+        {"command":"allowed=\"$(wget -q -T 5 -O - http://network-policy-http.kontext-network-policy-e2e.svc.cluster.local:8080/allowed.txt)\" && test \"$allowed\" = allowed && if wget -q -T 3 -O /tmp/blocked.out http://network-policy-http.kontext-network-policy-e2e.svc.cluster.local:8081/blocked.txt; then printf unexpected-egress-success; exit 1; fi; printf dns-allowed-and-port-blocked","working_directory":"/tmp"}
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "4096"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "8192"
+  budget:
+    tokens: 256
+    wallclock: 1m
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-network-kubernetes
+  namespace: kontext-network-policy-e2e
+spec:
+  goal: List Pods through the Kubernetes API path allowed by the egress policy.
+  provider: fake
+  model: vendor/opaque-tool-model@2026
+  tools: [kubernetes_read]
+  serviceAccountName: reference-network-reader
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool
+    - name: KONTEXT_FAKE_TOOL_NAME
+      value: kubernetes_read
+    - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+      value: '{"operation":"list","resource":"pods"}'
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "16384"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "32768"
+  budget:
+    tokens: 256
+    wallclock: 1m

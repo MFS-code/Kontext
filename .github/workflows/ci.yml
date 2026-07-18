@@ -242,3 +242,71 @@ jobs:
       - name: Delete kind cluster
         if: always()
         run: kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
+
+  # kindnet does not enforce NetworkPolicy. This focused job installs pinned,
+  # checksum-verified Calico before treating connectivity results as evidence.
+  network-policy-e2e:
+    name: Kind NetworkPolicy e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs:
+      - validate
+    env:
+      KIND_CLUSTER_NAME: kontext-network-policy-ci
+      KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
+      KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
+      KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
+      KONTEXT_DIAG_DIR: ${{ github.workspace }}/.ci-diagnostics
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build operator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
+          cache-from: type=gha,scope=network-policy-operator
+          cache-to: type=gha,mode=max,scope=network-policy-operator
+
+      - name: Build reusable reporter image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runtimes/reporter/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
+          cache-from: type=gha,scope=network-policy-reporter
+          cache-to: type=gha,mode=max,scope=network-policy-reporter
+
+      - name: Build model-agnostic reference runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runtimes/reference/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
+          cache-from: type=gha,scope=network-policy-reference
+          cache-to: type=gha,mode=max,scope=network-policy-reference
+
+      - name: Run Calico NetworkPolicy acceptance
+        run: ./scripts/e2e-kind-network-policy.sh
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: network-policy-diagnostics-${{ github.run_id }}
+          path: ${{ env.KONTEXT_DIAG_DIR }}
+          if-no-files-found: ignore
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
