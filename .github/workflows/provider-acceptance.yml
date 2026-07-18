@@ -50,6 +50,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Validate provider selection
+        run: |
+          case "${KONTEXT_PROVIDER}" in
+            anthropic|openai|openai-compatible) ;;
+            *)
+              echo "unsupported acceptance provider: ${KONTEXT_PROVIDER}" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -110,7 +120,8 @@ jobs:
           ./scripts/collect-kind-diagnostics.sh "${RUNNER_TEMP}/provider-diagnostics"
           rm -f \
             "${RUNNER_TEMP}/provider-diagnostics/agent-workloads.txt" \
-            "${RUNNER_TEMP}/provider-diagnostics/kontext-resources.txt"
+            "${RUNNER_TEMP}/provider-diagnostics/kontext-resources.txt" \
+            "${RUNNER_TEMP}/provider-diagnostics/workload-overview.txt"
 
       - name: Upload failure diagnostics
         if: failure()
