@@ -271,6 +271,8 @@ func normalizeOpenAIStopReason(value string) (runtimeapi.StopReason, error) {
 		return runtimeapi.StopReasonToolUse, nil
 	case "content_filter":
 		return runtimeapi.StopReasonContentFilter, nil
+	case "refusal":
+		return runtimeapi.StopReasonRefusal, nil
 	default:
 		return "", fmt.Errorf("unsupported finish reason %q", value)
 	}

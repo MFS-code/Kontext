@@ -31,6 +31,7 @@ func TestOpenAICompletesAgainstCompatibleBaseURL(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
+		writer.Header().Set("request-id", "req-generic-1")
 		writer.Header().Set("x-request-id", "req-openai-1")
 		_, _ = writer.Write([]byte(`{
 			"choices":[{
@@ -233,6 +234,40 @@ func TestOpenAIRejectsInvalidAndPartialResponses(t *testing.T) {
 			_, err = selected.Complete(context.Background(), completionRequest("model"))
 			assertProviderErrorCode(t, err, "invalid_provider_response")
 		})
+	}
+}
+
+func TestOpenAINormalizesRefusalFinishReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`{
+			"choices":[{
+				"message":{
+					"role":"assistant",
+					"content":null,
+					"refusal":"request refused"
+				},
+				"finish_reason":"refusal"
+			}]
+		}`))
+	}))
+	defer server.Close()
+	selected, err := provider.NewOpenAI(provider.OpenAIConfig{
+		APIKey:   "key",
+		Endpoint: server.URL,
+		Client:   server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	response, err := selected.Complete(context.Background(), completionRequest("model"))
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if response.StopReason != runtimeapi.StopReasonRefusal {
+		t.Fatalf("unexpected stop reason %q", response.StopReason)
+	}
+	if got := runtimeapi.MessageText(response.Message); got != "request refused" {
+		t.Fatalf("unexpected refusal text %q", got)
 	}
 }
 

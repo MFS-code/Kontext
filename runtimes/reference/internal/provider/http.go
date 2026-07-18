@@ -250,12 +250,21 @@ func validateHTTPURL(value string) error {
 }
 
 func requestID(header http.Header, names ...string) string {
+	tried := make(map[string]struct{}, len(names))
 	for _, name := range names {
+		canonicalName := http.CanonicalHeaderKey(name)
+		if _, found := tried[canonicalName]; found {
+			continue
+		}
+		tried[canonicalName] = struct{}{}
 		if value := strings.TrimSpace(header.Get(name)); value != "" {
 			return value
 		}
 	}
 	for _, name := range []string{"request-id", "x-request-id"} {
+		if _, found := tried[http.CanonicalHeaderKey(name)]; found {
+			continue
+		}
 		if value := strings.TrimSpace(header.Get(name)); value != "" {
 			return value
 		}
