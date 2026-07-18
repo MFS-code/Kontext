@@ -40,6 +40,7 @@ No private chain-of-thought is emitted.
 | `KONTEXT_MAX_TOOL_CALLS` | no | Maximum executed tool calls in one run |
 | `KONTEXT_MAX_TOOL_RESULT_BYTES` | no | Maximum bytes returned from one tool call |
 | `KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES` | no | Maximum tool-result bytes returned across the run |
+| `KONTEXT_EMIT_TOOL_OUTPUT` | no | Include bounded tool content in events; defaults to `false` |
 | `KONTEXT_PROVIDER_ENDPOINT` | no | Exact absolute HTTP(S) request endpoint |
 | `KONTEXT_PROVIDER_BASE_URL` | no | Absolute HTTP(S) base URL; provider path is appended |
 | `ANTHROPIC_API_KEY` | Anthropic only | Anthropic API key, normally injected from a Secret |
@@ -132,6 +133,11 @@ Tool errors are returned to the model so it may recover within the remaining
 limits. Cancellation terminates the shell process group and fails the run.
 Unknown or non-allowlisted calls return structured tool errors and are never
 executed.
+
+Tool events include identity, timing, byte count, error code, and truncation
+metadata. Tool content is omitted from events unless
+`KONTEXT_EMIT_TOOL_OUTPUT=true` because event logs may leave the workload's
+namespace or retention boundary.
 
 The turn, tool-call, per-result, and total-output limits are disabled when
 their environment variables are omitted or set to `0`. Examples use finite

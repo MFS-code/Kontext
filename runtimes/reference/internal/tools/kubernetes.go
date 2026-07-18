@@ -14,6 +14,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 
 	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
 )
@@ -35,6 +36,10 @@ type KubernetesConfig struct {
 type kubernetesTool struct {
 	config   KubernetesConfig
 	maxBytes int64
+
+	clientOnce sync.Once
+	client     *http.Client
+	clientErr  error
 }
 
 type kubernetesReadArguments struct {
@@ -134,7 +139,7 @@ func (tool *kubernetesTool) Execute(
 		}
 	}
 
-	config, err := resolveKubernetesConfig(tool.config)
+	config, err := tool.resolveConfig()
 	if err != nil {
 		return outcome{}, err
 	}
@@ -218,6 +223,20 @@ func (tool *kubernetesTool) Execute(
 	}, nil
 }
 
+func (tool *kubernetesTool) resolveConfig() (KubernetesConfig, error) {
+	config := tool.config
+	if config.Client == nil {
+		tool.clientOnce.Do(func() {
+			tool.client, tool.clientErr = newKubernetesClient()
+		})
+		if tool.clientErr != nil {
+			return KubernetesConfig{}, tool.clientErr
+		}
+		config.Client = tool.client
+	}
+	return resolveKubernetesConfig(config)
+}
+
 func resolveKubernetesConfig(config KubernetesConfig) (KubernetesConfig, error) {
 	if config.Namespace == "" {
 		namespace, err := os.ReadFile(serviceAccountNSPath)
@@ -254,26 +273,11 @@ func resolveKubernetesConfig(config KubernetesConfig) (KubernetesConfig, error) 
 		config.BaseURL = "https://" + net.JoinHostPort(host, port)
 	}
 	if config.Client == nil {
-		certificate, err := os.ReadFile(serviceAccountCAPath)
+		var err error
+		config.Client, err = newKubernetesClient()
 		if err != nil {
-			return KubernetesConfig{}, &Error{
-				Code:    "kubernetes_unavailable",
-				Message: fmt.Sprintf("read Kubernetes CA certificate: %v", err),
-			}
+			return KubernetesConfig{}, err
 		}
-		roots := x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(certificate) {
-			return KubernetesConfig{}, &Error{
-				Code:    "kubernetes_unavailable",
-				Message: "Kubernetes CA certificate is invalid",
-			}
-		}
-		config.Client = &http.Client{Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
-				RootCAs:    roots,
-			},
-		}}
 	}
 	if config.Namespace == "" || config.Token == "" {
 		return KubernetesConfig{}, &Error{
@@ -282,4 +286,27 @@ func resolveKubernetesConfig(config KubernetesConfig) (KubernetesConfig, error) 
 		}
 	}
 	return config, nil
+}
+
+func newKubernetesClient() (*http.Client, error) {
+	certificate, err := os.ReadFile(serviceAccountCAPath)
+	if err != nil {
+		return nil, &Error{
+			Code:    "kubernetes_unavailable",
+			Message: fmt.Sprintf("read Kubernetes CA certificate: %v", err),
+		}
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(certificate) {
+		return nil, &Error{
+			Code:    "kubernetes_unavailable",
+			Message: "Kubernetes CA certificate is invalid",
+		}
+	}
+	return &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    roots,
+		},
+	}}, nil
 }

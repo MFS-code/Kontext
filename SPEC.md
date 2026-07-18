@@ -311,7 +311,9 @@ uses an explicit working directory, filters its direct child environment,
 streams logs, bounds captured output, and cleans up its process group on
 cancellation. These runtime checks prevent accidental exposure; Kubernetes
 RBAC, workload security context, mounted data, and container isolation remain
-the security boundaries.
+the security boundaries. Tool events omit result content by default; the
+maintained runtime requires an explicit opt-in before placing bounded tool
+content in the event stream.
 
 The reference runtime emits versioned JSONL lifecycle, usage, tool, output, and
 error events to stdout. It retains conversation state only in memory for one

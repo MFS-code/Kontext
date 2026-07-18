@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -224,6 +225,34 @@ func TestRunnerExecutesToolCallsAndReturnsResultsToProvider(t *testing.T) {
 	)
 	if len(results) != 1 || results[0].Content != `{"status":"ok"}` {
 		t.Fatalf("tool result was not returned to provider: %#v", results)
+	}
+}
+
+func TestRunnerRequiresOptInForToolOutputEvents(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
+			emitter := &dataRecordingEmitter{}
+			selectedProvider := &scriptedProvider{
+				responses: []runtimeapi.CompletionResponse{
+					toolCallResponse("call-1"),
+					finalResponse("done"),
+				},
+			}
+			executor := lookupExecutor(runtimeapi.ToolResult{Content: "sensitive output"})
+			runner := runnerWithTools(selectedProvider, executor)
+			runner.Emitter = emitter
+			runtimeConfig := baseConfig()
+			runtimeConfig.EmitToolOutput = enabled
+			result := runner.Run(context.Background(), runtimeConfig)
+			if result.ExitCode != 0 {
+				t.Fatalf("unexpected failure %#v", result.Envelope.Error)
+			}
+			toolEvent := emitter.first(events.TypeTool)
+			_, hasOutput := toolEvent["output"]
+			if hasOutput != enabled {
+				t.Fatalf("output presence=%t, want %t; event=%#v", hasOutput, enabled, toolEvent)
+			}
+		})
 	}
 }
 
@@ -520,6 +549,15 @@ type recordingEmitter struct {
 	types []events.Type
 }
 
+type dataRecordingEmitter struct {
+	events []recordedEvent
+}
+
+type recordedEvent struct {
+	eventType events.Type
+	data      any
+}
+
 type scriptedProvider struct {
 	responses []runtimeapi.CompletionResponse
 	requests  []runtimeapi.CompletionRequest
@@ -565,6 +603,23 @@ func (executor *staticToolExecutor) Execute(
 
 func (emitter *recordingEmitter) Emit(eventType events.Type, _ any) {
 	emitter.types = append(emitter.types, eventType)
+}
+
+func (emitter *dataRecordingEmitter) Emit(eventType events.Type, data any) {
+	emitter.events = append(emitter.events, recordedEvent{
+		eventType: eventType,
+		data:      data,
+	})
+}
+
+func (emitter *dataRecordingEmitter) first(eventType events.Type) map[string]any {
+	for _, event := range emitter.events {
+		if event.eventType == eventType {
+			data, _ := event.data.(map[string]any)
+			return data
+		}
+	}
+	return nil
 }
 
 func (emitter *recordingEmitter) has(eventType events.Type) bool {

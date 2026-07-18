@@ -92,6 +92,9 @@ func resolveFake(runtimeConfig config.Config) (Provider, error) {
 				Message:  "KONTEXT_FAKE_TOOL_NAME is required for tool scenario",
 			}
 		}
+		if runtimeConfig.FakeToolArguments == "" {
+			runtimeConfig.FakeToolArguments = "{}"
+		}
 		if !json.Valid([]byte(runtimeConfig.FakeToolArguments)) {
 			return nil, &ConfigurationError{
 				Provider: "fake",

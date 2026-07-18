@@ -23,6 +23,7 @@ func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 		"KONTEXT_MAX_TOOL_CALLS":              "8",
 		"KONTEXT_MAX_TOOL_RESULT_BYTES":       "1024",
 		"KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES": "4096",
+		"KONTEXT_EMIT_TOOL_OUTPUT":            "true",
 		"KONTEXT_PROVIDER_ENDPOINT":           "http://provider.default.svc:8080/v1",
 		"ANTHROPIC_API_KEY":                   "anthropic-secret",
 		"OPENAI_API_KEY":                      "openai-secret",
@@ -54,6 +55,9 @@ func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 		loaded.MaxToolResultBytes == nil || *loaded.MaxToolResultBytes != 1024 ||
 		loaded.MaxTotalToolOutputBytes == nil || *loaded.MaxTotalToolOutputBytes != 4096 {
 		t.Fatalf("unexpected tool limits: %#v", loaded)
+	}
+	if !loaded.EmitToolOutput {
+		t.Fatal("expected tool output event opt-in")
 	}
 	if loaded.ProviderEndpoint != "http://provider.default.svc:8080/v1" {
 		t.Fatalf("unexpected endpoint %q", loaded.ProviderEndpoint)
@@ -119,6 +123,9 @@ func TestLoadValidatesRequiredAndOptionalConfiguration(t *testing.T) {
 		{name: "invalid max tool calls", change: func(values map[string]string) { values["KONTEXT_MAX_TOOL_CALLS"] = "many" }},
 		{name: "oversized tool result limit", change: func(values map[string]string) {
 			values["KONTEXT_MAX_TOOL_RESULT_BYTES"] = "8388609"
+		}},
+		{name: "invalid tool output opt-in", change: func(values map[string]string) {
+			values["KONTEXT_EMIT_TOOL_OUTPUT"] = "sometimes"
 		}},
 		{name: "invalid endpoint", change: func(values map[string]string) { values["KONTEXT_PROVIDER_ENDPOINT"] = "localhost:8080" }},
 		{name: "invalid base URL", change: func(values map[string]string) { values["KONTEXT_PROVIDER_BASE_URL"] = "localhost:8080" }},

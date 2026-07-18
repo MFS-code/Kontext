@@ -103,6 +103,18 @@ func TestResolveValidatesFakeScenarios(t *testing.T) {
 	}); err == nil {
 		t.Fatalf("expected missing delay error")
 	}
+	selected, err := provider.Resolve(config.Config{
+		Provider:     "fake",
+		FakeScenario: provider.FakeScenarioTool,
+		FakeToolName: "zero_argument_tool",
+	})
+	if err != nil {
+		t.Fatalf("resolve zero-argument tool scenario: %v", err)
+	}
+	fake, ok := selected.(*provider.Fake)
+	if !ok || string(fake.ToolArguments) != "{}" {
+		t.Fatalf("unexpected zero-argument fake %#v", selected)
+	}
 }
 
 func TestFakeProviderScenarios(t *testing.T) {

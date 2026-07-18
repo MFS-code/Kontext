@@ -31,6 +31,7 @@ type Config struct {
 	MaxToolCalls            *int64
 	MaxToolResultBytes      *int64
 	MaxTotalToolOutputBytes *int64
+	EmitToolOutput          bool
 
 	ProviderEndpoint  string
 	ProviderBaseURL   string
@@ -106,6 +107,13 @@ func Load(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	emitToolOutput, err := optionalBool(
+		getenv("KONTEXT_EMIT_TOOL_OUTPUT"),
+		"KONTEXT_EMIT_TOOL_OUTPUT",
+	)
+	if err != nil {
+		return Config{}, err
+	}
 	endpoint, err := optionalEndpoint(
 		getenv("KONTEXT_PROVIDER_ENDPOINT"),
 		"KONTEXT_PROVIDER_ENDPOINT",
@@ -161,6 +169,7 @@ func Load(getenv func(string) string) (Config, error) {
 		MaxToolCalls:            maxToolCalls,
 		MaxToolResultBytes:      maxToolResultBytes,
 		MaxTotalToolOutputBytes: maxTotalToolOutputBytes,
+		EmitToolOutput:          emitToolOutput,
 		ProviderEndpoint:        endpoint,
 		ProviderBaseURL:         baseURL,
 		AnthropicAPIKey:         getenv("ANTHROPIC_API_KEY"),
@@ -170,6 +179,18 @@ func Load(getenv func(string) string) (Config, error) {
 		FakeToolName:            strings.TrimSpace(getenv("KONTEXT_FAKE_TOOL_NAME")),
 		FakeToolArguments:       strings.TrimSpace(getenv("KONTEXT_FAKE_TOOL_ARGUMENTS")),
 	}, nil
+}
+
+func optionalBool(value string, name string) (bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", name)
+	}
+	return parsed, nil
 }
 
 func optionalLimitInt64(value string, name string, maximum int64) (*int64, error) {

@@ -281,7 +281,7 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 				runtimeConfig,
 				&totalToolOutputBytes,
 			)
-			runner.emit(events.TypeTool, map[string]any{
+			toolEvent := map[string]any{
 				"callId":         toolResult.CallID,
 				"name":           toolResult.Name,
 				"count":          toolCalls,
@@ -290,8 +290,11 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 				"errorCode":      toolResult.ErrorCode,
 				"truncated":      toolResult.Truncated,
 				"outputBytes":    len(toolResult.Content),
-				"output":         toolResult.Content,
-			})
+			}
+			if runtimeConfig.EmitToolOutput {
+				toolEvent["output"] = toolResult.Content
+			}
+			runner.emit(events.TypeTool, toolEvent)
 			resultCopy := toolResult
 			resultBlocks = append(resultBlocks, runtimeapi.ContentBlock{
 				Type:       runtimeapi.ContentTypeToolResult,
