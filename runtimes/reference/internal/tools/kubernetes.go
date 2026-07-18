@@ -48,24 +48,27 @@ type kubernetesReadArguments struct {
 	Name      string `json:"name,omitempty"`
 }
 
-type kubernetesResource struct {
+type kubernetesResourceDefinition struct {
+	name      string
 	apiPrefix string
 }
 
-var kubernetesResources = map[string]kubernetesResource{
-	"pods":         {apiPrefix: "/api/v1"},
-	"configmaps":   {apiPrefix: "/api/v1"},
-	"services":     {apiPrefix: "/api/v1"},
-	"events":       {apiPrefix: "/api/v1"},
-	"deployments":  {apiPrefix: "/apis/apps/v1"},
-	"statefulsets": {apiPrefix: "/apis/apps/v1"},
-	"daemonsets":   {apiPrefix: "/apis/apps/v1"},
-	"replicasets":  {apiPrefix: "/apis/apps/v1"},
-	"jobs":         {apiPrefix: "/apis/batch/v1"},
-	"cronjobs":     {apiPrefix: "/apis/batch/v1"},
-	"agents":       {apiPrefix: "/apis/kontext.dev/v1alpha1"},
-	"agentruns":    {apiPrefix: "/apis/kontext.dev/v1alpha1"},
+var kubernetesResourceRegistry = []kubernetesResourceDefinition{
+	{name: "pods", apiPrefix: "/api/v1"},
+	{name: "configmaps", apiPrefix: "/api/v1"},
+	{name: "services", apiPrefix: "/api/v1"},
+	{name: "events", apiPrefix: "/api/v1"},
+	{name: "deployments", apiPrefix: "/apis/apps/v1"},
+	{name: "statefulsets", apiPrefix: "/apis/apps/v1"},
+	{name: "daemonsets", apiPrefix: "/apis/apps/v1"},
+	{name: "replicasets", apiPrefix: "/apis/apps/v1"},
+	{name: "jobs", apiPrefix: "/apis/batch/v1"},
+	{name: "cronjobs", apiPrefix: "/apis/batch/v1"},
+	{name: "agents", apiPrefix: "/apis/kontext.dev/v1alpha1"},
+	{name: "agentruns", apiPrefix: "/apis/kontext.dev/v1alpha1"},
 }
+
+var kubernetesResources = indexKubernetesResources(kubernetesResourceRegistry)
 
 var kubernetesNamePattern = regexp.MustCompile(
 	`^[a-z0-9]([-.a-z0-9]*[a-z0-9])?$`,
@@ -79,17 +82,57 @@ func (tool *kubernetesTool) Definition() runtimeapi.ToolDefinition {
 	return runtimeapi.ToolDefinition{
 		Name:        NameKubernetesRead,
 		Description: "Get or list an allowlisted Kubernetes resource in the current namespace. Secrets are never available.",
-		InputSchema: json.RawMessage(`{
-			"type":"object",
-			"properties":{
-				"operation":{"type":"string","enum":["get","list"]},
-				"resource":{"type":"string","enum":["pods","configmaps","services","events","deployments","statefulsets","daemonsets","replicasets","jobs","cronjobs","agents","agentruns"]},
-				"name":{"type":"string","description":"Required for get; omit for list"}
-			},
-			"required":["operation","resource"],
-			"additionalProperties":false
-		}`),
+		InputSchema: kubernetesReadInputSchema(),
 	}
+}
+
+func indexKubernetesResources(
+	definitions []kubernetesResourceDefinition,
+) map[string]kubernetesResourceDefinition {
+	resources := make(map[string]kubernetesResourceDefinition, len(definitions))
+	for _, definition := range definitions {
+		if definition.name == "" || definition.apiPrefix == "" {
+			panic("Kubernetes resource definitions require a name and API prefix")
+		}
+		if definition.name == "secrets" {
+			panic("Kubernetes Secrets must never be exposed")
+		}
+		if _, duplicate := resources[definition.name]; duplicate {
+			panic(fmt.Sprintf("duplicate Kubernetes resource %q", definition.name))
+		}
+		resources[definition.name] = definition
+	}
+	return resources
+}
+
+func kubernetesReadInputSchema() json.RawMessage {
+	resourceNames := make([]string, 0, len(kubernetesResourceRegistry))
+	for _, resource := range kubernetesResourceRegistry {
+		resourceNames = append(resourceNames, resource.name)
+	}
+	schema, err := json.Marshal(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"operation": map[string]any{
+				"type": "string",
+				"enum": []string{"get", "list"},
+			},
+			"resource": map[string]any{
+				"type": "string",
+				"enum": resourceNames,
+			},
+			"name": map[string]any{
+				"type":        "string",
+				"description": "Required for get; omit for list",
+			},
+		},
+		"required":             []string{"operation", "resource"},
+		"additionalProperties": false,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("encode kubernetes_read schema: %v", err))
+	}
+	return schema
 }
 
 func (tool *kubernetesTool) Execute(

@@ -11,7 +11,6 @@ import (
 
 	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/conversation"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/events"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/provider"
 	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
@@ -62,20 +61,7 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 	if now == nil {
 		now = time.Now
 	}
-	startedAt := now().UTC()
-	var turns int32
-	var toolCalls int32
-	metadata := func(requestID string) Metadata {
-		return Metadata{
-			Provider:    runtimeConfig.Provider,
-			Model:       runtimeConfig.Model,
-			RequestID:   requestID,
-			StartedAt:   startedAt,
-			CompletedAt: now().UTC(),
-			Turns:       turns,
-			ToolCalls:   toolCalls,
-		}
-	}
+	state := newLoopState(runtimeConfig.Goal, now)
 
 	runner.emit(events.TypeLifecycle, map[string]any{
 		"phase":     "started",
@@ -94,8 +80,7 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 				code = "invalid_provider_configuration"
 			}
 		}
-		runner.emitError(code, err.Error(), nil)
-		return failed(code, err.Error(), nil, metadata(""))
+		return state.failure(runner, runtimeConfig, code, err.Error(), nil, "")
 	}
 	toolExecutor, err := resolveTools(runtimeConfig)
 	if err != nil {
@@ -104,8 +89,7 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 		if errors.As(err, &toolError) && toolError.Code != "" {
 			code = toolError.Code
 		}
-		runner.emitError(code, err.Error(), nil)
-		return failed(code, err.Error(), nil, metadata(""))
+		return state.failure(runner, runtimeConfig, code, err.Error(), nil, "")
 	}
 	definitions := toolExecutor.Definitions()
 	if len(definitions) > 0 {
@@ -120,215 +104,32 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 		})
 	}
 
-	state := conversation.New(runtimeConfig.Goal)
-	var totalUsage runtimeapi.Usage
-	var consumedTokens int64
-	var totalToolOutputBytes int64
-	lastRequestID := ""
-
 	for {
-		if limitReached(runtimeConfig.MaxTurns, int64(turns)) {
-			return runner.limitFailure(
-				"turn_limit_exceeded",
-				"maximum provider turns reached before final output",
-				totalUsage,
-				metadata(lastRequestID),
-			)
-		}
-		requestStartedAt := now().UTC()
-		turns++
-		request := runtimeapi.CompletionRequest{
-			Model:     runtimeConfig.Model,
-			Messages:  state.Messages(),
-			MaxTokens: remainingTokenBudget(runtimeConfig.TokenBudget, consumedTokens),
-			Tools:     runtimeapi.CloneToolDefinitions(definitions),
-		}
-		response, err := selectedProvider.Complete(ctx, request)
-		if err != nil {
-			code, message, retryable, requestID := normalizeError(ctx, err)
-			runner.emitError(code, message, retryable)
-			result := failed(code, message, retryable, metadata(requestID))
-			result.Envelope.Usage = envelopeUsage(totalUsage)
-			return result
-		}
-		lastRequestID = response.RequestID
-		if err := runtimeapi.ValidateResponse(response); err != nil {
-			message := fmt.Sprintf("provider returned an invalid response: %v", err)
-			runner.emitError("invalid_provider_response", message, nil)
-			result := failed(
-				"invalid_provider_response",
-				message,
-				nil,
-				metadata(response.RequestID),
-			)
-			result.Envelope.Usage = envelopeUsage(totalUsage)
-			return result
-		}
-
-		totalUsage = addUsage(totalUsage, response.Usage)
-		consumedTokens = saturatingAdd(consumedTokens, measuredTokens(response.Usage))
-		runner.emit(events.TypeLifecycle, map[string]any{
-			"phase":          "provider_completed",
-			"turn":           turns,
-			"stopReason":     response.StopReason,
-			"durationMillis": now().UTC().Sub(requestStartedAt).Milliseconds(),
-		})
-		if usage := envelopeUsage(response.Usage); usage != nil {
-			runner.emit(events.TypeUsage, map[string]any{
-				"turn":  turns,
-				"usage": usage,
-			})
-		}
-		if tokenBudgetExceeded(runtimeConfig.TokenBudget, consumedTokens) {
-			return runner.limitFailure(
-				"token_limit_exceeded",
-				"measured provider usage exceeded the run token budget",
-				totalUsage,
-				metadata(response.RequestID),
-			)
-		}
-
-		state.Append(response.Message)
-		calls := runtimeapi.MessageToolCalls(response.Message)
-		if len(calls) == 0 {
-			switch response.StopReason {
-			case runtimeapi.StopReasonPauseTurn:
-				continue
-			case runtimeapi.StopReasonEndTurn, runtimeapi.StopReasonStopSequence:
-			default:
-				code, message := terminalStopFailure(response.StopReason)
-				runner.emitError(code, message, nil)
-				result := failed(code, message, nil, metadata(response.RequestID))
-				result.Envelope.Usage = envelopeUsage(totalUsage)
-				return result
-			}
-			response.Usage = totalUsage
-			completedMetadata := metadata(response.RequestID)
-			runner.emit(events.TypeOutput, map[string]any{
-				"mediaType": resultv1alpha1.DefaultMediaType,
-				"value":     runtimeapi.MessageText(response.Message),
-			})
-			return Result{
-				Envelope: Success(response, completedMetadata),
-				ExitCode: 0,
-			}
-		}
-		if response.StopReason != runtimeapi.StopReasonToolUse {
-			message := fmt.Sprintf(
-				"provider returned tool calls with stop reason %q",
-				response.StopReason,
-			)
-			runner.emitError("invalid_provider_response", message, nil)
-			result := failed(
-				"invalid_provider_response",
-				message,
-				nil,
-				metadata(response.RequestID),
-			)
-			result.Envelope.Usage = envelopeUsage(totalUsage)
-			return result
-		}
-		if limitReached(runtimeConfig.TokenBudget, consumedTokens) {
-			return runner.limitFailure(
-				"token_limit_exceeded",
-				"run token budget was exhausted before tool results could be returned",
-				totalUsage,
-				metadata(response.RequestID),
-			)
-		}
-		if limitReached(runtimeConfig.MaxTurns, int64(turns)) {
-			return runner.limitFailure(
-				"turn_limit_exceeded",
-				"maximum provider turns reached before tool results could be returned",
-				totalUsage,
-				metadata(response.RequestID),
-			)
-		}
-
-		if batchExceedsLimit(
-			runtimeConfig.MaxToolCalls,
-			int64(toolCalls),
-			int64(len(calls)),
-		) {
-			return runner.limitFailure(
-				"tool_call_limit_exceeded",
-				"maximum tool calls reached before final output",
-				totalUsage,
-				metadata(response.RequestID),
-			)
-		}
-		if limitReached(
-			runtimeConfig.MaxTotalToolOutputBytes,
-			totalToolOutputBytes,
-		) {
-			return runner.limitFailure(
-				"tool_output_limit_exceeded",
-				"total tool-output limit reached before final output",
-				totalUsage,
-				metadata(response.RequestID),
-			)
-		}
-
-		resultBlocks := make([]runtimeapi.ContentBlock, 0, len(calls))
-		for _, call := range calls {
-			if limitReached(runtimeConfig.MaxToolCalls, int64(toolCalls)) {
-				return runner.limitFailure(
-					"tool_call_limit_exceeded",
-					"maximum tool calls reached before final output",
-					totalUsage,
-					metadata(response.RequestID),
-				)
-			}
-			if limitReached(
-				runtimeConfig.MaxTotalToolOutputBytes,
-				totalToolOutputBytes,
-			) {
-				return runner.limitFailure(
-					"tool_output_limit_exceeded",
-					"total tool-output limit reached before final output",
-					totalUsage,
-					metadata(response.RequestID),
-				)
-			}
-			toolCalls++
-			toolStartedAt := now().UTC()
-			toolResult, err := toolExecutor.Execute(ctx, call)
-			if err != nil {
-				code, message, retryable, _ := normalizeError(ctx, err)
-				runner.emitError(code, message, retryable)
-				result := failed(code, message, retryable, metadata(response.RequestID))
-				result.Envelope.Usage = envelopeUsage(totalUsage)
-				return result
-			}
-			toolResult = applyToolOutputLimits(
-				toolResult,
+		outcome := runner.providerTurn(
+			ctx,
+			runtimeConfig,
+			selectedProvider,
+			definitions,
+			state,
+		)
+		switch outcome.kind {
+		case turnOutcomePaused:
+			continue
+		case turnOutcomeFinal, turnOutcomeFailed:
+			return outcome.result
+		case turnOutcomeToolBatch:
+			if result := runner.executeToolBatch(
+				ctx,
 				runtimeConfig,
-				&totalToolOutputBytes,
-			)
-			toolEvent := map[string]any{
-				"callId":         toolResult.CallID,
-				"name":           toolResult.Name,
-				"count":          toolCalls,
-				"durationMillis": now().UTC().Sub(toolStartedAt).Milliseconds(),
-				"isError":        toolResult.IsError,
-				"errorCode":      toolResult.ErrorCode,
-				"truncated":      toolResult.Truncated,
-				"outputBytes":    len(toolResult.Content),
+				toolExecutor,
+				state,
+				outcome,
+			); result != nil {
+				return *result
 			}
-			if runtimeConfig.EmitToolOutput {
-				toolEvent["output"] = toolResult.Content
-			}
-			runner.emit(events.TypeTool, toolEvent)
-			resultCopy := toolResult
-			resultBlocks = append(resultBlocks, runtimeapi.ContentBlock{
-				Type:       runtimeapi.ContentTypeToolResult,
-				ToolResult: &resultCopy,
-			})
+		default:
+			panic(fmt.Sprintf("unsupported turn outcome %d", outcome.kind))
 		}
-		state.Append(runtimeapi.Message{
-			Role:    runtimeapi.RoleTool,
-			Content: resultBlocks,
-		})
 	}
 }
 

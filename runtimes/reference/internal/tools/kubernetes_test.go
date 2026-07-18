@@ -3,9 +3,11 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,6 +49,97 @@ func TestKubernetesReadUsesCurrentNamespaceAndServiceAccount(t *testing.T) {
 	}
 	if result.IsError || !json.Valid([]byte(result.Content)) {
 		t.Fatalf("unexpected result %#v", result)
+	}
+}
+
+func TestKubernetesReadSchemaAndRoutingShareResourceRegistry(t *testing.T) {
+	expectedResources := []string{
+		"pods",
+		"configmaps",
+		"services",
+		"events",
+		"deployments",
+		"statefulsets",
+		"daemonsets",
+		"replicasets",
+		"jobs",
+		"cronjobs",
+		"agents",
+		"agentruns",
+	}
+	expectedPrefixes := map[string]string{
+		"pods":         "/api/v1",
+		"configmaps":   "/api/v1",
+		"services":     "/api/v1",
+		"events":       "/api/v1",
+		"deployments":  "/apis/apps/v1",
+		"statefulsets": "/apis/apps/v1",
+		"daemonsets":   "/apis/apps/v1",
+		"replicasets":  "/apis/apps/v1",
+		"jobs":         "/apis/batch/v1",
+		"cronjobs":     "/apis/batch/v1",
+		"agents":       "/apis/kontext.dev/v1alpha1",
+		"agentruns":    "/apis/kontext.dev/v1alpha1",
+	}
+
+	var receivedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		receivedPath = request.URL.Path
+		_, _ = writer.Write([]byte(`{"items":[]}`))
+	}))
+	defer server.Close()
+	registry, err := tools.New(tools.Config{
+		Allowed: []string{tools.NameKubernetesRead},
+		Kubernetes: tools.KubernetesConfig{
+			BaseURL:   server.URL,
+			Namespace: "current",
+			Token:     "token",
+			Client:    server.Client(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	definitions := registry.Definitions()
+	if len(definitions) != 1 {
+		t.Fatalf("definitions=%d, want 1", len(definitions))
+	}
+	var schema struct {
+		Properties struct {
+			Resource struct {
+				Enum []string `json:"enum"`
+			} `json:"resource"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(definitions[0].InputSchema, &schema); err != nil {
+		t.Fatalf("decode kubernetes_read schema: %v", err)
+	}
+	if !slices.Equal(schema.Properties.Resource.Enum, expectedResources) {
+		t.Fatalf(
+			"resource enum=%v, want %v",
+			schema.Properties.Resource.Enum,
+			expectedResources,
+		)
+	}
+	if slices.Contains(schema.Properties.Resource.Enum, "secrets") {
+		t.Fatal("Secrets must never appear in the kubernetes_read schema")
+	}
+
+	for _, resource := range schema.Properties.Resource.Enum {
+		result, err := registry.Execute(context.Background(), runtimeapi.ToolCall{
+			ID:   "kube-list-" + resource,
+			Name: tools.NameKubernetesRead,
+			Arguments: json.RawMessage(
+				fmt.Sprintf(`{"operation":"list","resource":%q}`, resource),
+			),
+		})
+		if err != nil || result.IsError {
+			t.Fatalf("%s routing failed: result=%#v err=%v", resource, result, err)
+		}
+		wantPath := expectedPrefixes[resource] + "/namespaces/current/" + resource
+		if receivedPath != wantPath {
+			t.Fatalf("%s routed to %q, want %q", resource, receivedPath, wantPath)
+		}
 	}
 }
 
