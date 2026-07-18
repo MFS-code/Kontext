@@ -11,12 +11,20 @@ on:
           - anthropic
           - openai
           - openai-compatible
+      scenario:
+        description: Tiny acceptance path (tool uses two provider requests)
+        required: true
+        default: tool
+        type: choice
+        options:
+          - tool
+          - text
       model:
         description: Provider model identifier (passed through unchanged)
         required: true
         type: string
       endpoint:
-        description: Optional exact Messages or Chat Completions endpoint
+        description: Optional exact endpoint (never include credentials)
         required: false
         type: string
 
@@ -24,15 +32,17 @@ permissions:
   contents: read
 
 jobs:
-  anthropic:
-    name: Anthropic request
-    if: inputs.provider == 'anthropic'
+  provider:
+    name: ${{ inputs.provider }} ${{ inputs.scenario }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     environment: provider-acceptance
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      KONTEXT_GOAL: Reply with exactly the word kontext.
+      KIND_CLUSTER_NAME: provider-acceptance
+      KONTEXT_ACCEPTANCE_NAMESPACE: provider-acceptance
+      KONTEXT_ACCEPTANCE_SCENARIO: ${{ inputs.scenario }}
+      KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
+      KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
       KONTEXT_PROVIDER: ${{ inputs.provider }}
       KONTEXT_MODEL: ${{ inputs.model }}
       KONTEXT_PROVIDER_ENDPOINT: ${{ inputs.endpoint }}
@@ -40,44 +50,88 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run one authenticated completion
+      - name: Validate provider selection
         run: |
-          output="$(go run ./runtimes/reference)"
-          printf '%s\n' "${output}"
-          [[ "${output}" == *'"apiVersion":"kontext.dev/event/v1alpha1"'* ]]
-          [[ "${output}" == *'"outcome":"Succeeded"'* ]]
+          case "${KONTEXT_PROVIDER}" in
+            anthropic|openai|openai-compatible) ;;
+            *)
+              echo "unsupported acceptance provider: ${KONTEXT_PROVIDER}" >&2
+              exit 1
+              ;;
+          esac
 
-  openai-compatible:
-    name: OpenAI-compatible request
-    if: inputs.provider == 'openai' || inputs.provider == 'openai-compatible'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment: provider-acceptance
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      KONTEXT_GOAL: Reply with exactly the word kontext.
-      KONTEXT_PROVIDER: ${{ inputs.provider }}
-      KONTEXT_MODEL: ${{ inputs.model }}
-      KONTEXT_PROVIDER_ENDPOINT: ${{ inputs.endpoint }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Build maintained operator image
+        uses: docker/build-push-action@v6
         with:
-          go-version-file: go.mod
-          cache: true
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
+          cache-from: type=gha,scope=provider-acceptance-operator
+          cache-to: type=gha,mode=max,scope=provider-acceptance-operator
 
-      - name: Run one authenticated completion
+      - name: Build maintained reference runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runtimes/reference/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
+          cache-from: type=gha,scope=provider-acceptance-reference
+          cache-to: type=gha,mode=max,scope=provider-acceptance-reference
+
+      - name: Create ephemeral kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          wait: 120s
+
+      - name: Load maintained images
         run: |
-          output="$(go run ./runtimes/reference)"
-          printf '%s\n' "${output}"
-          [[ "${output}" == *'"apiVersion":"kontext.dev/event/v1alpha1"'* ]]
-          [[ "${output}" == *'"outcome":"Succeeded"'* ]]
+          kind load docker-image "${KONTEXT_OPERATOR_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+          kind load docker-image "${KONTEXT_REFERENCE_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+
+      - name: Install maintained operator
+        run: |
+          kubectl apply -k config/default
+          kubectl rollout status deployment/controller-manager \
+            --namespace kontext-system \
+            --timeout=120s
+
+      - name: Run Anthropic acceptance
+        if: inputs.provider == 'anthropic'
+        env:
+          KONTEXT_PROVIDER_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: ./scripts/provider-acceptance-kind.sh
+
+      - name: Run OpenAI-compatible acceptance
+        if: inputs.provider == 'openai' || inputs.provider == 'openai-compatible'
+        env:
+          KONTEXT_PROVIDER_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: ./scripts/provider-acceptance-kind.sh
+
+      - name: Collect redacted failure diagnostics
+        if: failure()
+        run: |
+          ./scripts/collect-kind-diagnostics.sh "${RUNNER_TEMP}/provider-diagnostics"
+          rm -f \
+            "${RUNNER_TEMP}/provider-diagnostics/agent-workloads.txt" \
+            "${RUNNER_TEMP}/provider-diagnostics/kontext-resources.txt" \
+            "${RUNNER_TEMP}/provider-diagnostics/workload-overview.txt"
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/provider-diagnostics
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name "${KIND_CLUSTER_NAME}" || true

@@ -230,6 +230,28 @@ that environment with required reviewers and store `ANTHROPIC_API_KEY` and
 `OPENAI_API_KEY` as environment secrets. Pull-request CI never receives or
 uses these credentials.
 
+Each dispatch builds the maintained operator and reference runtime, loads them
+into an ephemeral kind cluster, and injects only the selected provider key
+through a namespace-local Secret. The default `tool` scenario mounts a tiny
+ConfigMap, exposes only `read_knowledge`, and requires exactly one call before
+an exact final response. The `text` scenario preserves the ordinary one-turn
+transport check.
+
+The tool scenario permits at most two provider turns, one tool call, 256 bytes
+per tool result and in total, 2,048 cumulative measured tokens, and 90 seconds
+of wallclock time. A normal dispatch should stay below roughly 2,000 provider
+tokens, but this is not a hard billing ceiling: usage is checked only after a
+response, provider token accounting varies, and the repeated tool context can
+cross the configured budget. Before approval, select a small non-reasoning
+model, verify its current pricing and the endpoint, and do not use this
+workflow for untrusted code. Failure artifacts omit workload logs,
+Agent/AgentRun descriptions, and cluster event summaries that can contain
+runtime-specific values. Remaining controller and cluster diagnostics are
+retained briefly; maintainers should still review them before sharing. The
+model and endpoint inputs are visible workflow metadata. The acceptance script
+rejects endpoint userinfo, queries, fragments, and whitespace so credentials
+cannot be embedded there.
+
 ## Dependency inventory
 
 The reference binary uses only the Go standard library and in-repository
