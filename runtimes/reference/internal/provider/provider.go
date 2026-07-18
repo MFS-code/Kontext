@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -33,10 +34,14 @@ func (err *UnsupportedError) Error() string {
 
 type ConfigurationError struct {
 	Provider string
+	Code     string
 	Message  string
 }
 
 func (err *ConfigurationError) Error() string {
+	if err.Provider == "" {
+		return fmt.Sprintf("provider configuration is invalid: %s", err.Message)
+	}
 	return fmt.Sprintf("%s provider configuration is invalid: %s", err.Provider, err.Message)
 }
 
@@ -44,6 +49,21 @@ func Resolve(runtimeConfig config.Config) (Provider, error) {
 	switch runtimeConfig.Provider {
 	case "fake":
 		return resolveFake(runtimeConfig)
+	case "anthropic":
+		return NewAnthropic(AnthropicConfig{
+			APIKey:   runtimeConfig.AnthropicAPIKey,
+			Endpoint: runtimeConfig.ProviderEndpoint,
+			BaseURL:  runtimeConfig.ProviderBaseURL,
+			Client:   http.DefaultClient,
+		})
+	case "openai", "openai-compatible":
+		return NewOpenAI(OpenAIConfig{
+			Name:     runtimeConfig.Provider,
+			APIKey:   runtimeConfig.OpenAIAPIKey,
+			Endpoint: runtimeConfig.ProviderEndpoint,
+			BaseURL:  runtimeConfig.ProviderBaseURL,
+			Client:   http.DefaultClient,
+		})
 	default:
 		return nil, &UnsupportedError{Name: runtimeConfig.Provider}
 	}

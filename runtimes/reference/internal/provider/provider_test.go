@@ -29,6 +29,61 @@ func TestResolveSelectsFakeProvider(t *testing.T) {
 	}
 }
 
+func TestResolveSelectsMaintainedHTTPProviders(t *testing.T) {
+	tests := []struct {
+		name   string
+		config config.Config
+	}{
+		{
+			name: "anthropic",
+			config: config.Config{
+				Provider:        "anthropic",
+				AnthropicAPIKey: "anthropic-key",
+			},
+		},
+		{
+			name: "openai",
+			config: config.Config{
+				Provider:     "openai",
+				OpenAIAPIKey: "openai-key",
+			},
+		},
+		{
+			name: "openai-compatible",
+			config: config.Config{
+				Provider:     "openai-compatible",
+				OpenAIAPIKey: "openai-key",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			selected, err := provider.Resolve(test.config)
+			if err != nil {
+				t.Fatalf("resolve provider: %v", err)
+			}
+			if selected.Name() != test.config.Provider {
+				t.Fatalf("expected provider %q, got %q", test.config.Provider, selected.Name())
+			}
+		})
+	}
+}
+
+func TestResolveReportsMissingProviderCredentials(t *testing.T) {
+	for _, name := range []string{"anthropic", "openai", "openai-compatible"} {
+		t.Run(name, func(t *testing.T) {
+			_, err := provider.Resolve(config.Config{Provider: name})
+			var configurationError *provider.ConfigurationError
+			if !errors.As(err, &configurationError) {
+				t.Fatalf("expected configuration error, got %v", err)
+			}
+			if configurationError.Code != "missing_provider_credentials" {
+				t.Fatalf("unexpected error code %q", configurationError.Code)
+			}
+		})
+	}
+}
+
 func TestResolveValidatesFakeScenarios(t *testing.T) {
 	if _, err := provider.Resolve(config.Config{
 		Provider:     "fake",

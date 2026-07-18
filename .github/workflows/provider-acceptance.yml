@@ -1,0 +1,83 @@
+name: Provider acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Maintained provider transport
+        required: true
+        type: choice
+        options:
+          - anthropic
+          - openai
+          - openai-compatible
+      model:
+        description: Provider model identifier (passed through unchanged)
+        required: true
+        type: string
+      endpoint:
+        description: Optional exact Messages or Chat Completions endpoint
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  anthropic:
+    name: Anthropic request
+    if: inputs.provider == 'anthropic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: provider-acceptance
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      KONTEXT_GOAL: Reply with exactly the word kontext.
+      KONTEXT_PROVIDER: ${{ inputs.provider }}
+      KONTEXT_MODEL: ${{ inputs.model }}
+      KONTEXT_PROVIDER_ENDPOINT: ${{ inputs.endpoint }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run one authenticated completion
+        run: |
+          output="$(go run ./runtimes/reference)"
+          printf '%s\n' "${output}"
+          [[ "${output}" == *'"apiVersion":"kontext.dev/event/v1alpha1"'* ]]
+          [[ "${output}" == *'"outcome":"Succeeded"'* ]]
+
+  openai-compatible:
+    name: OpenAI-compatible request
+    if: inputs.provider == 'openai' || inputs.provider == 'openai-compatible'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: provider-acceptance
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      KONTEXT_GOAL: Reply with exactly the word kontext.
+      KONTEXT_PROVIDER: ${{ inputs.provider }}
+      KONTEXT_MODEL: ${{ inputs.model }}
+      KONTEXT_PROVIDER_ENDPOINT: ${{ inputs.endpoint }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run one authenticated completion
+        run: |
+          output="$(go run ./runtimes/reference)"
+          printf '%s\n' "${output}"
+          [[ "${output}" == *'"apiVersion":"kontext.dev/event/v1alpha1"'* ]]
+          [[ "${output}" == *'"outcome":"Succeeded"'* ]]

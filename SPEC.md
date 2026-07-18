@@ -277,8 +277,19 @@ contract.
 
 The initial keyless `fake` provider is deterministic and exercises the same
 configuration, conversation, event, result, cancellation, and failure paths
-that real HTTP transports use. `KONTEXT_MODEL` remains opaque and is never
-aliased or rewritten.
+that real HTTP transports use. The maintained real transports are Anthropic
+Messages (`anthropic`) and OpenAI-compatible Chat Completions (`openai` or
+`openai-compatible`). They use direct non-streaming HTTP, accept an optional
+exact endpoint or base-URL override, and normalize text, function tool calls,
+stop reasons, measured usage, request IDs, and actionable transport errors.
+The OpenAI-compatible boundary is the documented Chat Completions request,
+response, bearer-auth, and function-tool-call shape; it does not imply support
+for the Responses API, streaming, Azure URL construction, or every inference
+protocol. `KONTEXT_MODEL` remains opaque and is never aliased or rewritten.
+
+Credentials come from the `AgentRun` Secret policy as `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY`. Authenticated acceptance is manual and environment-protected;
+pull-request CI remains deterministic, keyless, and network-independent.
 
 The controller remains authoritative for wallclock enforcement. The runtime
 parses `KONTEXT_BUDGET_WALLCLOCK` but does not start a competing timer; it

@@ -20,6 +20,8 @@ func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 		"KONTEXT_BUDGET_WALLCLOCK":  "1m30s",
 		"KONTEXT_BUDGET_DOLLARS":    "0",
 		"KONTEXT_PROVIDER_ENDPOINT": "http://provider.default.svc:8080/v1",
+		"ANTHROPIC_API_KEY":         "anthropic-secret",
+		"OPENAI_API_KEY":            "openai-secret",
 	}
 	loaded, err := config.Load(lookup(values))
 	if err != nil {
@@ -45,6 +47,10 @@ func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 	}
 	if loaded.ProviderEndpoint != "http://provider.default.svc:8080/v1" {
 		t.Fatalf("unexpected endpoint %q", loaded.ProviderEndpoint)
+	}
+	if loaded.AnthropicAPIKey != "anthropic-secret" ||
+		loaded.OpenAIAPIKey != "openai-secret" {
+		t.Fatalf("provider credentials were not loaded")
 	}
 }
 
@@ -72,6 +78,14 @@ func TestLoadValidatesRequiredAndOptionalConfiguration(t *testing.T) {
 		{name: "NaN dollars", change: func(values map[string]string) { values["KONTEXT_BUDGET_DOLLARS"] = "NaN" }},
 		{name: "infinite dollars", change: func(values map[string]string) { values["KONTEXT_BUDGET_DOLLARS"] = "+Inf" }},
 		{name: "invalid endpoint", change: func(values map[string]string) { values["KONTEXT_PROVIDER_ENDPOINT"] = "localhost:8080" }},
+		{name: "invalid base URL", change: func(values map[string]string) { values["KONTEXT_PROVIDER_BASE_URL"] = "localhost:8080" }},
+		{name: "embedded endpoint credentials", change: func(values map[string]string) {
+			values["KONTEXT_PROVIDER_ENDPOINT"] = "https://user:password@provider.example/messages"
+		}},
+		{name: "endpoint and base URL", change: func(values map[string]string) {
+			values["KONTEXT_PROVIDER_ENDPOINT"] = "https://provider.example/messages"
+			values["KONTEXT_PROVIDER_BASE_URL"] = "https://provider.example"
+		}},
 		{name: "invalid fake delay", change: func(values map[string]string) { values["KONTEXT_FAKE_DELAY"] = "-3s" }},
 	}
 	for _, test := range tests {
@@ -82,6 +96,18 @@ func TestLoadValidatesRequiredAndOptionalConfiguration(t *testing.T) {
 				t.Fatalf("expected configuration error")
 			}
 		})
+	}
+}
+
+func TestLoadParsesProviderBaseURL(t *testing.T) {
+	values := requiredValues()
+	values["KONTEXT_PROVIDER_BASE_URL"] = "http://provider.default.svc:8080/openai"
+	loaded, err := config.Load(lookup(values))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.ProviderBaseURL != "http://provider.default.svc:8080/openai" {
+		t.Fatalf("unexpected base URL %q", loaded.ProviderBaseURL)
 	}
 }
 

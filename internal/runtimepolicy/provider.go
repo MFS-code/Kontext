@@ -33,6 +33,12 @@ var providerDefinitions = map[string]providerDefinition{
 			{EnvVarName: "OPENAI_API_KEY", SecretKey: "OPENAI_API_KEY"},
 		},
 	},
+	"openai-compatible": {
+		defaultSecretName: "kontext-openai",
+		credentials: []CredentialSpec{
+			{EnvVarName: "OPENAI_API_KEY", SecretKey: "OPENAI_API_KEY"},
+		},
+	},
 	"google": {
 		defaultSecretName: "kontext-google",
 		credentials: []CredentialSpec{

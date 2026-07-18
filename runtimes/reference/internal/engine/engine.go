@@ -72,7 +72,10 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 		code := "unsupported_provider"
 		var configurationError *provider.ConfigurationError
 		if errors.As(err, &configurationError) {
-			code = "invalid_provider_configuration"
+			code = configurationError.Code
+			if code == "" {
+				code = "invalid_provider_configuration"
+			}
 		}
 		runner.emitError(code, err.Error(), nil)
 		return failed(code, err.Error(), nil, metadata(""))
@@ -111,6 +114,14 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 	})
 	if usage := envelopeUsage(response.Usage); usage != nil {
 		runner.emit(events.TypeUsage, usage)
+	}
+	for _, toolCall := range runtimeapi.MessageToolCalls(response.Message) {
+		runner.emit(events.TypeTool, map[string]any{
+			"id":        toolCall.ID,
+			"name":      toolCall.Name,
+			"arguments": toolCall.Arguments,
+			"executed":  false,
+		})
 	}
 	runner.emit(events.TypeOutput, map[string]any{
 		"mediaType": resultv1alpha1.DefaultMediaType,
@@ -168,6 +179,14 @@ func normalizeError(
 			providerError.Message,
 			providerError.Retryable,
 			providerError.RequestID
+	}
+	var configurationError *provider.ConfigurationError
+	if errors.As(err, &configurationError) {
+		code := configurationError.Code
+		if code == "" {
+			code = "invalid_provider_configuration"
+		}
+		return code, configurationError.Error(), nil, ""
 	}
 	return "provider_error", err.Error(), nil, ""
 }

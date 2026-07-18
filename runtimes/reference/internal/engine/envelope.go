@@ -20,7 +20,7 @@ func Success(response runtimeapi.CompletionResponse, metadata Metadata) resultv1
 	text := runtimeapi.MessageText(response.Message)
 	value, _ := json.Marshal(text)
 	turns := int32(1)
-	toolCalls := int32(0)
+	toolCalls := int32(len(runtimeapi.MessageToolCalls(response.Message)))
 	durationMillis := metadata.CompletedAt.Sub(metadata.StartedAt).Milliseconds()
 
 	return resultv1alpha1.Envelope{

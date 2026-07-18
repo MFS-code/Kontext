@@ -130,10 +130,11 @@ func TestBuildPodInjectsProviderCredentials(t *testing.T) {
 		secretName string
 		secretKey  string
 	}{
-		"anthropic":    {provider: "anthropic", envName: "ANTHROPIC_API_KEY", secretName: "kontext-anthropic", secretKey: "ANTHROPIC_API_KEY"},
-		"openai":       {provider: "openai", envName: "OPENAI_API_KEY", secretName: "kontext-openai", secretKey: "OPENAI_API_KEY"},
-		"google":       {provider: "google", envName: "GOOGLE_API_KEY", secretName: "kontext-google", secretKey: "GOOGLE_API_KEY"},
-		"azure-openai": {provider: "azure-openai", envName: "AZURE_OPENAI_API_KEY", secretName: "kontext-azure-openai", secretKey: "AZURE_OPENAI_API_KEY"},
+		"anthropic":         {provider: "anthropic", envName: "ANTHROPIC_API_KEY", secretName: "kontext-anthropic", secretKey: "ANTHROPIC_API_KEY"},
+		"openai":            {provider: "openai", envName: "OPENAI_API_KEY", secretName: "kontext-openai", secretKey: "OPENAI_API_KEY"},
+		"openai-compatible": {provider: "openai-compatible", envName: "OPENAI_API_KEY", secretName: "kontext-openai", secretKey: "OPENAI_API_KEY"},
+		"google":            {provider: "google", envName: "GOOGLE_API_KEY", secretName: "kontext-google", secretKey: "GOOGLE_API_KEY"},
+		"azure-openai":      {provider: "azure-openai", envName: "AZURE_OPENAI_API_KEY", secretName: "kontext-azure-openai", secretKey: "AZURE_OPENAI_API_KEY"},
 	}
 
 	for name, tc := range cases {

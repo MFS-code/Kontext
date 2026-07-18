@@ -1,6 +1,7 @@
 package runtimeapi_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
@@ -55,6 +56,58 @@ func TestValidateResponse(t *testing.T) {
 	}
 }
 
+func TestValidateResponseAcceptsToolCallsAndFilteredEmptyContent(t *testing.T) {
+	toolCall := runtimeapi.CompletionResponse{
+		Message: runtimeapi.Message{
+			Role: runtimeapi.RoleAssistant,
+			Content: []runtimeapi.ContentBlock{
+				{
+					Type: runtimeapi.ContentTypeToolCall,
+					ToolCall: &runtimeapi.ToolCall{
+						ID:        "call-1",
+						Name:      "lookup",
+						Arguments: json.RawMessage(`{"query":"status"}`),
+					},
+				},
+			},
+		},
+		StopReason: runtimeapi.StopReasonToolUse,
+	}
+	if err := runtimeapi.ValidateResponse(toolCall); err != nil {
+		t.Fatalf("validate tool call: %v", err)
+	}
+
+	filtered := runtimeapi.CompletionResponse{
+		Message:    runtimeapi.Message{Role: runtimeapi.RoleAssistant},
+		StopReason: runtimeapi.StopReasonContentFilter,
+	}
+	if err := runtimeapi.ValidateResponse(filtered); err != nil {
+		t.Fatalf("validate filtered response: %v", err)
+	}
+}
+
+func TestValidateResponseRejectsMalformedToolCall(t *testing.T) {
+	response := runtimeapi.CompletionResponse{
+		Message: runtimeapi.Message{
+			Role: runtimeapi.RoleAssistant,
+			Content: []runtimeapi.ContentBlock{
+				{
+					Type: runtimeapi.ContentTypeToolCall,
+					ToolCall: &runtimeapi.ToolCall{
+						ID:        "call-1",
+						Name:      "lookup",
+						Arguments: json.RawMessage(`{`),
+					},
+				},
+			},
+		},
+		StopReason: runtimeapi.StopReasonToolUse,
+	}
+	if err := runtimeapi.ValidateResponse(response); err == nil {
+		t.Fatal("expected invalid tool arguments")
+	}
+}
+
 func TestMessageTextJoinsTextBlocks(t *testing.T) {
 	message := runtimeapi.Message{
 		Role: runtimeapi.RoleAssistant,
@@ -65,5 +118,29 @@ func TestMessageTextJoinsTextBlocks(t *testing.T) {
 	}
 	if got := runtimeapi.MessageText(message); got != "first\nsecond" {
 		t.Fatalf("unexpected text %q", got)
+	}
+}
+
+func TestMessageToolCallsReturnsIndependentArguments(t *testing.T) {
+	message := runtimeapi.Message{
+		Role: runtimeapi.RoleAssistant,
+		Content: []runtimeapi.ContentBlock{
+			{
+				Type: runtimeapi.ContentTypeToolCall,
+				ToolCall: &runtimeapi.ToolCall{
+					ID:        "call-1",
+					Name:      "lookup",
+					Arguments: json.RawMessage(`{"query":"status"}`),
+				},
+			},
+		},
+	}
+	calls := runtimeapi.MessageToolCalls(message)
+	if len(calls) != 1 || calls[0].Name != "lookup" {
+		t.Fatalf("unexpected tool calls %#v", calls)
+	}
+	calls[0].Arguments[0] = '['
+	if string(message.Content[0].ToolCall.Arguments) != `{"query":"status"}` {
+		t.Fatal("tool-call arguments were not cloned")
 	}
 }
