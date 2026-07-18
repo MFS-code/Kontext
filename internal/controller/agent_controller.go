@@ -170,6 +170,7 @@ func (r *AgentReconciler) getCurrentRun(ctx context.Context, agent *kontextv1alp
 
 func (r *AgentReconciler) buildServiceRun(agent *kontextv1alpha1.Agent, runName string) *kontextv1alpha1.AgentRun {
 	provider := runtimepolicy.NormalizeProvider(agent.Spec.Provider)
+	agentSpec := agent.Spec.DeepCopy()
 
 	run := &kontextv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -187,7 +188,7 @@ func (r *AgentReconciler) buildServiceRun(agent *kontextv1alpha1.Agent, runName 
 			Tools:    util.CloneSlice(agent.Spec.Tools),
 			Budget:   agent.Spec.Budget,
 			Runtime:  *agent.Spec.Runtime.DeepCopy(),
-			Env:      util.CloneSlice(agent.Spec.Env),
+			Env:      agentSpec.Env,
 		},
 	}
 	if agent.Spec.SecretRef != nil {

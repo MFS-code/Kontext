@@ -22,7 +22,7 @@ func TestBuildPodInjectsKontextEnv(t *testing.T) {
 				Image: "kontext-echo:dev",
 			},
 			Env: []kontextv1alpha1.EnvVar{
-				{Name: "KONTEXT_ZONE_ID", Value: "agent:leaf:0001"},
+				{Name: "KONTEXT_ZONE_ID", Value: envValue("agent:leaf:0001")},
 			},
 		},
 	}
@@ -57,7 +57,7 @@ func TestBuildPodRejectsControllerManagedEnvOverrides(t *testing.T) {
 					Provider: "anthropic",
 					Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
 					Env: []kontextv1alpha1.EnvVar{
-						{Name: name, Value: "override"},
+						{Name: name, Value: envValue("override")},
 					},
 				},
 			}
@@ -65,6 +65,62 @@ func TestBuildPodRejectsControllerManagedEnvOverrides(t *testing.T) {
 				t.Fatalf("expected managed env override rejection")
 			}
 		})
+	}
+}
+
+func TestBuildPodInjectsGenericSecretBackedEnv(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "secret-env", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "use MCP",
+			Model:    "model",
+			Provider: "fake",
+			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+			Env: []kontextv1alpha1.EnvVar{{
+				Name: "MCP_AUTH_TOKEN",
+				ValueFrom: &kontextv1alpha1.EnvVarSource{
+					SecretKeyRef: kontextv1alpha1.SecretKeySelector{
+						Name: "mcp-credentials",
+						Key:  "token",
+					},
+				},
+			}},
+		},
+	}
+	pod := podbuilder.BuildPod(run)
+	var found *corev1.EnvVar
+	for index := range pod.Spec.Containers[0].Env {
+		if pod.Spec.Containers[0].Env[index].Name == "MCP_AUTH_TOKEN" {
+			found = &pod.Spec.Containers[0].Env[index]
+			break
+		}
+	}
+	if found == nil || found.Value != "" || found.ValueFrom == nil ||
+		found.ValueFrom.SecretKeyRef == nil ||
+		found.ValueFrom.SecretKeyRef.Name != "mcp-credentials" ||
+		found.ValueFrom.SecretKeyRef.Key != "token" {
+		t.Fatalf("unexpected generic Secret env: %#v", found)
+	}
+}
+
+func TestBuildPodRejectsSecretBackedManagedEnvOverride(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "secret-override", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "fake",
+			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+			Env: []kontextv1alpha1.EnvVar{{
+				Name: "KONTEXT_TOOLS",
+				ValueFrom: &kontextv1alpha1.EnvVarSource{
+					SecretKeyRef: kontextv1alpha1.SecretKeySelector{Name: "bad", Key: "value"},
+				},
+			}},
+		},
+	}
+	if _, err := podbuilder.BuildPodWithConfig(run, podbuilder.Config{}); err == nil {
+		t.Fatal("expected managed Secret-backed env override rejection")
 	}
 }
 
@@ -583,4 +639,8 @@ func envMap(pod *corev1.Pod) map[string]string {
 		}
 	}
 	return env
+}
+
+func envValue(value string) *string {
+	return &value
 }

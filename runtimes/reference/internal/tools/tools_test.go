@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
 	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/tools"
 )
@@ -73,5 +79,114 @@ func TestRegistryReturnsDeniedAndUnknownCallsToModel(t *testing.T) {
 				t.Fatalf("call identity changed: %#v", result)
 			}
 		})
+	}
+}
+
+func TestRegistryCombinesAndAllowlistsMCPTools(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "fake", Version: "1"}, nil)
+	server.AddTool(
+		&mcp.Tool{Name: "remote_echo", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "remote"}}}, nil
+		},
+	)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
+		JSONResponse: true,
+	})
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
+		Allowed: []string{"remote_echo"},
+		MCP: config.MCPConfig{Servers: []config.MCPServer{{
+			Name: "remote", Transport: "http", Endpoint: httpServer.URL,
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	defer registry.Close(context.Background())
+	definitions := registry.Definitions()
+	if len(definitions) != 1 || definitions[0].Name != "remote_echo" {
+		t.Fatalf("unexpected allowlisted definitions: %#v", definitions)
+	}
+	result, err := registry.Execute(context.Background(), runtimeapi.ToolCall{
+		ID: "call-remote", Name: "remote_echo", Arguments: json.RawMessage(`{}`),
+	})
+	if err != nil || result.Content != "remote" {
+		t.Fatalf("execute MCP tool: result=%#v err=%v", result, err)
+	}
+	denied, err := registry.Execute(context.Background(), runtimeapi.ToolCall{
+		ID: "call-built-in", Name: tools.NameShell, Arguments: json.RawMessage(`{}`),
+	})
+	if err != nil || !denied.IsError || denied.ErrorCode != "tool_denied" {
+		t.Fatalf("built-in allowlist changed: result=%#v err=%v", denied, err)
+	}
+}
+
+func TestRegistryRejectsMCPBuiltInNameCollision(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "fake", Version: "1"}, nil)
+	server.AddTool(
+		&mcp.Tool{Name: tools.NameReadKnowledge, InputSchema: json.RawMessage(`{"type":"object"}`)},
+		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{}, nil
+		},
+	)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
+		JSONResponse: true,
+	})
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	_, err := tools.NewWithContext(context.Background(), tools.Config{
+		MCP: config.MCPConfig{Servers: []config.MCPServer{{
+			Name: "remote", Transport: "http", Endpoint: httpServer.URL,
+		}}},
+	})
+	var toolError *tools.Error
+	if !errors.As(err, &toolError) || toolError.Code != "tool_name_collision" {
+		t.Fatalf("unexpected collision error: %v", err)
+	}
+}
+
+func TestRegistryStartupFailureUsesBoundedMCPCleanup(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "fake", Version: "1"}, nil)
+	server.AddTool(
+		&mcp.Tool{Name: "remote", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{}, nil
+		},
+	)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
+		JSONResponse: true,
+	})
+	deleteStarted := make(chan struct{}, 1)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodDelete {
+			deleteStarted <- struct{}{}
+			<-request.Context().Done()
+			return
+		}
+		handler.ServeHTTP(writer, request)
+	}))
+	defer httpServer.Close()
+
+	startedAt := time.Now()
+	_, err := tools.NewWithContext(context.Background(), tools.Config{
+		Allowed: []string{"unknown"},
+		MCP: config.MCPConfig{Servers: []config.MCPServer{{
+			Name: "remote", Transport: "http", Endpoint: httpServer.URL,
+		}}},
+	})
+	if err == nil {
+		t.Fatal("expected unknown tool startup error")
+	}
+	if elapsed := time.Since(startedAt); elapsed > 2500*time.Millisecond {
+		t.Fatalf("startup cleanup was not bounded: %s", elapsed)
+	}
+	select {
+	case <-deleteStarted:
+	default:
+		t.Fatal("startup cleanup did not attempt HTTP session close")
 	}
 }

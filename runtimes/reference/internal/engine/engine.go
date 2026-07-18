@@ -31,12 +31,14 @@ type ToolExecutor interface {
 }
 
 type ToolResolver func(config.Config) (ToolExecutor, error)
+type ContextToolResolver func(context.Context, config.Config) (ToolExecutor, error)
 
 type Runner struct {
-	Emitter      Emitter
-	Resolve      Resolver
-	ResolveTools ToolResolver
-	Now          func() time.Time
+	Emitter             Emitter
+	Resolve             Resolver
+	ResolveTools        ToolResolver
+	ResolveToolsContext ContextToolResolver
+	Now                 func() time.Time
 }
 
 type Result struct {
@@ -49,11 +51,17 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 	if resolve == nil {
 		resolve = provider.Resolve
 	}
-	resolveTools := runner.ResolveTools
+	resolveTools := runner.ResolveToolsContext
+	if resolveTools == nil && runner.ResolveTools != nil {
+		resolveTools = func(_ context.Context, runtimeConfig config.Config) (ToolExecutor, error) {
+			return runner.ResolveTools(runtimeConfig)
+		}
+	}
 	if resolveTools == nil {
-		resolveTools = func(runtimeConfig config.Config) (ToolExecutor, error) {
-			return tools.New(tools.Config{
+		resolveTools = func(ctx context.Context, runtimeConfig config.Config) (ToolExecutor, error) {
+			return tools.NewWithContext(ctx, tools.Config{
 				Allowed: runtimeConfig.Tools,
+				MCP:     runtimeConfig.MCP,
 			})
 		}
 	}
@@ -82,7 +90,7 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 		}
 		return state.failure(runner, runtimeConfig, code, err.Error(), nil, "")
 	}
-	toolExecutor, err := resolveTools(runtimeConfig)
+	toolExecutor, err := resolveTools(ctx, runtimeConfig)
 	if err != nil {
 		code := "invalid_tool_configuration"
 		var toolError *tools.Error
@@ -115,8 +123,27 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 		switch outcome.kind {
 		case turnOutcomePaused:
 			continue
-		case turnOutcomeFinal, turnOutcomeFailed:
-			return outcome.result
+		case turnOutcomeFinal:
+			result := runner.cleanupToolExecutor(
+				toolExecutor,
+				outcome.result,
+				state,
+				runtimeConfig,
+			)
+			if result.ExitCode == 0 {
+				runner.emit(events.TypeOutput, map[string]any{
+					"mediaType": resultv1alpha1.DefaultMediaType,
+					"value":     runtimeapi.MessageText(outcome.response.Message),
+				})
+			}
+			return result
+		case turnOutcomeFailed:
+			return runner.cleanupToolExecutor(
+				toolExecutor,
+				outcome.result,
+				state,
+				runtimeConfig,
+			)
 		case turnOutcomeToolBatch:
 			if result := runner.executeToolBatch(
 				ctx,
@@ -125,12 +152,49 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 				state,
 				outcome,
 			); result != nil {
-				return *result
+				return runner.cleanupToolExecutor(
+					toolExecutor,
+					*result,
+					state,
+					runtimeConfig,
+				)
 			}
 		default:
 			panic(fmt.Sprintf("unsupported turn outcome %d", outcome.kind))
 		}
 	}
+}
+
+func (runner Runner) cleanupToolExecutor(
+	executor ToolExecutor,
+	result Result,
+	state *loopState,
+	runtimeConfig config.Config,
+) Result {
+	closer, ok := executor.(interface {
+		Close(context.Context) error
+	})
+	if !ok {
+		return result
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := closer.Close(cleanupCtx); err != nil {
+		const code = "tool_cleanup_failed"
+		message := truncateUTF8(fmt.Sprintf("tool cleanup failed: %v", err), 4<<10)
+		if result.ExitCode == 0 {
+			return state.failure(
+				runner,
+				runtimeConfig,
+				code,
+				message,
+				nil,
+				state.lastRequestID,
+			)
+		}
+		runner.emitError(code, message, nil)
+	}
+	return result
 }
 
 func terminalStopFailure(reason runtimeapi.StopReason) (string, string) {

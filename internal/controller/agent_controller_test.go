@@ -28,6 +28,12 @@ func TestAgentReconcilerMintsServiceRun(t *testing.T) {
 			Goal:     "stay ready",
 			Provider: "echo",
 			Model:    "echo-model",
+			Env: []kontextv1alpha1.EnvVar{{
+				Name: "MCP_TOKEN",
+				ValueFrom: &kontextv1alpha1.EnvVarSource{
+					SecretKeyRef: kontextv1alpha1.SecretKeySelector{Name: "mcp-auth", Key: "token"},
+				},
+			}},
 			Runtime: kontextv1alpha1.RuntimeSpec{
 				Image:   "kontext-echo:dev",
 				Command: []string{"/entrypoint.sh"},
@@ -66,6 +72,27 @@ func TestAgentReconcilerMintsServiceRun(t *testing.T) {
 	}
 	if len(run.Spec.Runtime.Command) != 1 || run.Spec.Runtime.Command[0] != "/entrypoint.sh" {
 		t.Fatalf("runtime command was not snapshotted: %#v", run.Spec.Runtime.Command)
+	}
+	if len(run.Spec.Env) != 1 || run.Spec.Env[0].ValueFrom == nil ||
+		run.Spec.Env[0].ValueFrom.SecretKeyRef.Name != "mcp-auth" ||
+		run.Spec.Env[0].ValueFrom.SecretKeyRef.Key != "token" {
+		t.Fatalf("Secret-backed env was not snapshotted: %#v", run.Spec.Env)
+	}
+	updated.Spec.Env[0].ValueFrom.SecretKeyRef.Name = "changed-auth"
+	updated.Spec.Env[0].ValueFrom.SecretKeyRef.Key = "changed-token"
+	if err := k8sClient.Update(ctx, &updated); err != nil {
+		t.Fatalf("update Agent Secret ref: %v", err)
+	}
+	if err := k8sClient.Get(
+		ctx,
+		types.NamespacedName{Name: run.Name, Namespace: run.Namespace},
+		&run,
+	); err != nil {
+		t.Fatalf("get child run after Agent update: %v", err)
+	}
+	if run.Spec.Env[0].ValueFrom.SecretKeyRef.Name != "mcp-auth" ||
+		run.Spec.Env[0].ValueFrom.SecretKeyRef.Key != "token" {
+		t.Fatalf("child run Secret ref drifted with Agent update: %#v", run.Spec.Env)
 	}
 }
 

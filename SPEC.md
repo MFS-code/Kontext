@@ -52,7 +52,7 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `budget.dollars`     | number ≥ 0                            | no  |                                                                |
 | `secretRef.name`     | string                                | no  | Provider credentials Secret.                                   |
 | `serviceAccountName` | string                                | no  | Per-agent identity.                                            |
-| `env`                | []EnvVar                              | no  | Extra env passthrough to the Pod.                              |
+| `env`                | []EnvVar                              | no  | Extra literal or Secret-backed env passed to the Pod.          |
 | `schedule`           | string (cron)                         | no  | Only for `Scheduled`.                                          |
 | `backoff`            | object                                | no  | Re-cast backoff policy for `Service`. Controller-defaulted.    |
 
@@ -91,6 +91,7 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 | `budget`             | object   | no  | Resolved snapshot.                               |
 | `secretRef.name`     | string   | no  |                                                  |
 | `serviceAccountName` | string   | no  |                                                  |
+| `env`                | []EnvVar | no  | Resolved literal or Secret-backed env snapshot.  |
 | `runtime.image`      | string   | yes | Resolved from Agent.                             |
 | `runtime.command`    | []string | no  | Required when stdout capture is configured.      |
 | `runtime.args`       | []string | no  | Appended to the declared command.                |
@@ -140,6 +141,10 @@ The controller injects, on the Pod:
 - Env vars: `KONTEXT_GOAL`, `KONTEXT_MODEL`, `KONTEXT_PROVIDER`, `KONTEXT_TOOLS` (comma-separated), `KONTEXT_BUDGET_TOKENS`, `KONTEXT_BUDGET_WALLCLOCK`, `KONTEXT_BUDGET_DOLLARS`, `KONTEXT_AGENT_NAME`, `KONTEXT_RUN_NAME`.
 - Optionally a mounted `/kontext/input.json` with the same data (richer/structured payloads).
 - Provider credentials mounted from `secretRef` as env (e.g. `ANTHROPIC_API_KEY`).
+- Generic `spec.env` entries. Each entry selects exactly one literal `value` or
+  `valueFrom.secretKeyRef{name,key}`. Controller-managed variables cannot be
+  overridden through either form. Secret values remain Kubernetes Secret data;
+  they are not copied into Agent/AgentRun fields or controller logs.
 
 ### Output — logs and execution events
 
@@ -352,6 +357,24 @@ The reference runtime emits versioned JSONL lifecycle, usage, tool, output, and
 error events to stdout. It retains conversation state only in memory for one
 run and does not provide retries, planning, persistent memory, retrieval,
 subagents, or background orchestration.
+
+Configured MCP servers are a maintained-runtime concern, not control-plane
+vocabulary. The reference runtime uses the official MCP Go SDK v1.6.1, which
+requires Go 1.25 or newer; this repository declares Go 1.26.5. The SDK
+negotiates protocol `2025-11-25` and accepts `2025-06-18`, `2025-03-26`, and
+`2024-11-05`. Discovered MCP tools join the same immutable allowlisted registry
+and use the same turn, call-count, output, cancellation, event, and cleanup
+controls as built-ins.
+
+The maintained Playwright MCP example is a separate restricted
+Deployment/Service reached over HTTP `/mcp`, never an AgentRun sidecar.
+Playwright MCP 0.0.78 is pinned to
+`mcr.microsoft.com/playwright/mcp@sha256:3d871c22ea2d4cca0966e2cfb1860e1cb03eb7353725a3d6cffd133296fb04eb`.
+The browser server has its own keyless identity, ephemeral profile and writable
+storage, finite resources, and NetworkPolicy. It does not add MCP or browser
+fields to either CRD. The example disables Chromium's sandbox because the
+pinned image runs in a restricted container; Playwright MCP is not itself a
+security boundary.
 
 ### Mode expectations for the image
 

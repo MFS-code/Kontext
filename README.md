@@ -86,6 +86,23 @@ The reference runtime exposes only tools listed in `spec.tools`; Kubernetes
 RBAC, mounts, security context, and NetworkPolicy remain the authority for
 what those tools may access.
 
+The reference runtime also discovers allowlisted stdio and Streamable HTTP MCP
+tools. The maintained browser example deploys pinned Playwright MCP as a
+separate restricted Deployment/Service and connects to it from keyless fake
+provider AgentRuns. Its Calico-backed acceptance covers deterministic browser
+interaction, fresh profiles, denied metadata/internal egress, wallclock
+cleanup, omitted tool event content, and absent provider credentials and
+ServiceAccount tokens:
+
+```bash
+./scripts/e2e-kind-network-policy.sh
+```
+
+kindnet does not enforce NetworkPolicy, so browser policy results are asserted
+only in that disposable Calico cluster. See
+[`runtimes/reference/README.md`](runtimes/reference/README.md) for the pinned
+image, command, resource checkpoint, and sandbox caveat.
+
 ### Capture results from an existing image
 
 An existing Linux container can opt into stdout result capture without adding

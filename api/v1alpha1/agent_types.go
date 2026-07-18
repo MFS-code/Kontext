@@ -113,10 +113,23 @@ type ConfigMapRef struct {
 	Name string `json:"name"`
 }
 
-// EnvVar is a name/value pair injected into the runtime Pod.
+// EnvVar is a name/value or Secret-backed value injected into the runtime Pod.
+// +kubebuilder:validation:XValidation:rule="has(self.value) != has(self.valueFrom)",message="exactly one of value or valueFrom must be configured"
 type EnvVar struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+	Name      string        `json:"name"`
+	Value     *string       `json:"value,omitempty"`
+	ValueFrom *EnvVarSource `json:"valueFrom,omitempty"`
+}
+
+type EnvVarSource struct {
+	SecretKeyRef SecretKeySelector `json:"secretKeyRef"`
+}
+
+type SecretKeySelector struct {
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
 }
 
 // BackoffSpec controls Service-mode re-cast delays.

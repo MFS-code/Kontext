@@ -1,0 +1,43 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-playwright-fresh
+  namespace: kontext-network-policy-e2e
+spec:
+  goal: Prove a new AgentRun receives a fresh isolated browser profile.
+  provider: fake
+  model: test/playwright-tool-sequence
+  tools:
+    - browser_navigate
+    - browser_snapshot
+  serviceAccountName: reference-browser-runtime
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_MCP_CONFIG
+      value: >-
+        {"servers":[{"name":"playwright","transport":"http","endpoint":"http://playwright-mcp.kontext-network-policy-e2e.svc.cluster.local:8931/mcp","timeout":"15s","maxRetries":0}]}
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool_sequence
+    - name: KONTEXT_FAKE_TOOL_SEQUENCE
+      value: >-
+        [{"name":"browser_navigate","arguments":{"url":"http://playwright-fixture.kontext-network-policy-e2e.svc.cluster.local:8080/"}},{"name":"browser_snapshot","arguments":{}}]
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "1024"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "2048"
+  budget:
+    tokens: 8192
+    wallclock: 2m

@@ -248,7 +248,7 @@ jobs:
   network-policy-e2e:
     name: Kind NetworkPolicy e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     needs:
       - validate
     env:
