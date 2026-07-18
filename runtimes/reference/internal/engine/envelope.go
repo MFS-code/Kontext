@@ -83,12 +83,14 @@ func Failure(
 func envelopeUsage(providerUsage runtimeapi.Usage) *resultv1alpha1.Usage {
 	if providerUsage.InputTokens == nil &&
 		providerUsage.OutputTokens == nil &&
-		providerUsage.TotalTokens == nil {
+		providerUsage.TotalTokens == nil &&
+		providerUsage.ReasoningTokens == nil {
 		return nil
 	}
 	return &resultv1alpha1.Usage{
-		InputTokens:  providerUsage.InputTokens,
-		OutputTokens: providerUsage.OutputTokens,
-		TotalTokens:  providerUsage.TotalTokens,
+		InputTokens:     providerUsage.InputTokens,
+		OutputTokens:    providerUsage.OutputTokens,
+		TotalTokens:     providerUsage.TotalTokens,
+		ReasoningTokens: providerUsage.ReasoningTokens,
 	}
 }

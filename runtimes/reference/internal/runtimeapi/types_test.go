@@ -146,6 +146,20 @@ func TestValidateResponseRejectsInvalidUsage(t *testing.T) {
 	if err := runtimeapi.ValidateResponse(base); err == nil {
 		t.Fatal("expected usage overflow rejection")
 	}
+
+	base.Usage = runtimeapi.Usage{ReasoningTokens: &negative}
+	if err := runtimeapi.ValidateResponse(base); err == nil {
+		t.Fatal("expected negative reasoning usage rejection")
+	}
+
+	reasoning := int64(4)
+	base.Usage = runtimeapi.Usage{
+		OutputTokens:    &output,
+		ReasoningTokens: &reasoning,
+	}
+	if err := runtimeapi.ValidateResponse(base); err == nil {
+		t.Fatal("expected reasoning usage above output usage rejection")
+	}
 }
 
 func TestMessageTextJoinsTextBlocks(t *testing.T) {

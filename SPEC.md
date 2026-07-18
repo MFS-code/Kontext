@@ -170,7 +170,8 @@ The controller injects, on the Pod:
   "usage": {
     "inputTokens": 1000,
     "outputTokens": 234,
-    "totalTokens": 1234
+    "totalTokens": 1234,
+    "reasoningTokens": 180
   },
   "timing": {
     "durationMillis": 1750
@@ -189,7 +190,14 @@ The envelope fields are:
 - `outcome` — `Succeeded` or `Failed`. A failed outcome includes
   `error.message` and may include a stable `error.code` and `error.retryable`.
 - `output` — an optional media type plus any valid JSON value.
-- `usage` — optional typed metrics. Missing values are never inferred as zero.
+- `usage` — optional typed metrics. `reasoningTokens` records a
+  provider-reported reasoning-token breakdown of output/completion usage.
+  Missing values are never inferred as zero, including when the provider does
+  not expose that breakdown; a present zero means the provider measured zero.
+  Visible response text can therefore tokenize to fewer tokens than
+  `outputTokens`: provider completion totals may also include hidden reasoning
+  or other provider-defined completion accounting. The count does not expose
+  reasoning content.
 - `timing` — optional start/completion timestamps and measured durations.
 - `execution` — optional non-secret provider, model, request, turn, and tool
   metadata.
@@ -202,6 +210,11 @@ The envelope fields are:
 The termination message is a terminal summary, not a transcript. Producers
 must compact it below 4096 bytes while preserving valid JSON and setting
 `truncation`. Full execution events remain in the JSONL log stream.
+
+The controller projects the stable aggregate usage fields into
+`AgentRun.status.usage`. Optional usage breakdowns such as `reasoningTokens`
+remain in the versioned result envelope and usage events, avoiding
+provider-detail growth in Kubernetes status.
 
 `status.output` preserves `output`. The compatibility field `status.result` is
 projected deterministically: JSON strings with a `text/*` media type become

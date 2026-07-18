@@ -256,9 +256,14 @@ type openAIToolCall struct {
 }
 
 type openAIUsage struct {
-	PromptTokens     *int64 `json:"prompt_tokens"`
-	CompletionTokens *int64 `json:"completion_tokens"`
-	TotalTokens      *int64 `json:"total_tokens"`
+	PromptTokens           *int64                       `json:"prompt_tokens"`
+	CompletionTokens       *int64                       `json:"completion_tokens"`
+	TotalTokens            *int64                       `json:"total_tokens"`
+	CompletionTokenDetails openAICompletionTokenDetails `json:"completion_tokens_details"`
+}
+
+type openAICompletionTokenDetails struct {
+	ReasoningTokens *int64 `json:"reasoning_tokens"`
 }
 
 type openAIErrorResponse struct {
@@ -328,9 +333,10 @@ func normalizeOpenAIResponse(
 			Content: content,
 		},
 		Usage: runtimeapi.Usage{
-			InputTokens:  response.Usage.PromptTokens,
-			OutputTokens: response.Usage.CompletionTokens,
-			TotalTokens:  response.Usage.TotalTokens,
+			InputTokens:     response.Usage.PromptTokens,
+			OutputTokens:    response.Usage.CompletionTokens,
+			TotalTokens:     response.Usage.TotalTokens,
+			ReasoningTokens: response.Usage.CompletionTokenDetails.ReasoningTokens,
 		},
 		StopReason: stopReason,
 		RequestID:  responseRequestID,

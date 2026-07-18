@@ -47,10 +47,11 @@ type Output struct {
 // Usage records only metrics actually measured by a runtime or provider.
 // Pointer fields distinguish a measured zero from a missing measurement.
 type Usage struct {
-	InputTokens  *int64   `json:"inputTokens,omitempty"`
-	OutputTokens *int64   `json:"outputTokens,omitempty"`
-	TotalTokens  *int64   `json:"totalTokens,omitempty"`
-	Dollars      *float64 `json:"dollars,omitempty"`
+	InputTokens     *int64   `json:"inputTokens,omitempty"`
+	OutputTokens    *int64   `json:"outputTokens,omitempty"`
+	TotalTokens     *int64   `json:"totalTokens,omitempty"`
+	ReasoningTokens *int64   `json:"reasoningTokens,omitempty"`
+	Dollars         *float64 `json:"dollars,omitempty"`
 }
 
 // Timing records provider/runtime timing when it is available.
@@ -162,14 +163,24 @@ func (e Envelope) Validate() error {
 
 func validateUsage(usage Usage) error {
 	metrics := map[string]*int64{
-		"inputTokens":  usage.InputTokens,
-		"outputTokens": usage.OutputTokens,
-		"totalTokens":  usage.TotalTokens,
+		"inputTokens":     usage.InputTokens,
+		"outputTokens":    usage.OutputTokens,
+		"totalTokens":     usage.TotalTokens,
+		"reasoningTokens": usage.ReasoningTokens,
 	}
 	for name, value := range metrics {
 		if value != nil && *value < 0 {
 			return fmt.Errorf("result usage %s cannot be negative", name)
 		}
+	}
+	if usage.OutputTokens != nil &&
+		usage.ReasoningTokens != nil &&
+		*usage.ReasoningTokens > *usage.OutputTokens {
+		return fmt.Errorf(
+			"result usage reasoningTokens %d exceeds outputTokens %d",
+			*usage.ReasoningTokens,
+			*usage.OutputTokens,
+		)
 	}
 	if usage.Dollars != nil && *usage.Dollars < 0 {
 		return errors.New("result usage dollars cannot be negative")

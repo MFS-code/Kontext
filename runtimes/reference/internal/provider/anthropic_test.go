@@ -81,6 +81,9 @@ func TestAnthropicCompletesAndNormalizesResponse(t *testing.T) {
 	if response.Usage.TotalTokens != nil {
 		t.Fatalf("unreported total tokens must remain absent: %#v", response.Usage)
 	}
+	if response.Usage.ReasoningTokens != nil {
+		t.Fatalf("Anthropic must not fabricate reasoning usage: %#v", response.Usage)
+	}
 	if len(response.Message.Content) != 2 ||
 		response.Message.Content[1].ToolCall == nil ||
 		response.Message.Content[1].ToolCall.Name != "lookup" ||
@@ -131,7 +134,8 @@ func TestAnthropicUsesExactEndpointAndRequestedTokenLimit(t *testing.T) {
 	}
 	if response.Usage.InputTokens != nil ||
 		response.Usage.OutputTokens != nil ||
-		response.Usage.TotalTokens != nil {
+		response.Usage.TotalTokens != nil ||
+		response.Usage.ReasoningTokens != nil {
 		t.Fatalf("absent usage must remain absent: %#v", response.Usage)
 	}
 }
