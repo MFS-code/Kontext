@@ -74,7 +74,6 @@ on_exit() {
     echo "==> cleaning completed e2e resources"
     set +e
     cleanup_e2e_resources
-    status=$?
     set -e
   else
     echo "==> preserving failed e2e resources for diagnostics" >&2

@@ -51,6 +51,15 @@ verify_sha256() {
   fi
 }
 
+require_ipv4() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "${value}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    echo "${name} is not a single IPv4 address: ${value}" >&2
+    return 1
+  fi
+}
+
 wait_for_run_phase() {
   local name="$1"
   local expected="$2"
@@ -160,6 +169,42 @@ KONTEXT_KIND_IMAGE_SET=network-policy \
 echo "==> applying NetworkPolicy fixture and policy"
 kubectl apply -f \
   "${ROOT_DIR}/deploy/examples/v1alpha1/reference-kind-network-policy.yaml"
+kubernetes_service_ip="$(
+  kubectl get service kubernetes -n default -o jsonpath='{.spec.clusterIP}'
+)"
+control_plane_ip="$(
+  docker inspect \
+    --format '{{(index .NetworkSettings.Networks "kind").IPAddress}}' \
+    "${CLUSTER_NAME}-control-plane"
+)"
+require_ipv4 "Kubernetes Service IP" "${kubernetes_service_ip}"
+require_ipv4 "kind control-plane IP" "${control_plane_ip}"
+api_egress_patch="$(
+  cat <<EOF
+[
+  {
+    "op": "add",
+    "path": "/spec/egress/-",
+    "value": {
+      "to": [{"ipBlock": {"cidr": "${kubernetes_service_ip}/32"}}],
+      "ports": [{"protocol": "TCP", "port": 443}]
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/egress/-",
+    "value": {
+      "to": [{"ipBlock": {"cidr": "${control_plane_ip}/32"}}],
+      "ports": [{"protocol": "TCP", "port": 6443}]
+    }
+  }
+]
+EOF
+)"
+kubectl patch networkpolicy reference-runtime-egress \
+  -n "${NAMESPACE}" \
+  --type=json \
+  --patch "${api_egress_patch}"
 kubectl wait --for=condition=Ready pod/network-policy-http \
   -n "${NAMESPACE}" \
   --timeout=120s

@@ -146,14 +146,6 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
-    # Runtime clients use the kubernetes Service on 443. Some CNIs evaluate
-    # the post-DNAT kind control-plane endpoint on 6443, so both API ports are
-    # explicit while all other destinations and ports remain denied.
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-      ports:
-        - protocol: TCP
-          port: 443
-        - protocol: TCP
-          port: 6443
+    # The acceptance script appends exact /32 rules for the Kubernetes Service
+    # and kind control-plane IPs after cluster creation. Keeping dynamic API
+    # endpoints out of this static fixture avoids broad external HTTPS egress.
