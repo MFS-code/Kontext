@@ -17,6 +17,91 @@ runtime_image="${KONTEXT_REFERENCE_IMAGE:-kontext-reference:dev}"
 run_name="provider-${scenario}"
 secret_name="provider-acceptance-credentials"
 knowledge_name="provider-acceptance-knowledge"
+record_path="${KONTEXT_ACCEPTANCE_RECORD:-${KONTEXT_EVAL_DIR:-eval-results}/provider-acceptance.json}"
+started_epoch="$(date +%s)"
+phase="NotStarted"
+failure_stage="initialization"
+pass=false
+usage_json='{}'
+turns_json='null'
+tool_calls_json='null'
+commit_sha="${GITHUB_SHA:-}"
+run_id="${GITHUB_RUN_ID:-local}"
+run_attempt="${GITHUB_RUN_ATTEMPT:-1}"
+
+need jq
+
+if [[ -z "${commit_sha}" ]]; then
+  commit_sha="$(git -C "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+fi
+
+write_acceptance_record() {
+  local completed_epoch duration_millis record_dir temp_path
+  completed_epoch="$(date +%s)"
+  duration_millis="$(( (completed_epoch - started_epoch) * 1000 ))"
+  record_dir="$(dirname "${record_path}")"
+  mkdir -p "${record_dir}"
+  temp_path="${record_path}.tmp"
+  jq -n \
+    --arg apiVersion "kontext.dev/eval/v1alpha1" \
+    --arg commitSHA "${commit_sha:0:64}" \
+    --arg failureStage "${failure_stage:0:128}" \
+    --arg kind "ProviderAcceptanceRecord" \
+    --arg model "${model:0:256}" \
+    --arg phase "${phase:0:64}" \
+    --arg provider "${provider:0:64}" \
+    --arg runAttempt "${run_attempt:0:32}" \
+    --arg runID "${run_id:0:128}" \
+    --arg scenario "${scenario:0:64}" \
+    --argjson durationMillis "${duration_millis}" \
+    --argjson measuredUsage "${usage_json}" \
+    --argjson pass "${pass}" \
+    --argjson toolCalls "${tool_calls_json}" \
+    --argjson turns "${turns_json}" \
+    '{
+      apiVersion: $apiVersion,
+      kind: $kind,
+      provider: $provider,
+      model: $model,
+      scenario: $scenario,
+      commitSHA: $commitSHA,
+      runID: $runID,
+      runAttempt: $runAttempt,
+      phase: $phase,
+      durationMillis: $durationMillis,
+      measuredUsage: $measuredUsage,
+      turns: $turns,
+      toolCalls: $toolCalls,
+      pass: $pass
+    }
+    | if $pass then . else .failureStage = $failureStage end' >"${temp_path}"
+  mv "${temp_path}" "${record_path}"
+}
+
+on_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ "${status}" -eq 0 ]]; then
+    pass=true
+    failure_stage=""
+  fi
+  if ! write_acceptance_record; then
+    echo "failed to write provider acceptance record: ${record_path}" >&2
+    if [[ "${status}" -eq 0 ]]; then
+      status=1
+    fi
+  fi
+  exit "${status}"
+}
+
+trap on_exit EXIT
+
+if [[ "${KONTEXT_ACCEPTANCE_INITIALIZE_ONLY:-false}" == "true" ]]; then
+  failure_stage="workflow_not_started"
+  write_acceptance_record
+  trap - EXIT
+  exit 0
+fi
 
 if [[ -n "${endpoint}" ]]; then
   if [[ "${endpoint}" != http://* && "${endpoint}" != https://* ]]; then
@@ -34,10 +119,17 @@ fi
 
 case "${provider}" in
   anthropic)
+    normalized_provider="anthropic"
     credential_env="ANTHROPIC_API_KEY"
     other_credential_env="OPENAI_API_KEY"
     ;;
-  openai | openai-compatible)
+  openai)
+    normalized_provider="openai"
+    credential_env="OPENAI_API_KEY"
+    other_credential_env="ANTHROPIC_API_KEY"
+    ;;
+  openai-compatible)
+    normalized_provider="openai-compatible"
     credential_env="OPENAI_API_KEY"
     other_credential_env="ANTHROPIC_API_KEY"
     ;;
@@ -63,8 +155,6 @@ case "${scenario}" in
     exit 1
     ;;
 esac
-
-need jq
 
 render_run_manifest() {
   jq -n \
@@ -137,17 +227,21 @@ render_run_manifest() {
 }
 
 if [[ "${KONTEXT_ACCEPTANCE_RENDER_ONLY:-false}" == "true" ]]; then
+  trap - EXIT
   render_run_manifest
   exit 0
 fi
 
 need kubectl
 
+failure_stage="credential_check"
 if [[ -z "${KONTEXT_PROVIDER_API_KEY:-}" ]]; then
   echo "the selected provider credential is empty" >&2
   exit 1
 fi
 
+phase="Preparing"
+failure_stage="namespace_setup"
 echo "==> preparing isolated namespace"
 kubectl create namespace "${namespace}" \
   --dry-run=client \
@@ -173,9 +267,12 @@ if [[ "${scenario}" == "tool" ]]; then
     kubectl apply -f - >/dev/null
 fi
 
+phase="Pending"
+failure_stage="create_agentrun"
 echo "==> creating ${provider} ${scenario} AgentRun"
 render_run_manifest | kubectl apply -f - >/dev/null
 
+failure_stage="wait_for_terminal_phase"
 echo "==> waiting for AgentRun success"
 phase=""
 for _ in $(seq 1 75); do
@@ -211,6 +308,18 @@ run_json="$(
     --namespace "${namespace}" \
     -o json
 )"
+usage_json="$(
+  jq -c '
+    (.status.usage // {})
+    | with_entries(select(
+        .key == "tokens"
+        or .key == "inputTokens"
+        or .key == "outputTokens"
+        or .key == "dollars"
+      ))
+  ' <<<"${run_json}"
+)"
+failure_stage="validate_result"
 result="$(jq -r '.status.result' <<<"${run_json}")"
 if [[ "${result}" != "${expected_result}" ]]; then
   echo "unexpected final result: ${result}" >&2
@@ -271,54 +380,72 @@ if ! kubectl get secret "${secret_name}" \
   exit 1
 fi
 
-logs="$(
-  kubectl logs "${pod_name}" \
-    --namespace "${namespace}" \
-    --container runtime
-)"
+failure_stage="validate_envelope"
 envelope="$(
-  jq -R -s -c '
+  jq -c '
     [
-      split("\n")[]
-      | select(startswith("KONTEXT_RESULT:"))
-      | sub("^KONTEXT_RESULT:[[:space:]]*"; "")
+      .status.containerStatuses[]?
+      | select(.name == "runtime")
+      | .state.terminated.message // empty
       | fromjson
     ]
     | last
-  ' <<<"${logs}"
+  ' <<<"${pod_json}"
 )"
 if [[ "${envelope}" == "null" ]]; then
-  echo "runtime logs did not contain a terminal result envelope" >&2
+  echo "runtime Pod did not contain a terminal result envelope" >&2
   exit 1
 fi
 
+if ! jq -e \
+  --arg expectedModel "${model}" \
+  --arg expectedProvider "${normalized_provider}" '
+    .apiVersion == "kontext.dev/result/v1alpha1"
+    and .execution.provider == $expectedProvider
+    and .execution.model == $expectedModel
+  ' <<<"${envelope}" >/dev/null; then
+  echo "terminal envelope did not preserve provider/model identity" >&2
+  exit 1
+fi
+
+turns_json="$(jq -c '.execution.turns // null' <<<"${envelope}")"
+tool_calls_json="$(jq -c '.execution.toolCalls // null' <<<"${envelope}")"
+
 if [[ "${scenario}" == "tool" ]]; then
-  tool_event_count="$(
-    jq -R -s '
-      [
-        split("\n")[]
-        | fromjson?
-        | select(
-            .apiVersion == "kontext.dev/event/v1alpha1"
-            and .type == "tool"
-            and .data.name == "read_knowledge"
-          )
-      ]
-      | length
-    ' <<<"${logs}"
+  failure_stage="validate_tool_event"
+  logs="$(
+    kubectl logs "${pod_name}" \
+      --namespace "${namespace}" \
+      --container runtime
   )"
-  if [[ "${tool_event_count}" != "1" ]] ||
+  if ! jq -R -s -e '
+    [
+      split("\n")[]
+      | fromjson?
+      | select(
+          .apiVersion == "kontext.dev/event/v1alpha1"
+          and .type == "tool"
+        )
+    ] as $events
+    | ($events | length) == 1
+    and $events[0].data.name == "read_knowledge"
+    and $events[0].data.count == 1
+    and $events[0].data.isError == false
+    and (($events[0].data.errorCode // "") == "")
+  ' <<<"${logs}" >/dev/null ||
     ! jq -e '
-      .outcome == "Succeeded"
+      .apiVersion == "kontext.dev/result/v1alpha1"
+      and .outcome == "Succeeded"
       and .execution.turns == 2
       and .execution.toolCalls == 1
     ' <<<"${envelope}" >/dev/null; then
-    echo "tool scenario did not record exactly one read_knowledge call" >&2
+    echo "tool scenario did not record exactly one successful read_knowledge event" >&2
     exit 1
   fi
 else
   if ! jq -e '
-    .outcome == "Succeeded"
+    .apiVersion == "kontext.dev/result/v1alpha1"
+    and .outcome == "Succeeded"
     and .execution.turns == 1
     and .execution.toolCalls == 0
   ' <<<"${envelope}" >/dev/null; then
@@ -327,4 +454,6 @@ else
   fi
 fi
 
+phase="Succeeded"
+failure_stage="complete"
 echo "provider acceptance passed: provider=${provider} scenario=${scenario}"

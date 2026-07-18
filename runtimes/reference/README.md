@@ -17,9 +17,11 @@ kontext-reporter (PID 1)
 ```
 
 The runtime emits versioned JSONL lifecycle, usage, output, and error events to
-stdout. Its final line is a `KONTEXT_RESULT:`-prefixed result envelope. The
-reporter preserves the logs and process exit status, compacts the envelope, and
-writes `/dev/termination-log`.
+stdout. Internally, it gives its final envelope to the bundled reporter through
+the `KONTEXT_RESULT:` capture prefix. The reporter preserves process semantics,
+compacts the envelope, and writes the authoritative Pod termination message.
+Consumers use `AgentRun.status` or that termination message for terminal data;
+raw logs remain events and diagnostics.
 
 No private chain-of-thought is emitted.
 
@@ -175,7 +177,8 @@ The maintained runtime includes three tools:
 
 - `read_knowledge` reads one UTF-8 file below `/kontext/knowledge`. Absolute
   paths, parent traversal, escaping symlinks, directories, and oversized reads
-  are rejected or truncated.
+  are rejected or truncated. The mounted ConfigMap is static context for the
+  run, not production RAG.
 - `kubernetes_read` performs current-namespace `get` or `list` operations for
   a fixed resource allowlist. It has no namespace argument and never permits
   Secrets. Kubernetes RBAC remains authoritative.
@@ -187,7 +190,8 @@ The maintained runtime includes three tools:
 Allowlisting a tool makes it visible to the model; it does not grant new
 infrastructure permissions. The Pod's ServiceAccount, security context,
 mounted volumes, filesystem permissions, and NetworkPolicy determine what a
-tool can actually access.
+tool can actually access. Availability also does not guarantee model use;
+versioned tool events are the evidence that a call occurred.
 
 Environment filtering is defense in depth, not a Secret boundary. The shell
 runs in the same container as the runtime. Filtering changes only the direct
@@ -427,8 +431,9 @@ Each dispatch builds the maintained operator and reference runtime, loads them
 into an ephemeral kind cluster, and injects only the selected provider key
 through a namespace-local Secret. The default `tool` scenario mounts a tiny
 ConfigMap, exposes only `read_knowledge`, and requires exactly one call before
-an exact final response. The `text` scenario preserves the ordinary one-turn
-transport check.
+an exact final response. Acceptance requires exactly one matching tool event
+with `count: 1`, `isError: false`, and no error code. The `text` scenario
+preserves the ordinary one-turn transport check.
 
 The tool scenario permits at most two provider turns, one tool call, 256 bytes
 per tool result and in total, 2,048 cumulative measured tokens, and 90 seconds
@@ -444,6 +449,20 @@ retained briefly; maintainers should still review them before sharing. The
 model and endpoint inputs are visible workflow metadata. The acceptance script
 rejects endpoint userinfo, queries, fragments, and whitespace so credentials
 cannot be embedded there.
+
+The script writes a bounded `kontext.dev/eval/v1alpha1`
+`ProviderAcceptanceRecord` on success and safe failure paths. It includes the
+provider, opaque model, scenario, commit/run identity, phase, duration,
+measured usage, turns, tool calls, and pass/fail only. It excludes API keys,
+Secret values, raw logs, and model output. The workflow uploads this record on
+success or failure with short retention.
+
+Before an alpha release, dispatch the workflow for each maintained transport
+being released, approve the protected environment, require a passing run, and
+retain the `provider-acceptance-<run>-<attempt>` artifact with the release
+evidence. Without those protected credentials, no local or keyless run counts
+as authenticated acceptance. Immutable versioned image publication is a
+separate release step.
 
 ## Dependency inventory
 

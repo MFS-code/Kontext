@@ -42,9 +42,11 @@ The child emits a complete versioned envelope on one stdout line:
 KONTEXT_RESULT: {"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":{"ok":true}}}
 ```
 
-The line remains visible in ordinary logs. If multiple prefixed lines are
-present, the last one wins. Missing, malformed, legacy, or capture-truncated
-candidates produce a failed result envelope.
+The line remains visible in ordinary logs as capture input, but the log copy is
+not the authoritative terminal record. The reporter writes that record to the
+Pod termination message, which the controller projects into `AgentRun.status`.
+If multiple prefixed lines are present, the last one wins. Missing, malformed,
+legacy, or capture-truncated candidates produce a failed result envelope.
 
 `RESULT:` is not a reporter prefix. The exact prefix is `KONTEXT_RESULT:`.
 
@@ -81,7 +83,9 @@ go test ./runtimes/reporter -count=1
 make docker-build-reporter
 ```
 
-Reporter injection into arbitrary workload images is intentionally deferred to
-the control plane. The internal `--install-to PATH` mode atomically copies the
-running static executable into the shared injection volume; it is used by the
-trusted init container rather than by workload authors.
+Reporter injection is selected by `runtime.result` and performed by the control
+plane. The internal `--install-to PATH` mode atomically copies the running
+static executable into the shared injection volume; it is used by the trusted
+init container rather than by workload authors. Images that write a native
+termination envelope omit `runtime.result` and receive no injected reporter.
+See `deploy/examples/v1alpha1/README.md` for all four result paths.

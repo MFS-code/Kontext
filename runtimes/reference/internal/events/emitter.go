@@ -6,26 +6,22 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	eventv1alpha1 "github.com/kontext-dev/kontext/pkg/event/v1alpha1"
 )
 
-const APIVersion = "kontext.dev/event/v1alpha1"
+const APIVersion = eventv1alpha1.APIVersion
 
-type Type string
+type Type = eventv1alpha1.Type
+type Event = eventv1alpha1.Event
 
 const (
-	TypeLifecycle Type = "lifecycle"
-	TypeOutput    Type = "output"
-	TypeUsage     Type = "usage"
-	TypeTool      Type = "tool"
-	TypeError     Type = "error"
+	TypeLifecycle = eventv1alpha1.TypeLifecycle
+	TypeOutput    = eventv1alpha1.TypeOutput
+	TypeUsage     = eventv1alpha1.TypeUsage
+	TypeTool      = eventv1alpha1.TypeTool
+	TypeError     = eventv1alpha1.TypeError
 )
-
-type Event struct {
-	APIVersion string          `json:"apiVersion"`
-	Timestamp  time.Time       `json:"timestamp"`
-	Type       Type            `json:"type"`
-	Data       json.RawMessage `json:"data"`
-}
 
 type Emitter struct {
 	writer      io.Writer

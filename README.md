@@ -26,7 +26,13 @@ Kontext adds two custom resources under `kontext.dev/v1alpha1`, deliberately mir
 
 An `AgentRun` can also be created standalone, without any owning `Agent` — useful for ad-hoc dispatch and demos.
 
-Agents themselves are **bring-your-own-runtime**: any container image that reads a few `KONTEXT_*` env vars, streams ordinary logs, and writes a JSON result to `/dev/termination-log` is a valid agent. Kontext never inspects what the agent does — only that I/O boundary. Structured consumers should read `.status.output`; `.status.result` remains its backward-compatible text projection. The full versioned contract is in [`SPEC.md`](SPEC.md).
+Agents themselves are **bring-your-own-runtime**. A plain Linux image can run
+with ordinary logs and no structured result; images that need result status can
+write the termination envelope natively or opt into stdout capture. Kontext
+never inspects what the agent does beyond that I/O boundary. Structured
+consumers should read `.status.output`; `.status.result` remains its
+backward-compatible text projection. The full versioned contract is in
+[`SPEC.md`](SPEC.md).
 
 ## Quickstart on kind
 
@@ -35,6 +41,7 @@ Requires Docker, [kind](https://kind.sigs.k8s.io/), and kubectl.
 ```bash
 make kind-install       # build operator + echo images, load into kind, install controller
 ./scripts/e2e-kind.sh   # end-to-end verification
+./scripts/eval-kind.sh  # deterministic evals against the same cluster
 ```
 
 The e2e script proves the two core behaviors:
@@ -72,9 +79,9 @@ kubectl get agentruns -w
 
 | Image | Purpose |
 |---|---|
-| [`runtimes/echo/`](runtimes/echo) | Keyless test runtime. Exercises the full contract (stdout thoughts, termination-log result, service heartbeat) without any API key. |
+| [`runtimes/echo/`](runtimes/echo) | Keyless control-plane conformance oracle. It still emits the accepted legacy termination payload during the v1alpha1 transition. |
 | [`runtimes/reference/`](runtimes/reference) | Maintained provider-neutral Go runtime with fake, Anthropic, and OpenAI-compatible transports plus a bounded built-in tool loop. |
-| [`runtimes/python-anthropic/`](runtimes/python-anthropic) | Real runtime backed by the Anthropic Messages API. Needs an `ANTHROPIC_API_KEY` secret via `spec.secretRef`. |
+| [`runtimes/python-anthropic/`](runtimes/python-anthropic) | Legacy Anthropic behavior oracle retained for compatibility; not the maintained primary runtime. |
 | [`runtimes/reporter/`](runtimes/reporter) | Reusable PID 1 supervisor. Preserves child logs and process semantics while producing the versioned result envelope. |
 
 Provider credentials are wired by the controller from a Kubernetes Secret into
@@ -103,6 +110,10 @@ only in that disposable Calico cluster. See
 [`runtimes/reference/README.md`](runtimes/reference/README.md) for the pinned
 image, command, resource checkpoint, and sandbox caveat.
 
+Mounted `knowledgeConfigMapRef` data is static context, not production RAG.
+Making a tool available does not guarantee model use; versioned tool events
+are the execution evidence. See [`docs/runtimes.md`](docs/runtimes.md).
+
 ### Capture results from an existing image
 
 An existing Linux container can opt into stdout result capture without adding
@@ -125,11 +136,36 @@ non-empty stdout line as text; `KontextEnvelope` accepts a
 installations must configure `KONTEXT_REPORTER_IMAGE`; `make kind-install`
 wires the locally built reporter automatically.
 
+The complete four-path example index (plain logs, final-line capture,
+structured capture, and native envelope) is in
+[`deploy/examples/v1alpha1/README.md`](deploy/examples/v1alpha1/README.md).
+
+## Evaluations
+
+`kontext-eval` evaluates workloads from outside the Pod. Deterministic graders
+run before any optional model judge. JSONL records retain only explicitly
+graded status/model output, projected envelope fields, bounded failure
+messages, and requested event metadata—never raw logs, Pod environments, or
+Secret values:
+
+```bash
+make build-eval
+./bin/kontext-eval --suite evals/suites/keyless.yaml
+```
+
+Pull-request CI runs the keyless suite in the existing kind cluster and uploads
+its machine-readable records. Authenticated transport acceptance remains a
+dispatch-only, environment-protected workflow; its short-lived artifact is the
+release evidence. A keyless or render-only run is not an authenticated
+provider acceptance. See [`docs/evals.md`](docs/evals.md).
+
 ## Governance
 
-Every run is bounded and auditable:
+Each `AgentRun` is isolated and auditable. Budgets and runtime limits are
+optional: task examples configure finite limits, while a long-running Service
+may intentionally omit `budget.wallclock`.
 
-- **Budgets** — `spec.budget.wallclock` is enforced by the controller (the Pod is killed and the run marked `BudgetExceeded`); token and dollar usage are reported by the runtime and recorded in `.status.usage`. The reference runtime checks token budgets against cumulative measured usage across provider requests. Tool follow-ups resend conversation context, and reasoning usage can exceed the visible output, so live model budgets need provider-specific headroom.
+- **Optional budgets** — when configured, `spec.budget.wallclock` is enforced by the controller (the Pod is killed and the run marked `BudgetExceeded`); token and dollar usage are reported by the runtime and recorded in `.status.usage`. The reference runtime checks configured token budgets against cumulative measured usage across provider requests. Tool follow-ups resend conversation context, and reasoning usage can exceed the visible output, so live model budgets need provider-specific headroom.
 - **Immutable run specs** — an `AgentRun` snapshots its configuration at creation, so history doesn't drift when the `Agent` changes.
 - **Standard lifecycle** — owner references give you GC cascade, conditions record transitions, and `kubectl` is the debugging surface.
 
@@ -143,6 +179,7 @@ make docker-build-all  # operator + all maintained runtime images
 make docker-build-reporter  # build the reusable result reporter image
 make docker-build-reference # build the model-agnostic reference runtime
 make kind-install      # build operator + echo, load into kind, install controller
+make build-eval        # compile the external evaluation runner
 make build             # compile operator binary to bin/manager
 make run               # run the controller locally against your kubeconfig
 ```
@@ -171,11 +208,17 @@ scripts/                   kind install + e2e
 |---|---|
 | [`SPEC.md`](SPEC.md) | API and runtime-image contract |
 | [`ROADMAP.md`](ROADMAP.md) | Milestones and locked decisions |
+| [`docs/runtimes.md`](docs/runtimes.md) | Runtime roles, result paths, static context, and tools |
+| [`docs/evals.md`](docs/evals.md) | Deterministic evals and provider acceptance records |
+| [`docs/operations.md`](docs/operations.md) | Infrastructure dependencies and failure modes |
+| [`docs/when-not-to-use-agents.md`](docs/when-not-to-use-agents.md) | Choosing a deterministic Job or script instead |
 | [`DEPRECATED.md`](DEPRECATED.md) | The earlier Python prototype, preserved on `deprecated/hackathon-python` |
 
 ## Status
 
 `v1alpha1` is alpha on purpose: the API shape is allowed to evolve. `Service` mode and standalone `AgentRun`s are implemented and covered by envtest and kind e2e; `Task` and `Scheduled` modes exist in the schema but are not reconciled yet.
+
+Publishing immutable versioned images remains separate release work.
 
 ## License
 
