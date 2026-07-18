@@ -198,6 +198,7 @@ func addUsage(total runtimeapi.Usage, current runtimeapi.Usage) runtimeapi.Usage
 	total.InputTokens = addMetric(total.InputTokens, current.InputTokens)
 	total.OutputTokens = addMetric(total.OutputTokens, current.OutputTokens)
 	total.TotalTokens = addMetric(total.TotalTokens, current.TotalTokens)
+	total.ReasoningTokens = addMetric(total.ReasoningTokens, current.ReasoningTokens)
 	return total
 }
 

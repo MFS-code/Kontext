@@ -1,0 +1,239 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kontext-e2e-tools
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: reference-kubernetes-reader
+  namespace: kontext-e2e-tools
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: reference-shell
+  namespace: kontext-e2e-tools
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: reference-pod-reader
+  namespace: kontext-e2e-tools
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: reference-pod-reader
+  namespace: kontext-e2e-tools
+subjects:
+  - kind: ServiceAccount
+    name: reference-kubernetes-reader
+    namespace: kontext-e2e-tools
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: reference-pod-reader
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-kubernetes-pods
+  namespace: kontext-e2e-tools
+spec:
+  goal: List Pods in the current namespace.
+  provider: fake
+  model: vendor/opaque-tool-model@2026
+  tools: [kubernetes_read]
+  serviceAccountName: reference-kubernetes-reader
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool
+    - name: KONTEXT_FAKE_TOOL_NAME
+      value: kubernetes_read
+    - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+      value: '{"operation":"list","resource":"pods"}'
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "16384"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "32768"
+  budget:
+    tokens: 256
+    wallclock: 1m
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-kubernetes-secrets
+  namespace: kontext-e2e-tools
+spec:
+  goal: Demonstrate that Secrets are outside the runtime resource allowlist.
+  provider: fake
+  model: vendor/opaque-tool-model@2026
+  tools: [kubernetes_read]
+  serviceAccountName: reference-kubernetes-reader
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool
+    - name: KONTEXT_FAKE_TOOL_NAME
+      value: kubernetes_read
+    - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+      value: '{"operation":"list","resource":"secrets"}'
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "4096"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "8192"
+  budget:
+    tokens: 256
+    wallclock: 1m
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-kubernetes-configmaps
+  namespace: kontext-e2e-tools
+spec:
+  goal: Demonstrate that Kubernetes RBAC rejects an ungranted ConfigMap list.
+  provider: fake
+  model: vendor/opaque-tool-model@2026
+  tools: [kubernetes_read]
+  serviceAccountName: reference-kubernetes-reader
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool
+    - name: KONTEXT_FAKE_TOOL_NAME
+      value: kubernetes_read
+    - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+      value: '{"operation":"list","resource":"configmaps"}'
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "4096"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "8192"
+  budget:
+    tokens: 256
+    wallclock: 1m
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-restricted-shell
+  namespace: kontext-e2e-tools
+spec:
+  goal: Run a shell command under the restricted Pod Security profile.
+  provider: fake
+  model: vendor/opaque-tool-model@2026
+  tools: [shell]
+  serviceAccountName: reference-shell
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool
+    - name: KONTEXT_FAKE_TOOL_NAME
+      value: shell
+    - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+      value: '{"command":"printf restricted-shell-ok","working_directory":"/tmp"}'
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "4096"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "8192"
+  budget:
+    tokens: 256
+    wallclock: 1m
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-wallclock-shell
+  namespace: kontext-e2e-tools
+spec:
+  goal: Cancel a long-running shell command at the controller wallclock.
+  provider: fake
+  model: vendor/opaque-tool-model@2026
+  tools: [shell]
+  serviceAccountName: reference-shell
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool
+    - name: KONTEXT_FAKE_TOOL_NAME
+      value: shell
+    - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+      value: '{"command":"sleep 30","working_directory":"/tmp"}'
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "4096"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "8192"
+  budget:
+    tokens: 256
+    wallclock: 3s

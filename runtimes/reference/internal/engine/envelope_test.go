@@ -11,6 +11,7 @@ import (
 func TestSuccessPreservesStructuredUsageAndOpaqueModel(t *testing.T) {
 	zero := int64(0)
 	outputTokens := int64(4)
+	reasoningTokens := int64(3)
 	response := runtimeapi.CompletionResponse{
 		Message: runtimeapi.Message{
 			Role: runtimeapi.RoleAssistant,
@@ -19,8 +20,9 @@ func TestSuccessPreservesStructuredUsageAndOpaqueModel(t *testing.T) {
 			},
 		},
 		Usage: runtimeapi.Usage{
-			InputTokens:  &zero,
-			OutputTokens: &outputTokens,
+			InputTokens:     &zero,
+			OutputTokens:    &outputTokens,
+			ReasoningTokens: &reasoningTokens,
 		},
 		StopReason: runtimeapi.StopReasonEndTurn,
 		RequestID:  "request-1",
@@ -46,6 +48,9 @@ func TestSuccessPreservesStructuredUsageAndOpaqueModel(t *testing.T) {
 	}
 	if envelope.Usage.TotalTokens != nil {
 		t.Fatalf("missing total tokens must remain absent: %#v", envelope.Usage)
+	}
+	if envelope.Usage.ReasoningTokens == nil || *envelope.Usage.ReasoningTokens != 3 {
+		t.Fatalf("reasoning tokens were lost: %#v", envelope.Usage)
 	}
 }
 
