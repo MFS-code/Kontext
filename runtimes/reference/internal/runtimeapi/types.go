@@ -39,9 +39,10 @@ type Message struct {
 }
 
 type Usage struct {
-	InputTokens  *int64
-	OutputTokens *int64
-	TotalTokens  *int64
+	InputTokens     *int64
+	OutputTokens    *int64
+	TotalTokens     *int64
+	ReasoningTokens *int64
 }
 
 type StopReason string

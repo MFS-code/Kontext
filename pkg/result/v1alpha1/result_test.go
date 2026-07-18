@@ -13,7 +13,7 @@ func TestParseVersionedEnvelopeWithArbitraryJSONOutput(t *testing.T) {
 		"apiVersion":"kontext.dev/result/v1alpha1",
 		"outcome":"Succeeded",
 		"output":{"mediaType":"application/json","value":{"answer":42,"items":[true,null]}},
-		"usage":{"inputTokens":0,"outputTokens":12},
+		"usage":{"inputTokens":0,"outputTokens":12,"reasoningTokens":0},
 		"extensions":{"anthropic.com/request":{"region":"us-east-1"}}
 	}`
 
@@ -32,6 +32,9 @@ func TestParseVersionedEnvelopeWithArbitraryJSONOutput(t *testing.T) {
 	}
 	if parsed.Usage.OutputTokens == nil || *parsed.Usage.OutputTokens != 12 {
 		t.Fatalf("expected 12 output tokens, got %#v", parsed.Usage)
+	}
+	if parsed.Usage.ReasoningTokens == nil || *parsed.Usage.ReasoningTokens != 0 {
+		t.Fatalf("expected measured zero reasoning tokens, got %#v", parsed.Usage)
 	}
 	if parsed.Usage.TotalTokens != nil || parsed.Usage.Dollars != nil {
 		t.Fatalf("missing metrics must remain absent, got %#v", parsed.Usage)

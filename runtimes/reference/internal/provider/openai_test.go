@@ -46,7 +46,12 @@ func TestOpenAICompletesAgainstCompatibleBaseURL(t *testing.T) {
 				},
 				"finish_reason":"tool_calls"
 			}],
-			"usage":{"prompt_tokens":9,"completion_tokens":0,"total_tokens":9}
+			"usage":{
+				"prompt_tokens":9,
+				"completion_tokens":0,
+				"total_tokens":9,
+				"completion_tokens_details":{"reasoning_tokens":0}
+			}
 		}`))
 	}))
 	defer server.Close()
@@ -88,6 +93,9 @@ func TestOpenAICompletesAgainstCompatibleBaseURL(t *testing.T) {
 	if response.Usage.OutputTokens == nil || *response.Usage.OutputTokens != 0 {
 		t.Fatalf("measured zero output tokens were lost: %#v", response.Usage)
 	}
+	if response.Usage.ReasoningTokens == nil || *response.Usage.ReasoningTokens != 0 {
+		t.Fatalf("measured zero reasoning tokens were lost: %#v", response.Usage)
+	}
 	if len(response.Message.Content) != 2 ||
 		response.Message.Content[1].ToolCall == nil ||
 		response.Message.Content[1].ToolCall.ID != "call-1" {
@@ -95,6 +103,39 @@ func TestOpenAICompletesAgainstCompatibleBaseURL(t *testing.T) {
 	}
 	if err := runtimeapi.ValidateResponse(response); err != nil {
 		t.Fatalf("validate normalized response: %v", err)
+	}
+}
+
+func TestOpenAIPreservesReportedReasoningTokenUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`{
+			"choices":[{
+				"message":{"role":"assistant","content":"done"},
+				"finish_reason":"stop"
+			}],
+			"usage":{
+				"prompt_tokens":10,
+				"completion_tokens":300,
+				"total_tokens":310,
+				"completion_tokens_details":{"reasoning_tokens":287}
+			}
+		}`))
+	}))
+	defer server.Close()
+	selected, err := provider.NewOpenAI(provider.OpenAIConfig{
+		APIKey:   "key",
+		Endpoint: server.URL,
+		Client:   server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	response, err := selected.Complete(context.Background(), completionRequest("model"))
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if response.Usage.ReasoningTokens == nil || *response.Usage.ReasoningTokens != 287 {
+		t.Fatalf("unexpected reasoning usage: %#v", response.Usage)
 	}
 }
 
@@ -129,7 +170,8 @@ func TestOpenAILeavesOptionalRequestAndUsageFieldsAbsent(t *testing.T) {
 	}
 	if response.Usage.InputTokens != nil ||
 		response.Usage.OutputTokens != nil ||
-		response.Usage.TotalTokens != nil {
+		response.Usage.TotalTokens != nil ||
+		response.Usage.ReasoningTokens != nil {
 		t.Fatalf("absent usage must remain absent: %#v", response.Usage)
 	}
 }

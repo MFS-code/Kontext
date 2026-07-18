@@ -76,7 +76,14 @@ providers. An exact endpoint is used without modification.
   appends `/chat/completions`.
 - Sends `model`, text `messages`, and optional `max_completion_tokens`.
 - Normalizes assistant text, function `tool_calls`, documented finish reasons,
-  optional prompt/completion/total usage, and the `x-request-id` header.
+  optional prompt/completion/total usage, optional
+  `completion_tokens_details.reasoning_tokens`, and the `x-request-id` header.
+
+OpenAI completion totals can exceed the tokenized visible text because they
+may include hidden reasoning tokens. When the API reports that breakdown, the
+runtime preserves it as optional `usage.reasoningTokens` in the usage event
+and final versioned result envelope. It never estimates the value when the
+detail is absent, and a reported zero remains distinct from absence.
 
 `OpenAI-compatible` means compatibility with that request, response, auth, and
 tool-call shape. It does not include the Responses API, streaming, embeddings,
