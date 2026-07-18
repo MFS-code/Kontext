@@ -1,0 +1,175 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kontext-tools
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kontext-reference-tools
+  namespace: kontext-tools
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kontext-reference-shell
+  namespace: kontext-tools
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kontext-reference-tools-read
+  namespace: kontext-tools
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "configmaps", "services", "events"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kontext.dev"]
+    resources: ["agents", "agentruns"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kontext-reference-tools-read
+  namespace: kontext-tools
+subjects:
+  - kind: ServiceAccount
+    name: kontext-reference-tools
+    namespace: kontext-tools
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kontext-reference-tools-read
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: reference-tools-egress
+  namespace: kontext-tools
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kontext-agentrun
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress:
+    # Adjust this selector for the DNS labels used by the target cluster.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # This permits the Kubernetes API and hosted HTTPS provider endpoint.
+    # Production installations should narrow the CIDR when their CNI supports it.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reference-tool-knowledge
+  namespace: kontext-tools
+data:
+  guide.txt: Replace this text with the bounded knowledge available to the run.
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-tools
+  namespace: kontext-tools
+spec:
+  goal: Inspect the mounted knowledge and current workload state, then summarize it.
+  provider: anthropic
+  model: replace-with-anthropic-model-id
+  tools:
+    - read_knowledge
+    - kubernetes_read
+  secretRef:
+    name: kontext-anthropic
+  knowledgeConfigMapRef:
+    name: reference-tool-knowledge
+  serviceAccountName: kontext-reference-tools
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_MAX_TURNS
+      value: "8"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "12"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "16384"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "65536"
+  budget:
+    tokens: 8192
+    wallclock: 5m
+---
+# Keep shell in a credentialless run. Environment filtering does not isolate
+# a shell from other process or file data in the same container.
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-shell
+  namespace: kontext-tools
+spec:
+  goal: Run the deterministic shell smoke command.
+  provider: fake
+  model: vendor/opaque-tool-model@2026
+  tools:
+    - shell
+  serviceAccountName: kontext-reference-shell
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool
+    - name: KONTEXT_FAKE_TOOL_NAME
+      value: shell
+    - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+      value: '{"command":"ls /bin >/dev/null && printf shell-ok","working_directory":"/tmp"}'
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "4096"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "8192"
+  budget:
+    wallclock: 1m

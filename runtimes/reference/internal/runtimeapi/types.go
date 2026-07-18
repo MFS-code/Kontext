@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -12,25 +13,43 @@ type Role string
 const (
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
 )
 
 type ContentType string
 
 const (
-	ContentTypeText     ContentType = "text"
-	ContentTypeToolCall ContentType = "tool_call"
+	ContentTypeText       ContentType = "text"
+	ContentTypeToolCall   ContentType = "tool_call"
+	ContentTypeToolResult ContentType = "tool_result"
 )
 
 type ContentBlock struct {
-	Type     ContentType
-	Text     string
-	ToolCall *ToolCall
+	Type       ContentType
+	Text       string
+	ToolCall   *ToolCall
+	ToolResult *ToolResult
+}
+
+type ToolDefinition struct {
+	Name        string
+	Description string
+	InputSchema json.RawMessage
 }
 
 type ToolCall struct {
 	ID        string
 	Name      string
 	Arguments json.RawMessage
+}
+
+type ToolResult struct {
+	CallID    string
+	Name      string
+	Content   string
+	IsError   bool
+	ErrorCode string
+	Truncated bool
 }
 
 type Message struct {
@@ -61,6 +80,7 @@ type CompletionRequest struct {
 	Model     string
 	Messages  []Message
 	MaxTokens *int64
+	Tools     []ToolDefinition
 }
 
 type CompletionResponse struct {
@@ -100,8 +120,8 @@ func ValidateResponse(response CompletionResponse) error {
 			if strings.TrimSpace(block.Text) == "" {
 				return fmt.Errorf("assistant content block %d has empty text", index)
 			}
-			if block.ToolCall != nil {
-				return fmt.Errorf("assistant text block %d unexpectedly contains a tool call", index)
+			if block.ToolCall != nil || block.ToolResult != nil {
+				return fmt.Errorf("assistant text block %d contains non-text data", index)
 			}
 		case ContentTypeToolCall:
 			if block.ToolCall == nil {
@@ -119,6 +139,11 @@ func ValidateResponse(response CompletionResponse) error {
 			if block.Text != "" {
 				return fmt.Errorf("assistant tool-call block %d unexpectedly contains text", index)
 			}
+			if block.ToolResult != nil {
+				return fmt.Errorf("assistant tool-call block %d contains a tool result", index)
+			}
+		case ContentTypeToolResult:
+			return fmt.Errorf("assistant content block %d unexpectedly contains a tool result", index)
 		default:
 			return fmt.Errorf("assistant content block %d has unsupported type %q", index, block.Type)
 		}
@@ -134,6 +159,44 @@ func ValidateResponse(response CompletionResponse) error {
 		StopReasonModelContextWindowExceeded:
 	default:
 		return fmt.Errorf("assistant response has unsupported stop reason %q", response.StopReason)
+	}
+	if err := validateUsage(response.Usage); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateUsage(usage Usage) error {
+	for _, metric := range []struct {
+		name  string
+		value *int64
+	}{
+		{name: "input", value: usage.InputTokens},
+		{name: "output", value: usage.OutputTokens},
+		{name: "total", value: usage.TotalTokens},
+	} {
+		if metric.value != nil && *metric.value < 0 {
+			return fmt.Errorf("%s token usage cannot be negative", metric.name)
+		}
+	}
+	var measuredParts int64
+	if usage.InputTokens != nil {
+		measuredParts += *usage.InputTokens
+	}
+	if usage.OutputTokens != nil {
+		if measuredParts > math.MaxInt64-*usage.OutputTokens {
+			return errors.New("input and output token usage overflow int64")
+		}
+		measuredParts += *usage.OutputTokens
+	}
+	if usage.TotalTokens != nil {
+		if measuredParts > *usage.TotalTokens {
+			return fmt.Errorf(
+				"total token usage %d is lower than measured input and output usage %d",
+				*usage.TotalTokens,
+				measuredParts,
+			)
+		}
 	}
 	return nil
 }
@@ -159,4 +222,24 @@ func MessageToolCalls(message Message) []ToolCall {
 		calls = append(calls, call)
 	}
 	return calls
+}
+
+func MessageToolResults(message Message) []ToolResult {
+	var results []ToolResult
+	for _, block := range message.Content {
+		if block.Type != ContentTypeToolResult || block.ToolResult == nil {
+			continue
+		}
+		results = append(results, *block.ToolResult)
+	}
+	return results
+}
+
+func CloneToolDefinitions(definitions []ToolDefinition) []ToolDefinition {
+	cloned := make([]ToolDefinition, len(definitions))
+	for index, definition := range definitions {
+		cloned[index] = definition
+		cloned[index].InputSchema = append(json.RawMessage(nil), definition.InputSchema...)
+	}
+	return cloned
 }

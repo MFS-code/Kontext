@@ -46,6 +46,28 @@ func TestBuildPodInjectsKontextEnv(t *testing.T) {
 	}
 }
 
+func TestBuildPodRejectsControllerManagedEnvOverrides(t *testing.T) {
+	for _, name := range []string{"KONTEXT_TOOLS", "KONTEXT_BUDGET_TOKENS", "ANTHROPIC_API_KEY"} {
+		t.Run(name, func(t *testing.T) {
+			run := &kontextv1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: "override-task", Namespace: "default"},
+				Spec: kontextv1alpha1.AgentRunSpec{
+					Goal:     "do work",
+					Model:    "model",
+					Provider: "anthropic",
+					Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+					Env: []kontextv1alpha1.EnvVar{
+						{Name: name, Value: "override"},
+					},
+				},
+			}
+			if _, err := podbuilder.BuildPodWithConfig(run, podbuilder.Config{}); err == nil {
+				t.Fatalf("expected managed env override rejection")
+			}
+		})
+	}
+}
+
 func TestBuildPodMountsKnowledgeConfigMap(t *testing.T) {
 	run := &kontextv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{Name: "knowledge-task", Namespace: "default"},
@@ -93,6 +115,46 @@ func TestBuildPodLeavesRuntimePermissionsUntouched(t *testing.T) {
 	sc := pod.Spec.Containers[0].SecurityContext
 	if sc != nil {
 		t.Fatalf("expected no container security context, got %+v", sc)
+	}
+}
+
+func TestBuildPodAppliesExplicitRuntimeSecurityContext(t *testing.T) {
+	runAsNonRoot := true
+	readOnlyRoot := true
+	allowPrivilegeEscalation := false
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "secure-task", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "do work",
+			Model:    "model",
+			Provider: "fake",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image: "runtime:dev",
+				SecurityContext: &kontextv1alpha1.RuntimeSecurityContext{
+					RunAsNonRoot:             &runAsNonRoot,
+					ReadOnlyRootFilesystem:   &readOnlyRoot,
+					AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+					Capabilities: &kontextv1alpha1.RuntimeCapabilities{
+						Drop: []string{"ALL"},
+					},
+					SeccompProfile: &kontextv1alpha1.RuntimeSeccompProfile{
+						Type: "RuntimeDefault",
+					},
+				},
+			},
+		},
+	}
+	pod := podbuilder.BuildPod(run)
+	securityContext := pod.Spec.Containers[0].SecurityContext
+	if securityContext == nil ||
+		securityContext.RunAsNonRoot == nil ||
+		!*securityContext.RunAsNonRoot ||
+		securityContext.AllowPrivilegeEscalation == nil ||
+		*securityContext.AllowPrivilegeEscalation ||
+		securityContext.Capabilities == nil ||
+		len(securityContext.Capabilities.Drop) != 1 ||
+		securityContext.Capabilities.Drop[0] != "ALL" {
+		t.Fatalf("unexpected runtime security context %#v", securityContext)
 	}
 }
 

@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -102,6 +103,18 @@ func TestResolveValidatesFakeScenarios(t *testing.T) {
 	}); err == nil {
 		t.Fatalf("expected missing delay error")
 	}
+	selected, err := provider.Resolve(config.Config{
+		Provider:     "fake",
+		FakeScenario: provider.FakeScenarioTool,
+		FakeToolName: "zero_argument_tool",
+	})
+	if err != nil {
+		t.Fatalf("resolve zero-argument tool scenario: %v", err)
+	}
+	fake, ok := selected.(*provider.Fake)
+	if !ok || string(fake.ToolArguments) != "{}" {
+		t.Fatalf("unexpected zero-argument fake %#v", selected)
+	}
 }
 
 func TestFakeProviderScenarios(t *testing.T) {
@@ -161,6 +174,51 @@ func TestFakeProviderScenarios(t *testing.T) {
 		}
 		if time.Since(started) > 100*time.Millisecond {
 			t.Fatalf("fake provider did not cancel promptly")
+		}
+	})
+
+	t.Run("tool round trip", func(t *testing.T) {
+		fake := &provider.Fake{
+			Scenario:      provider.FakeScenarioTool,
+			ToolName:      "read_knowledge",
+			ToolArguments: json.RawMessage(`{"path":"guide.txt"}`),
+		}
+		request := completionRequest("model")
+		request.Tools = []runtimeapi.ToolDefinition{
+			{
+				Name:        "read_knowledge",
+				Description: "Read knowledge.",
+				InputSchema: json.RawMessage(`{"type":"object"}`),
+			},
+		}
+		response, err := fake.Complete(context.Background(), request)
+		if err != nil {
+			t.Fatalf("request tool: %v", err)
+		}
+		calls := runtimeapi.MessageToolCalls(response.Message)
+		if len(calls) != 1 || calls[0].Name != "read_knowledge" {
+			t.Fatalf("unexpected calls %#v", calls)
+		}
+		request.Messages = append(request.Messages, response.Message, runtimeapi.Message{
+			Role: runtimeapi.RoleTool,
+			Content: []runtimeapi.ContentBlock{
+				{
+					Type: runtimeapi.ContentTypeToolResult,
+					ToolResult: &runtimeapi.ToolResult{
+						CallID:  calls[0].ID,
+						Name:    calls[0].Name,
+						Content: "tool loop works",
+					},
+				},
+			},
+		})
+		response, err = fake.Complete(context.Background(), request)
+		if err != nil {
+			t.Fatalf("complete after tool: %v", err)
+		}
+		if got := runtimeapi.MessageText(response.Message); got !=
+			"Fake provider received read_knowledge result: tool loop works" {
+			t.Fatalf("unexpected final output %q", got)
 		}
 	})
 }

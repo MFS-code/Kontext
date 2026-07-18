@@ -271,6 +271,114 @@ func TestOpenAINormalizesRefusalFinishReason(t *testing.T) {
 	}
 }
 
+func TestOpenAISerializesToolsCallsAndResults(t *testing.T) {
+	var received struct {
+		Tools []struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name       string          `json:"name"`
+				Parameters json.RawMessage `json:"parameters"`
+			} `json:"function"`
+		} `json:"tools"`
+		Messages []struct {
+			Role       string `json:"role"`
+			Content    string `json:"content"`
+			ToolCallID string `json:"tool_call_id"`
+			ToolCalls  []struct {
+				ID string `json:"id"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, _ = writer.Write([]byte(`{
+			"choices":[{
+				"message":{"role":"assistant","content":"done"},
+				"finish_reason":"stop"
+			}]
+		}`))
+	}))
+	defer server.Close()
+	selected, err := provider.NewOpenAI(provider.OpenAIConfig{
+		APIKey:   "key",
+		Endpoint: server.URL,
+		Client:   server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	request := completionRequest("model")
+	request.Tools = []runtimeapi.ToolDefinition{
+		{
+			Name:        "lookup",
+			Description: "Look up a status.",
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		},
+	}
+	request.Messages = append(request.Messages,
+		runtimeapi.Message{
+			Role: runtimeapi.RoleAssistant,
+			Content: []runtimeapi.ContentBlock{
+				{
+					Type: runtimeapi.ContentTypeToolCall,
+					ToolCall: &runtimeapi.ToolCall{
+						ID:        "call-1",
+						Name:      "lookup",
+						Arguments: json.RawMessage(`{"query":"status"}`),
+					},
+				},
+			},
+		},
+		runtimeapi.Message{
+			Role: runtimeapi.RoleTool,
+			Content: []runtimeapi.ContentBlock{
+				{
+					Type: runtimeapi.ContentTypeToolResult,
+					ToolResult: &runtimeapi.ToolResult{
+						CallID:    "call-1",
+						Name:      "lookup",
+						Content:   `{"partial":"{\"exitCode\":0"}`,
+						IsError:   true,
+						ErrorCode: "lookup_failed",
+						Truncated: true,
+					},
+				},
+			},
+		},
+	)
+	if _, err := selected.Complete(context.Background(), request); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if len(received.Tools) != 1 ||
+		received.Tools[0].Type != "function" ||
+		received.Tools[0].Function.Name != "lookup" ||
+		!json.Valid(received.Tools[0].Function.Parameters) {
+		t.Fatalf("unexpected tools %#v", received.Tools)
+	}
+	if len(received.Messages) != 3 ||
+		len(received.Messages[1].ToolCalls) != 1 ||
+		received.Messages[1].ToolCalls[0].ID != "call-1" ||
+		received.Messages[2].Role != "tool" ||
+		received.Messages[2].ToolCallID != "call-1" {
+		t.Fatalf("unexpected messages %#v", received.Messages)
+	}
+	var toolResult map[string]any
+	if err := json.Unmarshal([]byte(received.Messages[2].Content), &toolResult); err != nil {
+		t.Fatalf("decode tool result: %v", err)
+	}
+	if toolResult["isError"] != true ||
+		toolResult["errorCode"] != "lookup_failed" ||
+		toolResult["truncated"] != true {
+		t.Fatalf("tool error metadata was lost: %#v", toolResult)
+	}
+	content, ok := toolResult["content"].(string)
+	if !ok || !json.Valid([]byte(content)) {
+		t.Fatalf("structured tool content became invalid: %#v", toolResult["content"])
+	}
+}
+
 func TestOpenAIRequiresWellFormedCredentials(t *testing.T) {
 	for _, apiKey := range []string{"", " key-with-spaces ", "key\r\ninjected"} {
 		_, err := provider.NewOpenAI(provider.OpenAIConfig{APIKey: apiKey})

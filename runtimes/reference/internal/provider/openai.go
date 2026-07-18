@@ -114,11 +114,32 @@ type openAIRequestPayload struct {
 	Model               string                 `json:"model"`
 	Messages            []openAIRequestMessage `json:"messages"`
 	MaxCompletionTokens *int64                 `json:"max_completion_tokens,omitempty"`
+	Tools               []openAIToolDefinition `json:"tools,omitempty"`
 }
 
 type openAIRequestMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string                  `json:"role"`
+	Content    *string                 `json:"content"`
+	ToolCalls  []openAIRequestToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string                  `json:"tool_call_id,omitempty"`
+}
+
+type openAIRequestToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+type openAIToolDefinition struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Parameters  json.RawMessage `json:"parameters"`
+	} `json:"function"`
 }
 
 func openAIRequest(request runtimeapi.CompletionRequest) (openAIRequestPayload, error) {
@@ -126,17 +147,75 @@ func openAIRequest(request runtimeapi.CompletionRequest) (openAIRequestPayload, 
 		Model:               request.Model,
 		Messages:            make([]openAIRequestMessage, 0, len(request.Messages)),
 		MaxCompletionTokens: request.MaxTokens,
+		Tools:               make([]openAIToolDefinition, 0, len(request.Tools)),
+	}
+	for index, definition := range request.Tools {
+		if strings.TrimSpace(definition.Name) == "" ||
+			strings.TrimSpace(definition.Description) == "" ||
+			!json.Valid(definition.InputSchema) {
+			return openAIRequestPayload{}, fmt.Errorf("tool definition %d is invalid", index)
+		}
+		normalized := openAIToolDefinition{Type: "function"}
+		normalized.Function.Name = definition.Name
+		normalized.Function.Description = definition.Description
+		normalized.Function.Parameters = append(
+			json.RawMessage(nil),
+			definition.InputSchema...,
+		)
+		payload.Tools = append(payload.Tools, normalized)
 	}
 	for index, message := range request.Messages {
-		if message.Role != runtimeapi.RoleUser && message.Role != runtimeapi.RoleAssistant {
+		if message.Role != runtimeapi.RoleUser &&
+			message.Role != runtimeapi.RoleAssistant &&
+			message.Role != runtimeapi.RoleTool {
 			return openAIRequestPayload{}, fmt.Errorf(
 				"message %d has unsupported role %q",
 				index,
 				message.Role,
 			)
 		}
+		if message.Role == runtimeapi.RoleTool {
+			for blockIndex, block := range message.Content {
+				if block.Type != runtimeapi.ContentTypeToolResult || block.ToolResult == nil {
+					return openAIRequestPayload{}, fmt.Errorf(
+						"tool message %d content block %d must be a tool result",
+						index,
+						blockIndex,
+					)
+				}
+				content := providerToolResultContent(block.ToolResult)
+				payload.Messages = append(payload.Messages, openAIRequestMessage{
+					Role:       string(runtimeapi.RoleTool),
+					Content:    &content,
+					ToolCallID: block.ToolResult.CallID,
+				})
+			}
+			continue
+		}
+		normalized := openAIRequestMessage{Role: string(message.Role)}
+		text := runtimeapi.MessageText(message)
+		if text != "" {
+			normalized.Content = &text
+		}
 		for blockIndex, block := range message.Content {
-			if block.Type != runtimeapi.ContentTypeText {
+			switch block.Type {
+			case runtimeapi.ContentTypeText:
+			case runtimeapi.ContentTypeToolCall:
+				if message.Role != runtimeapi.RoleAssistant || block.ToolCall == nil {
+					return openAIRequestPayload{}, fmt.Errorf(
+						"message %d content block %d has invalid tool call",
+						index,
+						blockIndex,
+					)
+				}
+				toolCall := openAIRequestToolCall{
+					ID:   block.ToolCall.ID,
+					Type: "function",
+				}
+				toolCall.Function.Name = block.ToolCall.Name
+				toolCall.Function.Arguments = string(block.ToolCall.Arguments)
+				normalized.ToolCalls = append(normalized.ToolCalls, toolCall)
+			default:
 				return openAIRequestPayload{}, fmt.Errorf(
 					"message %d content block %d has unsupported type %q",
 					index,
@@ -145,10 +224,7 @@ func openAIRequest(request runtimeapi.CompletionRequest) (openAIRequestPayload, 
 				)
 			}
 		}
-		payload.Messages = append(payload.Messages, openAIRequestMessage{
-			Role:    string(message.Role),
-			Content: runtimeapi.MessageText(message),
-		})
+		payload.Messages = append(payload.Messages, normalized)
 	}
 	return payload, nil
 }
@@ -267,7 +343,7 @@ func normalizeOpenAIStopReason(value string) (runtimeapi.StopReason, error) {
 		return runtimeapi.StopReasonEndTurn, nil
 	case "length":
 		return runtimeapi.StopReasonMaxTokens, nil
-	case "tool_calls", "function_call":
+	case "tool_calls":
 		return runtimeapi.StopReasonToolUse, nil
 	case "content_filter":
 		return runtimeapi.StopReasonContentFilter, nil

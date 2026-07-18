@@ -39,6 +39,7 @@ Kontext provides generic `Agent` and `AgentRun` primitives. Consumer-specific co
 - Echo runtime shipped (`runtimes/echo/`). Anthropic Python runner remains under `runtimes/python-anthropic/`.
 - Versioned results, the reusable reporter, and optional stdout capture support existing Linux images with explicit commands.
 - The maintained Go reference runtime has a provider-neutral core, deterministic fake-provider path, and direct Anthropic and OpenAI-compatible HTTP transports.
+- The maintained runtime has a bounded provider-neutral loop with allowlisted knowledge, Kubernetes-read, and shell tools.
 
 ### M5 — Governance
 - Per-agent ServiceAccount, finalizers, budget enforcement, CEL validation on the CRDs, events on transitions.
@@ -54,4 +55,4 @@ Kontext provides generic `Agent` and `AgentRun` primitives. Consumer-specific co
 
 1. M2 Task templating when a concrete consumer needs parameterized triggers.
 2. M5 governance (CEL, per-agent SA, richer events).
-3. Bounded tool execution in the maintained reference runtime.
+3. Publish immutable maintained runtime images and run protected provider acceptance.

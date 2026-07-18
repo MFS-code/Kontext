@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+const (
+	maxTurnsLimit                = int64(10_000)
+	maxToolCallsLimit            = int64(100_000)
+	maxToolResultBytesLimit      = int64(8 << 20)
+	maxTotalToolOutputBytesLimit = int64(64 << 20)
+)
+
 type Config struct {
 	RunName   string
 	AgentName string
@@ -17,16 +24,23 @@ type Config struct {
 	Model     string
 	Tools     []string
 
-	TokenBudget     *int64
-	WallclockBudget *time.Duration
-	DollarBudget    *float64
+	TokenBudget             *int64
+	WallclockBudget         *time.Duration
+	DollarBudget            *float64
+	MaxTurns                *int64
+	MaxToolCalls            *int64
+	MaxToolResultBytes      *int64
+	MaxTotalToolOutputBytes *int64
+	EmitToolOutput          bool
 
-	ProviderEndpoint string
-	ProviderBaseURL  string
-	AnthropicAPIKey  string
-	OpenAIAPIKey     string
-	FakeScenario     string
-	FakeDelay        time.Duration
+	ProviderEndpoint  string
+	ProviderBaseURL   string
+	AnthropicAPIKey   string
+	OpenAIAPIKey      string
+	FakeScenario      string
+	FakeDelay         time.Duration
+	FakeToolName      string
+	FakeToolArguments string
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -57,6 +71,45 @@ func Load(getenv func(string) string) (Config, error) {
 	dollarBudget, err := optionalNonNegativeFloat(
 		getenv("KONTEXT_BUDGET_DOLLARS"),
 		"KONTEXT_BUDGET_DOLLARS",
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	maxTurns, err := optionalLimitInt64(
+		getenv("KONTEXT_MAX_TURNS"),
+		"KONTEXT_MAX_TURNS",
+		maxTurnsLimit,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	maxToolCalls, err := optionalLimitInt64(
+		getenv("KONTEXT_MAX_TOOL_CALLS"),
+		"KONTEXT_MAX_TOOL_CALLS",
+		maxToolCallsLimit,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	maxToolResultBytes, err := optionalLimitInt64(
+		getenv("KONTEXT_MAX_TOOL_RESULT_BYTES"),
+		"KONTEXT_MAX_TOOL_RESULT_BYTES",
+		maxToolResultBytesLimit,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	maxTotalToolOutputBytes, err := optionalLimitInt64(
+		getenv("KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES"),
+		"KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES",
+		maxTotalToolOutputBytesLimit,
+	)
+	if err != nil {
+		return Config{}, err
+	}
+	emitToolOutput, err := optionalBool(
+		getenv("KONTEXT_EMIT_TOOL_OUTPUT"),
+		"KONTEXT_EMIT_TOOL_OUTPUT",
 	)
 	if err != nil {
 		return Config{}, err
@@ -103,22 +156,59 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 
 	return Config{
-		RunName:          runName,
-		AgentName:        agentName,
-		Goal:             goal,
-		Provider:         strings.ToLower(provider),
-		Model:            model,
-		Tools:            parseTools(getenv("KONTEXT_TOOLS")),
-		TokenBudget:      tokenBudget,
-		WallclockBudget:  wallclockBudget,
-		DollarBudget:     dollarBudget,
-		ProviderEndpoint: endpoint,
-		ProviderBaseURL:  baseURL,
-		AnthropicAPIKey:  getenv("ANTHROPIC_API_KEY"),
-		OpenAIAPIKey:     getenv("OPENAI_API_KEY"),
-		FakeScenario:     fakeScenario,
-		FakeDelay:        fakeDelay,
+		RunName:                 runName,
+		AgentName:               agentName,
+		Goal:                    goal,
+		Provider:                strings.ToLower(provider),
+		Model:                   model,
+		Tools:                   parseTools(getenv("KONTEXT_TOOLS")),
+		TokenBudget:             tokenBudget,
+		WallclockBudget:         wallclockBudget,
+		DollarBudget:            dollarBudget,
+		MaxTurns:                maxTurns,
+		MaxToolCalls:            maxToolCalls,
+		MaxToolResultBytes:      maxToolResultBytes,
+		MaxTotalToolOutputBytes: maxTotalToolOutputBytes,
+		EmitToolOutput:          emitToolOutput,
+		ProviderEndpoint:        endpoint,
+		ProviderBaseURL:         baseURL,
+		AnthropicAPIKey:         getenv("ANTHROPIC_API_KEY"),
+		OpenAIAPIKey:            getenv("OPENAI_API_KEY"),
+		FakeScenario:            fakeScenario,
+		FakeDelay:               fakeDelay,
+		FakeToolName:            strings.TrimSpace(getenv("KONTEXT_FAKE_TOOL_NAME")),
+		FakeToolArguments:       strings.TrimSpace(getenv("KONTEXT_FAKE_TOOL_ARGUMENTS")),
 	}, nil
+}
+
+func optionalBool(value string, name string) (bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", name)
+	}
+	return parsed, nil
+}
+
+func optionalLimitInt64(value string, name string, maximum int64) (*int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return nil, fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	if parsed == 0 {
+		return nil, nil
+	}
+	if parsed > maximum {
+		return nil, fmt.Errorf("%s must not exceed %d", name, maximum)
+	}
+	return &parsed, nil
 }
 
 func required(getenv func(string) string, name string) (string, error) {
@@ -143,8 +233,11 @@ func optionalPositiveInt64(value string, name string) (*int64, error) {
 		return nil, nil
 	}
 	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || parsed <= 0 {
-		return nil, fmt.Errorf("%s must be a positive integer", name)
+	if err != nil || parsed < 0 {
+		return nil, fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	if parsed == 0 {
+		return nil, nil
 	}
 	return &parsed, nil
 }
@@ -155,8 +248,11 @@ func optionalPositiveDuration(value string, name string) (*time.Duration, error)
 		return nil, nil
 	}
 	parsed, err := time.ParseDuration(value)
-	if err != nil || parsed <= 0 {
-		return nil, fmt.Errorf("%s must be a positive duration", name)
+	if err != nil || parsed < 0 {
+		return nil, fmt.Errorf("%s must be a non-negative duration", name)
+	}
+	if parsed == 0 {
+		return nil, nil
 	}
 	return &parsed, nil
 }
