@@ -46,6 +46,16 @@ func TestAgentRunReconcilerCreatesPod(t *testing.T) {
 	if updated.Status.Phase != kontextv1alpha1.AgentRunPhasePending {
 		t.Fatalf("expected Pending, got %s", updated.Status.Phase)
 	}
+	for _, condition := range updated.Status.Conditions {
+		if condition.ObservedGeneration != updated.Generation {
+			t.Fatalf(
+				"condition %s observed generation %d, want %d",
+				condition.Type,
+				condition.ObservedGeneration,
+				updated.Generation,
+			)
+		}
+	}
 
 	podName := podbuilder.PodNameForRun(run.Name)
 	pod := &corev1.Pod{}
@@ -407,15 +417,28 @@ func TestAgentRunReconcilerSurfacesInvalidWallclock(t *testing.T) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: run.Name, Namespace: run.Namespace}, &updated); err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	found := false
+	var invalidBudget *metav1.Condition
 	for _, condition := range updated.Status.Conditions {
 		if condition.Type == conditions.BudgetValid && condition.Status == metav1.ConditionFalse {
-			found = true
+			condition := condition
+			invalidBudget = &condition
 			break
 		}
 	}
-	if !found {
+	if invalidBudget == nil {
 		t.Fatalf("expected BudgetValid=False condition, got %#v", updated.Status.Conditions)
+	}
+	if invalidBudget.ObservedGeneration != updated.Generation {
+		t.Fatalf(
+			"invalid budget observed generation %d, want %d",
+			invalidBudget.ObservedGeneration,
+			updated.Generation,
+		)
+	}
+	if !strings.Contains(invalidBudget.Message, "invalid") ||
+		!strings.Contains(invalidBudget.Message, "not enforced") ||
+		strings.Contains(invalidBudget.Message, "default") {
+		t.Fatalf("invalid budget condition is not truthful: %q", invalidBudget.Message)
 	}
 	if updated.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
 		t.Fatalf("invalid wallclock must not enforce a default budget")

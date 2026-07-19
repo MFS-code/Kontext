@@ -78,7 +78,11 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 			next.PodName = podName
 			next.Message = "Pod lost before run completed."
 			next.CompletionTime = nowPtr()
-			next.Conditions = conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed, next.Conditions)
+			setStatusConditions(
+				&next.Conditions,
+				run.Generation,
+				conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed)...,
+			)
 		})
 	}
 
@@ -90,9 +94,10 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 			next.Phase = kontextv1alpha1.AgentRunPhaseFailed
 			next.Message = fmt.Sprintf("Agent run configuration is invalid: %v.", err)
 			next.CompletionTime = nowPtr()
-			next.Conditions = conditions.ForAgentRunPhase(
-				kontextv1alpha1.AgentRunPhaseFailed,
-				next.Conditions,
+			setStatusConditions(
+				&next.Conditions,
+				run.Generation,
+				conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed)...,
 			)
 		})
 	}
@@ -107,7 +112,11 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 		next.Phase = kontextv1alpha1.AgentRunPhasePending
 		next.PodName = podName
 		next.Message = "Agent run pod requested."
-		next.Conditions = conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhasePending, next.Conditions)
+		setStatusConditions(
+			&next.Conditions,
+			run.Generation,
+			conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhasePending)...,
+		)
 	})
 }
 
@@ -134,7 +143,11 @@ func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontex
 		if status.IsTerminalPhase(observation.Phase) && next.CompletionTime == nil {
 			next.CompletionTime = nowPtr()
 		}
-		next.Conditions = conditions.ForAgentRunPhase(observation.Phase, next.Conditions)
+		setStatusConditions(
+			&next.Conditions,
+			run.Generation,
+			conditions.ForAgentRunPhase(observation.Phase)...,
+		)
 	})
 	if err != nil {
 		return ctrl.Result{}, err
@@ -157,10 +170,16 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 		return ctrl.Result{}, false, nil
 	}
 
-	wallclock := status.ParseWallclockDetailed(run.Spec.Budget.Wallclock, 300)
-	if !wallclock.Valid {
+	limit, parseErr := status.ParseWallclock(run.Spec.Budget.Wallclock)
+	if parseErr != nil {
 		_, err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
-			next.Conditions = conditions.Merge(next.Conditions, conditions.BudgetConfigured(false, wallclock.Warning))
+			setStatusConditions(
+				&next.Conditions,
+				run.Generation,
+				conditions.InvalidBudget(
+					fmt.Sprintf("Wallclock budget is invalid and is not enforced: %v.", parseErr),
+				),
+			)
 		})
 		if err != nil {
 			return ctrl.Result{}, false, err
@@ -172,7 +191,6 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 		return ctrl.Result{}, false, nil
 	}
 
-	limit := wallclock.Duration
 	startedAt := runtimeContainerStartedAt(pod)
 	if startedAt == nil {
 		startedAt = run.Status.StartTime
@@ -194,7 +212,11 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 		recordedStart := *startedAt
 		next.StartTime = &recordedStart
 		next.CompletionTime = nowPtr()
-		next.Conditions = conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseBudgetExceeded, next.Conditions)
+		setStatusConditions(
+			&next.Conditions,
+			run.Generation,
+			conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseBudgetExceeded)...,
+		)
 	})
 	if err != nil {
 		return ctrl.Result{}, false, err

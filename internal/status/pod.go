@@ -23,13 +23,6 @@ type PodObservation struct {
 	ExitCode *int32
 }
 
-// WallclockParseResult captures a parsed wallclock budget and any validation warning.
-type WallclockParseResult struct {
-	Duration time.Duration
-	Valid    bool
-	Warning  string
-}
-
 // ObservePod maps Pod status to AgentRun phase information.
 func ObservePod(pod *corev1.Pod) PodObservation {
 	if pod.Status.Phase == corev1.PodPending {
@@ -96,9 +89,14 @@ func runtimeContainerStatus(pod *corev1.Pod) *corev1.ContainerStatus {
 }
 
 func observationFromTermination(terminated *corev1.ContainerStateTerminated) PodObservation {
-	payload, parseErr := ParseTerminationMessage(terminated.Message)
-	output := outputStatus(payload)
-	usage := usageStatus(payload)
+	message := strings.TrimSpace(terminated.Message)
+	parsed, parseErr := resultv1alpha1.Parse(message)
+	if parseErr != nil {
+		parseErr = fmt.Errorf("parse termination payload: %w", parseErr)
+	}
+	output := outputStatus(parsed)
+	usage := usageStatus(parsed)
+	legacyResult := resultv1alpha1.ProjectLegacyResult(parsed.Output)
 	exitCode := terminated.ExitCode
 
 	if terminated.ExitCode == 0 {
@@ -112,15 +110,15 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 				ExitCode: &exitCode,
 			}
 		}
-		if payload.Outcome == resultv1alpha1.OutcomeFailed {
+		if parsed.Outcome == resultv1alpha1.OutcomeFailed {
 			message := "Agent runtime reported a failed outcome."
-			if payload.Error != "" {
-				message = fmt.Sprintf("%s %s", message, payload.Error)
+			if parsed.Error != nil {
+				message = fmt.Sprintf("%s %s", message, parsed.Error.Message)
 			}
 			return PodObservation{
 				Phase:    kontextv1alpha1.AgentRunPhaseFailed,
 				Message:  message,
-				Result:   payload.Result,
+				Result:   legacyResult,
 				Output:   output,
 				Usage:    usage,
 				ExitCode: &exitCode,
@@ -129,75 +127,69 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 		return PodObservation{
 			Phase:    kontextv1alpha1.AgentRunPhaseSucceeded,
 			Message:  "Agent run completed successfully.",
-			Result:   payload.Result,
+			Result:   legacyResult,
 			Output:   output,
 			Usage:    usage,
 			ExitCode: &exitCode,
 		}
 	}
 
-	message := fmt.Sprintf("Agent run exited with code %d.", terminated.ExitCode)
-	if payload.Error != "" {
-		message = fmt.Sprintf("%s %s", message, payload.Error)
+	message = fmt.Sprintf("Agent run exited with code %d.", terminated.ExitCode)
+	if parsed.Error != nil {
+		message = fmt.Sprintf("%s %s", message, parsed.Error.Message)
 	}
 	if parseErr != nil {
 		message = fmt.Sprintf("%s (malformed termination payload: %v)", message, parseErr)
+		legacyResult = strings.TrimSpace(terminated.Message)
 	}
 
 	return PodObservation{
 		Phase:    kontextv1alpha1.AgentRunPhaseFailed,
 		Message:  message,
-		Result:   payload.Result,
+		Result:   legacyResult,
 		Output:   output,
 		Usage:    usage,
 		ExitCode: &exitCode,
 	}
 }
 
-func outputStatus(payload TerminationPayload) *kontextv1alpha1.OutputStatus {
-	if payload.Output == nil {
+func outputStatus(parsed resultv1alpha1.ParsedResult) *kontextv1alpha1.OutputStatus {
+	if parsed.Output == nil {
 		return nil
 	}
 	return &kontextv1alpha1.OutputStatus{
-		MediaType: payload.Output.MediaType,
+		MediaType: parsed.Output.MediaType,
 		Value: runtime.RawExtension{
-			Raw: append([]byte(nil), payload.Output.Value...),
+			Raw: append([]byte(nil), parsed.Output.Value...),
 		},
 	}
 }
 
-func usageStatus(payload TerminationPayload) *kontextv1alpha1.UsageStatus {
-	if payload.Usage == nil {
+func usageStatus(parsed resultv1alpha1.ParsedResult) *kontextv1alpha1.UsageStatus {
+	if parsed.Usage == nil {
 		return nil
 	}
 	return &kontextv1alpha1.UsageStatus{
-		Tokens:       payload.Usage.TotalTokens,
-		InputTokens:  payload.Usage.InputTokens,
-		OutputTokens: payload.Usage.OutputTokens,
-		Dollars:      payload.Usage.Dollars,
+		Tokens:       parsed.Usage.TotalTokens,
+		InputTokens:  parsed.Usage.InputTokens,
+		OutputTokens: parsed.Usage.OutputTokens,
+		Dollars:      parsed.Usage.Dollars,
 	}
 }
 
-// ParseWallclock parses duration strings like 5m, 30s, 1h.
-func ParseWallclock(value string, defaultSeconds int) time.Duration {
-	return ParseWallclockDetailed(value, defaultSeconds).Duration
-}
-
-// ParseWallclockDetailed parses a wallclock budget and reports validation warnings.
-func ParseWallclockDetailed(value string, defaultSeconds int) WallclockParseResult {
-	defaultDuration := time.Duration(defaultSeconds) * time.Second
+// ParseWallclock parses a configured positive duration.
+func ParseWallclock(value string) (time.Duration, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return WallclockParseResult{Duration: defaultDuration, Valid: true}
+		return 0, fmt.Errorf("wallclock budget is empty")
 	}
 
 	duration, err := time.ParseDuration(value)
-	if err != nil || duration <= 0 {
-		return WallclockParseResult{
-			Duration: defaultDuration,
-			Valid:    false,
-			Warning:  fmt.Sprintf("Invalid wallclock budget %q; using default %s.", value, defaultDuration),
-		}
+	if err != nil {
+		return 0, fmt.Errorf("invalid wallclock budget %q: %w", value, err)
 	}
-	return WallclockParseResult{Duration: duration, Valid: true}
+	if duration <= 0 {
+		return 0, fmt.Errorf("invalid wallclock budget %q: duration must be positive", value)
+	}
+	return duration, nil
 }

@@ -726,6 +726,13 @@ func TestAgentReconcilerUnsupportedMode(t *testing.T) {
 	found := false
 	for _, condition := range updated.Status.Conditions {
 		if condition.Type == conditions.Ready && condition.Reason == "UnsupportedMode" {
+			if condition.ObservedGeneration != updated.Generation {
+				t.Fatalf(
+					"condition observed generation %d, want %d",
+					condition.ObservedGeneration,
+					updated.Generation,
+				)
+			}
 			found = true
 			break
 		}

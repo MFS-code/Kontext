@@ -2,7 +2,6 @@ package conditions
 
 import (
 	"fmt"
-	"sort"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -16,32 +15,6 @@ const (
 	Complete    = "Complete"
 	BudgetValid = "BudgetValid"
 )
-
-// Merge updates condition types in existing with new values, preserving transition times when unchanged.
-func Merge(existing []metav1.Condition, updates ...metav1.Condition) []metav1.Condition {
-	byType := map[string]metav1.Condition{}
-	for _, condition := range existing {
-		byType[condition.Type] = condition
-	}
-	now := metav1.Now()
-	for _, update := range updates {
-		current, ok := byType[update.Type]
-		if ok && current.Status == update.Status && current.Reason == update.Reason && current.Message == update.Message {
-			update.LastTransitionTime = current.LastTransitionTime
-		} else {
-			update.LastTransitionTime = now
-		}
-		byType[update.Type] = update
-	}
-	result := make([]metav1.Condition, 0, len(byType))
-	for _, condition := range byType {
-		result = append(result, condition)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Type < result[j].Type
-	})
-	return result
-}
 
 // UnsupportedMode returns conditions for unimplemented Agent modes.
 func UnsupportedMode(mode string) []metav1.Condition {
@@ -68,12 +41,8 @@ func InvalidMode(mode string) []metav1.Condition {
 	}}
 }
 
-// ForAgentRunPhase returns merged run conditions for the given lifecycle phase.
-func ForAgentRunPhase(phase kontextv1alpha1.AgentRunPhase, existing []metav1.Condition) []metav1.Condition {
-	return Merge(existing, agentRunPhaseUpdates(phase)...)
-}
-
-func agentRunPhaseUpdates(phase kontextv1alpha1.AgentRunPhase) []metav1.Condition {
+// ForAgentRunPhase returns conditions for the given lifecycle phase.
+func ForAgentRunPhase(phase kontextv1alpha1.AgentRunPhase) []metav1.Condition {
 	switch {
 	case status.IsTerminalPhase(phase):
 		return []metav1.Condition{{
@@ -114,16 +83,8 @@ func agentRunPhaseUpdates(phase kontextv1alpha1.AgentRunPhase) []metav1.Conditio
 	}
 }
 
-// BudgetConfigured returns a BudgetValid condition for wallclock parsing.
-func BudgetConfigured(valid bool, message string) metav1.Condition {
-	if valid {
-		return metav1.Condition{
-			Type:    BudgetValid,
-			Status:  metav1.ConditionTrue,
-			Reason:  "Configured",
-			Message: "Wallclock budget is valid.",
-		}
-	}
+// InvalidBudget returns a condition for a wallclock budget that cannot be enforced.
+func InvalidBudget(message string) metav1.Condition {
 	return metav1.Condition{
 		Type:    BudgetValid,
 		Status:  metav1.ConditionFalse,
