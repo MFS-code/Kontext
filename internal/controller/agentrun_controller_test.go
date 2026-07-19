@@ -15,7 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
-	"github.com/kontext-dev/kontext/internal/conditions"
 	"github.com/kontext-dev/kontext/internal/podbuilder"
 )
 
@@ -310,6 +309,63 @@ func TestAgentRunReconcilerFailsWhenPodLost(t *testing.T) {
 	}
 }
 
+func TestAgentRunReconcilerDeletesLegacyPodWithInvalidWallclock(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "legacy-invalid-wallclock",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	pod := podbuilder.BuildPod(run)
+	if err := k8sClient.Create(ctx, pod); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	runKey := types.NamespacedName{Name: run.Name, Namespace: run.Namespace}
+	reconciler := newAgentRunReconciler()
+	reconciler.Client = &legacyWallclockClient{
+		Client:    k8sClient,
+		runKey:    runKey,
+		wallclock: "not-a-duration",
+	}
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: runKey}); err != nil {
+		t.Fatalf("reconcile legacy run: %v", err)
+	}
+
+	podKey := types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
+	if err := k8sClient.Get(ctx, podKey, &corev1.Pod{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected legacy pod to be deleted, got %v", err)
+	}
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, runKey, &updated); err != nil {
+		t.Fatalf("get failed run: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", updated.Status.Phase)
+	}
+	if updated.Status.PodName != pod.Name {
+		t.Fatalf("expected pod name %q, got %q", pod.Name, updated.Status.PodName)
+	}
+	if updated.Status.CompletionTime == nil {
+		t.Fatal("expected completion time")
+	}
+	if !strings.Contains(updated.Status.Message, `invalid wallclock budget "not-a-duration"`) {
+		t.Fatalf("expected invalid wallclock diagnostics, got %q", updated.Status.Message)
+	}
+}
+
 func TestAgentRunReconcilerObservesSucceededPod(t *testing.T) {
 	ctx := context.Background()
 	podName := podbuilder.PodNameForRun("success-run")
@@ -377,71 +433,6 @@ func TestAgentRunReconcilerObservesSucceededPod(t *testing.T) {
 	}
 	if updated.Status.Usage == nil || updated.Status.Usage.Tokens == nil || *updated.Status.Usage.Tokens != 3 {
 		t.Fatalf("expected total token usage, got %#v", updated.Status.Usage)
-	}
-}
-
-func TestAgentRunReconcilerSurfacesInvalidWallclock(t *testing.T) {
-	ctx := context.Background()
-	podName := podbuilder.PodNameForRun("invalid-wallclock-run")
-	run := &kontextv1alpha1.AgentRun{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "invalid-wallclock-run",
-			Namespace: "default",
-		},
-		Spec: kontextv1alpha1.AgentRunSpec{
-			Goal:     "hello",
-			Provider: "echo",
-			Model:    "echo-model",
-			Runtime:  echoRuntimeSpec(),
-			Budget:   &kontextv1alpha1.BudgetSpec{Wallclock: "not-a-duration"},
-		},
-	}
-	if err := k8sClient.Create(ctx, run); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
-		Phase:   kontextv1alpha1.AgentRunPhasePending,
-		PodName: podName,
-	}); err != nil {
-		t.Fatalf("update run status: %v", err)
-	}
-
-	pod := podbuilder.BuildPod(run)
-	if err := k8sClient.Create(ctx, pod); err != nil {
-		t.Fatalf("create pod: %v", err)
-	}
-
-	reconcileAgentRun(ctx, t, types.NamespacedName{Name: run.Name, Namespace: run.Namespace})
-
-	var updated kontextv1alpha1.AgentRun
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: run.Name, Namespace: run.Namespace}, &updated); err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	var invalidBudget *metav1.Condition
-	for _, condition := range updated.Status.Conditions {
-		if condition.Type == conditions.BudgetValid && condition.Status == metav1.ConditionFalse {
-			condition := condition
-			invalidBudget = &condition
-			break
-		}
-	}
-	if invalidBudget == nil {
-		t.Fatalf("expected BudgetValid=False condition, got %#v", updated.Status.Conditions)
-	}
-	if invalidBudget.ObservedGeneration != updated.Generation {
-		t.Fatalf(
-			"invalid budget observed generation %d, want %d",
-			invalidBudget.ObservedGeneration,
-			updated.Generation,
-		)
-	}
-	if !strings.Contains(invalidBudget.Message, "invalid") ||
-		!strings.Contains(invalidBudget.Message, "not enforced") ||
-		strings.Contains(invalidBudget.Message, "default") {
-		t.Fatalf("invalid budget condition is not truthful: %q", invalidBudget.Message)
-	}
-	if updated.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
-		t.Fatalf("invalid wallclock must not enforce a default budget")
 	}
 }
 
@@ -754,6 +745,30 @@ type deleteErrorClient struct {
 
 func (c *deleteErrorClient) Delete(context.Context, client.Object, ...client.DeleteOption) error {
 	return c.err
+}
+
+// legacyWallclockClient simulates a persisted object created before CRD
+// admission validation was introduced while keeping writes on the real API server.
+type legacyWallclockClient struct {
+	client.Client
+	runKey    types.NamespacedName
+	wallclock string
+}
+
+func (c *legacyWallclockClient) Get(
+	ctx context.Context,
+	key client.ObjectKey,
+	obj client.Object,
+	opts ...client.GetOption,
+) error {
+	if err := c.Client.Get(ctx, key, obj, opts...); err != nil {
+		return err
+	}
+	run, isAgentRun := obj.(*kontextv1alpha1.AgentRun)
+	if isAgentRun && key == c.runKey {
+		run.Spec.Budget = &kontextv1alpha1.BudgetSpec{Wallclock: c.wallclock}
+	}
+	return nil
 }
 
 func updateAgentRunStatus(ctx context.Context, run *kontextv1alpha1.AgentRun, next kontextv1alpha1.AgentRunStatus) error {

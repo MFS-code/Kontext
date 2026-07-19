@@ -44,15 +44,26 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	pod := &corev1.Pod{}
 	podKey := client.ObjectKey{Namespace: run.Namespace, Name: podName}
-	err := r.Get(ctx, podKey, pod)
-	if apierrors.IsNotFound(err) {
-		return r.reconcileMissingPod(ctx, &run, podName)
-	}
-	if err != nil {
-		return ctrl.Result{}, err
+	podErr := r.Get(ctx, podKey, pod)
+	podMissing := apierrors.IsNotFound(podErr)
+	if podErr != nil && !podMissing {
+		return ctrl.Result{}, podErr
 	}
 
-	wallclockResult, done, err := r.enforceWallclock(ctx, &run, pod)
+	var wallclockLimit *time.Duration
+	if !status.IsTerminalPhase(run.Status.Phase) {
+		parsedLimit, budgetErr := parseWallclockBudget(run.Spec.Budget)
+		if budgetErr != nil {
+			return r.failInvalidWallclock(ctx, &run, pod, !podMissing, budgetErr)
+		}
+		wallclockLimit = parsedLimit
+	}
+
+	if podMissing {
+		return r.reconcileMissingPod(ctx, &run, podName)
+	}
+
+	wallclockResult, done, err := r.enforceWallclock(ctx, &run, pod, wallclockLimit)
 	if err != nil || done {
 		return wallclockResult, err
 	}
@@ -156,36 +167,68 @@ func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontex
 	return ctrl.Result{}, nil
 }
 
-func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv1alpha1.AgentRun, pod *corev1.Pod) (ctrl.Result, bool, error) {
+func parseWallclockBudget(budget *kontextv1alpha1.BudgetSpec) (*time.Duration, error) {
+	if budget == nil || budget.Wallclock == "" {
+		return nil, nil
+	}
+
+	limit, err := time.ParseDuration(budget.Wallclock)
+	if err != nil {
+		return nil, fmt.Errorf("invalid wallclock budget %q: %w", budget.Wallclock, err)
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf(
+			"invalid wallclock budget %q: duration must be positive",
+			budget.Wallclock,
+		)
+	}
+	return &limit, nil
+}
+
+func (r *AgentRunReconciler) failInvalidWallclock(
+	ctx context.Context,
+	run *kontextv1alpha1.AgentRun,
+	pod *corev1.Pod,
+	podExists bool,
+	cause error,
+) (ctrl.Result, error) {
+	if podExists {
+		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+		next.Phase = kontextv1alpha1.AgentRunPhaseFailed
+		if podExists {
+			next.PodName = pod.Name
+		}
+		next.Message = fmt.Sprintf("Agent run configuration is invalid: %v.", cause)
+		next.CompletionTime = nowPtr()
+		setStatusConditions(
+			&next.Conditions,
+			run.Generation,
+			conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed)...,
+		)
+	})
+}
+
+func (r *AgentRunReconciler) enforceWallclock(
+	ctx context.Context,
+	run *kontextv1alpha1.AgentRun,
+	pod *corev1.Pod,
+	limit *time.Duration,
+) (ctrl.Result, bool, error) {
 	if run.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
 		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, true, err
 		}
 		return ctrl.Result{}, true, nil
 	}
-	if run.Spec.Budget == nil || run.Spec.Budget.Wallclock == "" {
+	if limit == nil {
 		return ctrl.Result{}, false, nil
 	}
 	if status.IsTerminalPhase(run.Status.Phase) {
-		return ctrl.Result{}, false, nil
-	}
-
-	limit, parseErr := status.ParseWallclock(run.Spec.Budget.Wallclock)
-	if parseErr != nil {
-		// AgentRun specs are immutable, so an invalid budget cannot become
-		// valid in place; applying a correction creates a new run.
-		_, err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
-			setStatusConditions(
-				&next.Conditions,
-				run.Generation,
-				conditions.InvalidBudget(
-					fmt.Sprintf("Wallclock budget is invalid and is not enforced: %v.", parseErr),
-				),
-			)
-		})
-		if err != nil {
-			return ctrl.Result{}, false, err
-		}
 		return ctrl.Result{}, false, nil
 	}
 
@@ -202,15 +245,15 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 	}
 
 	elapsed := time.Since(startedAt.Time)
-	if elapsed <= limit {
-		remaining := limit - elapsed
+	if elapsed <= *limit {
+		remaining := *limit - elapsed
 		return ctrl.Result{RequeueAfter: remaining + time.Second}, false, nil
 	}
 
 	_, err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 		next.Phase = kontextv1alpha1.AgentRunPhaseBudgetExceeded
 		next.PodName = pod.Name
-		next.Message = fmt.Sprintf("Wallclock budget exceeded after %s.", limit)
+		next.Message = fmt.Sprintf("Wallclock budget exceeded after %s.", *limit)
 		recordedStart := *startedAt
 		next.StartTime = &recordedStart
 		next.CompletionTime = nowPtr()

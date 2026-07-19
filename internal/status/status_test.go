@@ -3,7 +3,6 @@ package status_test
 import (
 	"strings"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -283,26 +282,6 @@ func TestObservePodLegacyPayloadWithoutMetricsLeavesUsageAbsent(t *testing.T) {
 	}
 }
 
-func TestParseWallclock(t *testing.T) {
-	got, err := status.ParseWallclock("5m")
-	if err != nil {
-		t.Fatalf("parse valid wallclock: %v", err)
-	}
-	if got != 5*time.Minute {
-		t.Fatalf("expected 5m, got %v", got)
-	}
-}
-
-func TestParseWallclockInvalid(t *testing.T) {
-	duration, err := status.ParseWallclock("not-a-duration")
-	if err == nil {
-		t.Fatal("expected invalid wallclock error")
-	}
-	if duration != 0 {
-		t.Fatalf("invalid wallclock returned duration %s", duration)
-	}
-}
-
 func TestObservePodWaitingUsesReason(t *testing.T) {
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{
@@ -456,15 +435,5 @@ func TestObservePodUnknownPhaseDefaultsPending(t *testing.T) {
 	pod := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodUnknown}}
 	if got := status.ObservePod(pod).Phase; got != kontextv1alpha1.AgentRunPhasePending {
 		t.Fatalf("expected Pending, got %s", got)
-	}
-}
-
-func TestParseWallclockRejectsNonPositive(t *testing.T) {
-	duration, err := status.ParseWallclock("0s")
-	if err == nil {
-		t.Fatal("expected non-positive wallclock error")
-	}
-	if duration != 0 {
-		t.Fatalf("non-positive wallclock returned duration %s", duration)
 	}
 }

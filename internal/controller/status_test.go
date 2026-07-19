@@ -112,7 +112,12 @@ func TestEnforceWallclockTreatsOmissionAsNoDeadline(t *testing.T) {
 	}
 
 	for _, run := range runs {
-		result, done, err := reconciler.enforceWallclock(context.Background(), run, &corev1.Pod{})
+		result, done, err := reconciler.enforceWallclock(
+			context.Background(),
+			run,
+			&corev1.Pod{},
+			nil,
+		)
 		if err != nil {
 			t.Fatalf("omitted wallclock returned error: %v", err)
 		}
@@ -122,6 +127,62 @@ func TestEnforceWallclockTreatsOmissionAsNoDeadline(t *testing.T) {
 		if len(run.Status.Conditions) != 0 {
 			t.Fatalf("omitted wallclock wrote conditions: %#v", run.Status.Conditions)
 		}
+	}
+}
+
+func TestParseWallclockBudget(t *testing.T) {
+	tests := []struct {
+		name    string
+		budget  *kontextv1alpha1.BudgetSpec
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "omitted"},
+		{name: "empty", budget: &kontextv1alpha1.BudgetSpec{}},
+		{
+			name:   "positive",
+			budget: &kontextv1alpha1.BudgetSpec{Wallclock: "5m"},
+			want:   5 * time.Minute,
+		},
+		{
+			name:    "invalid",
+			budget:  &kontextv1alpha1.BudgetSpec{Wallclock: "five minutes"},
+			wantErr: true,
+		},
+		{
+			name:    "zero",
+			budget:  &kontextv1alpha1.BudgetSpec{Wallclock: "0s"},
+			wantErr: true,
+		},
+		{
+			name:    "negative",
+			budget:  &kontextv1alpha1.BudgetSpec{Wallclock: "-1s"},
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			limit, err := parseWallclockBudget(test.budget)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("expected wallclock parse error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parse wallclock budget: %v", err)
+			}
+			if test.want == 0 {
+				if limit != nil {
+					t.Fatalf("expected no wallclock limit, got %s", *limit)
+				}
+				return
+			}
+			if limit == nil || *limit != test.want {
+				t.Fatalf("wallclock limit = %v, want %s", limit, test.want)
+			}
+		})
 	}
 }
 

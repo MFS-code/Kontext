@@ -13,7 +13,6 @@ const (
 	Ready       = "Ready"
 	Progressing = "Progressing"
 	Complete    = "Complete"
-	BudgetValid = "BudgetValid"
 )
 
 // UnsupportedMode returns conditions for unimplemented Agent modes.
@@ -80,15 +79,5 @@ func ForAgentRunPhase(phase kontextv1alpha1.AgentRunPhase) []metav1.Condition {
 			Reason:  string(phase),
 			Message: "Agent run is starting.",
 		}}
-	}
-}
-
-// InvalidBudget returns a condition for a wallclock budget that cannot be enforced.
-func InvalidBudget(message string) metav1.Condition {
-	return metav1.Condition{
-		Type:    BudgetValid,
-		Status:  metav1.ConditionFalse,
-		Reason:  "InvalidWallclock",
-		Message: message,
 	}
 }
