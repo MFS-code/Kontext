@@ -39,6 +39,10 @@ jobs:
             echo "::error::release tags must use vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-PRERELEASE"
             exit 1
           fi
+          if [[ "${#version}" -gt 63 ]]; then
+            echo "::error::release tags must fit the 63-character Kubernetes version label"
+            exit 1
+          fi
 
           git fetch origin "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
           if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${DEFAULT_BRANCH}"; then
@@ -248,6 +252,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+
       - name: Download image metadata
         uses: actions/download-artifact@v4
         with:
@@ -268,6 +278,11 @@ jobs:
               images: sort_by(.name)
             }' image-metadata/*.json >image-digests.json
 
+      - name: Render pinned install manifest
+        run: |
+          make release-manifest IMAGE_DIGESTS=image-digests.json
+          kubectl create --dry-run=client -f dist/install.yaml -o name
+
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -281,6 +296,7 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --title "Kontext ${VERSION}" \
-            --notes "Versioned Kontext images for linux/amd64 and linux/arm64. See image-digests.json for immutable references. This release serves the kontext.dev/v1alpha1 API." \
+            --notes "Install with: kubectl apply -f https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/install.yaml. See image-digests.json for immutable image references. This release serves the kontext.dev/v1alpha1 API." \
             "${flags[@]}" \
-            image-digests.json
+            image-digests.json \
+            dist/install.yaml

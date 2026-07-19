@@ -9,6 +9,7 @@ STDOUT_FIXTURE_IMG ?= kontext-stdout-fixture:dev
 # Generic image-build inputs. Convenience targets below select these per image.
 DOCKERFILE ?= Dockerfile
 CONTEXT ?= .
+DIST_DIR ?= dist
 
 # Get the currently used golang version
 GO_VERSION ?= 1.26.5
@@ -139,6 +140,14 @@ kind-install: docker-build docker-build-echo docker-build-reporter docker-build-
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+
+##@ Release
+
+.PHONY: release-manifest
+release-manifest: ## Render DIST_DIR/install.yaml from IMAGE_DIGESTS.
+	@test -f "$(IMAGE_DIGESTS)" || { echo "IMAGE_DIGESTS is required" >&2; exit 2; }
+	mkdir -p "$(DIST_DIR)"
+	./scripts/render-release-manifest.sh "$(IMAGE_DIGESTS)" >"$(DIST_DIR)/install.yaml"
 
 ##@ Deployment
 

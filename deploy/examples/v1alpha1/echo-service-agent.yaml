@@ -8,7 +8,7 @@ spec:
   provider: echo
   model: echo-model
   runtime:
-    image: kontext-echo:dev
+    image: ghcr.io/mfs-code/kontext-echo:RELEASE_TAG
     command: ["/entrypoint.sh"]
   env:
     - name: KONTEXT_MODE

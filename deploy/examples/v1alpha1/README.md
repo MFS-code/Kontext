@@ -1,15 +1,29 @@
 # v1alpha1 examples
 
-These manifests assume the Kontext CRDs and controller are installed. The kind
-quickstart builds and loads the local `kontext-*:dev` images; provider examples
-additionally require the named
-namespace-local Secret. Apply namespaced manifests with `kubectl apply -f`.
+These manifests assume the Kontext CRDs and controller are installed. Kontext
+images use the documented `RELEASE_TAG` placeholder rather than a mutable
+development tag.
+
+After the kind quickstart, map placeholders to the loaded local images:
+
+```bash
+./scripts/apply-example.sh deploy/examples/v1alpha1/echo-task-run.yaml
+```
+
+To apply an example with published images instead:
+
+```bash
+KONTEXT_RELEASE_TAG=v0.1.0-alpha.1 \
+  ./scripts/apply-example.sh deploy/examples/v1alpha1/reference-fake-run.yaml
+```
+
+Provider examples additionally require the named namespace-local Secret.
 
 ## Bring your own image
 
 | Path | Manifest | Prerequisite | Expected observation |
 |---|---|---|---|
-| Plain image, logs only | `plain-logs-run.yaml` | `kontext-stdout-fixture:dev` | `Succeeded`; ordinary `kubectl logs`; empty `status.result` and no `status.output`. No reporter is injected. |
+| Plain image, logs only | `plain-logs-run.yaml` | Digest-pinned BusyBox, or the local fixture selected by `apply-example.sh` | `Succeeded`; ordinary `kubectl logs`; empty `status.result` and no `status.output`. No reporter is injected. |
 | Injected final-line capture | `stdout-last-line-run.yaml` | Fixture and configured `KONTEXT_REPORTER_IMAGE` | `Succeeded`; logs remain available; `status.result` is `final answer from busybox`. |
 | Injected structured capture | `stdout-envelope-run.yaml` | Fixture and configured reporter image | `Succeeded`; the prefixed envelope supplies JSON output and measured usage. |
 | Native versioned envelope | `native-envelope-run.yaml` | Fixture image | `Succeeded`; the process writes `kontext.dev/result/v1alpha1` to `/dev/termination-log` itself. `runtime.result` is omitted, so the controller does not inject a reporter. |

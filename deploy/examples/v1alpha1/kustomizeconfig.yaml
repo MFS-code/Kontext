@@ -1,0 +1,5 @@
+images:
+  - path: spec/runtime/image
+    kind: Agent
+  - path: spec/runtime/image
+    kind: AgentRun

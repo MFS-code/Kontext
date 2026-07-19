@@ -16,6 +16,7 @@ CALICO_MANIFEST=""
 WORK_DIR=""
 CLUSTER_CREATED=false
 PREVIOUS_CONTEXT=""
+APPLY_EXAMPLE="${ROOT_DIR}/scripts/apply-example.sh"
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -438,8 +439,7 @@ KONTEXT_KIND_IMAGE_SET=network-policy \
   "${ROOT_DIR}/scripts/install-go-kind.sh"
 
 echo "==> applying NetworkPolicy fixture and policy"
-kubectl apply -f \
-  "${ROOT_DIR}/deploy/examples/v1alpha1/reference-kind-network-policy.yaml"
+"${APPLY_EXAMPLE}" reference-kind-network-policy.yaml
 kubernetes_service_ip="$(
   kubectl get service kubernetes -n default -o jsonpath='{.spec.clusterIP}'
 )"
@@ -481,8 +481,7 @@ kubectl wait --for=condition=Ready pod/network-policy-http \
   --timeout=120s
 
 echo "==> starting policy-selected runtime probes"
-kubectl apply -f \
-  "${ROOT_DIR}/deploy/examples/v1alpha1/reference-kind-network-policy-runs.yaml"
+"${APPLY_EXAMPLE}" reference-kind-network-policy-runs.yaml
 wait_for_run_phase reference-network-http Succeeded
 wait_for_run_phase reference-network-kubernetes Succeeded
 
@@ -512,8 +511,7 @@ if [[ "${kubernetes_logs}" != *'"name":"kubernetes_read"'* ||
 fi
 
 echo "==> applying restricted Playwright MCP and deterministic HTML fixtures"
-kubectl apply -f \
-  "${ROOT_DIR}/deploy/examples/v1alpha1/reference-playwright-mcp.yaml"
+"${APPLY_EXAMPLE}" reference-playwright-mcp.yaml
 kubectl rollout status deployment/playwright-fixture \
   -n "${NAMESPACE}" --timeout=180s
 kubectl rollout status deployment/unrelated-http \
@@ -530,8 +528,7 @@ assert_strict_pod_isolation "${playwright_pod}" mcp browser
 wait_for_no_browser_processes
 
 echo "==> running deterministic browser interaction"
-kubectl apply -f \
-  "${ROOT_DIR}/deploy/examples/v1alpha1/reference-playwright-browser-run.yaml"
+"${APPLY_EXAMPLE}" reference-playwright-browser-run.yaml
 wait_for_run_phase reference-playwright-browser Succeeded
 kubectl logs run-reference-playwright-browser -n "${NAMESPACE}" -c runtime \
   >"${WORK_DIR}/playwright-browser.log"
@@ -553,8 +550,7 @@ fi
 wait_for_no_browser_processes
 
 echo "==> proving browser profile isolation across AgentRuns"
-kubectl apply -f \
-  "${ROOT_DIR}/deploy/examples/v1alpha1/reference-playwright-fresh-run.yaml"
+"${APPLY_EXAMPLE}" reference-playwright-fresh-run.yaml
 wait_for_run_phase reference-playwright-fresh Succeeded
 kubectl logs run-reference-playwright-fresh -n "${NAMESPACE}" -c runtime \
   >"${WORK_DIR}/playwright-fresh.log"
@@ -575,8 +571,7 @@ fi
 wait_for_no_browser_processes
 
 echo "==> proving browser egress deny rules"
-kubectl apply -f \
-  "${ROOT_DIR}/deploy/examples/v1alpha1/reference-playwright-deny-run.yaml"
+"${APPLY_EXAMPLE}" reference-playwright-deny-run.yaml
 wait_for_run_phase reference-playwright-deny Succeeded
 kubectl logs run-reference-playwright-deny -n "${NAMESPACE}" -c runtime \
   >"${WORK_DIR}/playwright-deny.log"
@@ -597,8 +592,7 @@ fi
 wait_for_no_browser_processes
 
 echo "==> proving wallclock cancellation cleans the browser session"
-kubectl apply -f \
-  "${ROOT_DIR}/deploy/examples/v1alpha1/reference-playwright-cancel-run.yaml"
+"${APPLY_EXAMPLE}" reference-playwright-cancel-run.yaml
 kubectl wait --for=condition=Ready pod/run-reference-playwright-cancel \
   -n "${NAMESPACE}" --timeout=90s
 assert_strict_pod_isolation run-reference-playwright-cancel runtime runtime

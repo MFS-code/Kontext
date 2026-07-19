@@ -7,7 +7,7 @@ The thesis: **agents are workloads.** An agent should not live in a screen sessi
 After the [quickstart](#quickstart-on-kind) below, this is the whole workflow:
 
 ```bash
-kubectl apply -f deploy/examples/v1alpha1/echo-task-run.yaml
+./scripts/apply-example.sh deploy/examples/v1alpha1/echo-task-run.yaml
 kubectl get agentrun echo-review -w
 kubectl logs -f run-echo-review
 kubectl get agentrun echo-review -o jsonpath='{.status.result}'
@@ -34,6 +34,23 @@ consumers should read `.status.output`; `.status.result` remains its
 backward-compatible text projection. The full versioned contract is in
 [`SPEC.md`](SPEC.md).
 
+## Install a tagged release
+
+An existing Kubernetes cluster needs only kubectl and permission to create
+CRDs, cluster-scoped RBAC, a Namespace, and a Deployment:
+
+```bash
+VERSION=v0.1.0-alpha.1
+kubectl apply -f \
+  "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml"
+kubectl rollout status deployment/controller-manager \
+  --namespace kontext-system \
+  --timeout=120s
+```
+
+The release manifest pins the operator and trusted reporter images by digest.
+It does not require Docker, kind, or a repository clone.
+
 ## Quickstart on kind
 
 Requires Docker, [kind](https://kind.sigs.k8s.io/), and kubectl.
@@ -54,7 +71,7 @@ The e2e script proves the two core behaviors:
 ### Run a one-shot task
 
 ```bash
-kubectl apply -f deploy/examples/v1alpha1/echo-task-run.yaml
+./scripts/apply-example.sh deploy/examples/v1alpha1/echo-task-run.yaml
 kubectl get agentrun echo-review -w
 kubectl logs -f run-echo-review
 kubectl get agentrun echo-review -o jsonpath='{.status.result}'
@@ -63,7 +80,7 @@ kubectl get agentrun echo-review -o jsonpath='{.status.result}'
 ### Run a persistent service agent
 
 ```bash
-kubectl apply -f deploy/examples/v1alpha1/echo-service-agent.yaml
+./scripts/apply-example.sh deploy/examples/v1alpha1/echo-service-agent.yaml
 kubectl get agent echo-service -w
 kubectl logs -f $(kubectl get pod -l kontext.dev/agent=echo-service -o jsonpath='{.items[0].metadata.name}')
 ```

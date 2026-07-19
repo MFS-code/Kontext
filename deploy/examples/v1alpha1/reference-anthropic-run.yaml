@@ -9,7 +9,7 @@ spec:
   secretRef:
     name: kontext-anthropic
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
   budget:
     # Leave headroom for provider input usage even on a one-turn example.
     tokens: 4096

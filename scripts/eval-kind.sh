@@ -10,6 +10,7 @@ RECORDS="${EVAL_DIR}/keyless.jsonl"
 SUMMARY="${EVAL_DIR}/keyless.summary.json"
 MARKER="${EVAL_DIR}/not-run.json"
 SERVICE_AGENT="echo-service"
+APPLY_EXAMPLE="${ROOT_DIR}/scripts/apply-example.sh"
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -206,8 +207,7 @@ if jq -s -e '
 fi
 
 echo "==> proving Service mode omits wallclock deadlines and recasts"
-kubectl apply -n "${EVAL_NAMESPACE}" \
-  -f "${ROOT_DIR}/deploy/examples/v1alpha1/echo-service-agent.yaml" >/dev/null
+"${APPLY_EXAMPLE}" echo-service-agent.yaml -n "${EVAL_NAMESPACE}" >/dev/null
 first_run="$(wait_for_service)"
 first_pod="$(
   kubectl get pod -n "${EVAL_NAMESPACE}" \

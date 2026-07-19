@@ -55,7 +55,7 @@ spec:
   tools: [kubernetes_read]
   serviceAccountName: reference-kubernetes-reader
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -94,7 +94,7 @@ spec:
   tools: [kubernetes_read]
   serviceAccountName: reference-kubernetes-reader
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -133,7 +133,7 @@ spec:
   tools: [kubernetes_read]
   serviceAccountName: reference-kubernetes-reader
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -172,7 +172,7 @@ spec:
   tools: [shell]
   serviceAccountName: reference-shell
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -211,7 +211,7 @@ spec:
   tools: [shell]
   serviceAccountName: reference-shell
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
