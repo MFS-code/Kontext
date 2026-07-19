@@ -15,7 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
-	"github.com/kontext-dev/kontext/internal/conditions"
 	"github.com/kontext-dev/kontext/internal/podbuilder"
 )
 
@@ -377,71 +376,6 @@ func TestAgentRunReconcilerObservesSucceededPod(t *testing.T) {
 	}
 	if updated.Status.Usage == nil || updated.Status.Usage.Tokens == nil || *updated.Status.Usage.Tokens != 3 {
 		t.Fatalf("expected total token usage, got %#v", updated.Status.Usage)
-	}
-}
-
-func TestAgentRunReconcilerSurfacesInvalidWallclock(t *testing.T) {
-	ctx := context.Background()
-	podName := podbuilder.PodNameForRun("invalid-wallclock-run")
-	run := &kontextv1alpha1.AgentRun{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "invalid-wallclock-run",
-			Namespace: "default",
-		},
-		Spec: kontextv1alpha1.AgentRunSpec{
-			Goal:     "hello",
-			Provider: "echo",
-			Model:    "echo-model",
-			Runtime:  echoRuntimeSpec(),
-			Budget:   &kontextv1alpha1.BudgetSpec{Wallclock: "not-a-duration"},
-		},
-	}
-	if err := k8sClient.Create(ctx, run); err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
-		Phase:   kontextv1alpha1.AgentRunPhasePending,
-		PodName: podName,
-	}); err != nil {
-		t.Fatalf("update run status: %v", err)
-	}
-
-	pod := podbuilder.BuildPod(run)
-	if err := k8sClient.Create(ctx, pod); err != nil {
-		t.Fatalf("create pod: %v", err)
-	}
-
-	reconcileAgentRun(ctx, t, types.NamespacedName{Name: run.Name, Namespace: run.Namespace})
-
-	var updated kontextv1alpha1.AgentRun
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: run.Name, Namespace: run.Namespace}, &updated); err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	var invalidBudget *metav1.Condition
-	for _, condition := range updated.Status.Conditions {
-		if condition.Type == conditions.BudgetValid && condition.Status == metav1.ConditionFalse {
-			condition := condition
-			invalidBudget = &condition
-			break
-		}
-	}
-	if invalidBudget == nil {
-		t.Fatalf("expected BudgetValid=False condition, got %#v", updated.Status.Conditions)
-	}
-	if invalidBudget.ObservedGeneration != updated.Generation {
-		t.Fatalf(
-			"invalid budget observed generation %d, want %d",
-			invalidBudget.ObservedGeneration,
-			updated.Generation,
-		)
-	}
-	if !strings.Contains(invalidBudget.Message, "invalid") ||
-		!strings.Contains(invalidBudget.Message, "not enforced") ||
-		strings.Contains(invalidBudget.Message, "default") {
-		t.Fatalf("invalid budget condition is not truthful: %q", invalidBudget.Message)
-	}
-	if updated.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
-		t.Fatalf("invalid wallclock must not enforce a default budget")
 	}
 }
 

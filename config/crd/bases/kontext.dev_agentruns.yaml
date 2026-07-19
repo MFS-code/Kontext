@@ -70,6 +70,10 @@ spec:
                   wallclock:
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: wallclock must be empty or a positive duration
+                  rule: '!has(self.wallclock) || self.wallclock.size() == 0 || duration(self.wallclock)
+                    > duration(''0s'')'
               env:
                 items:
                   description: EnvVar is a name/value or Secret-backed value injected

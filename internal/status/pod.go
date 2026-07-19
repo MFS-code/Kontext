@@ -3,7 +3,6 @@ package status
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -175,21 +174,4 @@ func usageStatus(parsed resultv1alpha1.ParsedResult) *kontextv1alpha1.UsageStatu
 		OutputTokens: parsed.Usage.OutputTokens,
 		Dollars:      parsed.Usage.Dollars,
 	}
-}
-
-// ParseWallclock parses a configured positive duration.
-func ParseWallclock(value string) (time.Duration, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0, fmt.Errorf("wallclock budget is empty")
-	}
-
-	duration, err := time.ParseDuration(value)
-	if err != nil {
-		return 0, fmt.Errorf("invalid wallclock budget %q: %w", value, err)
-	}
-	if duration <= 0 {
-		return 0, fmt.Errorf("invalid wallclock budget %q: duration must be positive", value)
-	}
-	return duration, nil
 }

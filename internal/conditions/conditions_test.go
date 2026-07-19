@@ -70,19 +70,6 @@ func TestInvalidMode(t *testing.T) {
 	}
 }
 
-func TestInvalidBudgetUsesMessage(t *testing.T) {
-	condition := conditions.InvalidBudget("bad wallclock")
-	if condition.Status != metav1.ConditionFalse {
-		t.Fatalf("expected False, got %s", condition.Status)
-	}
-	if condition.Reason != "InvalidWallclock" {
-		t.Fatalf("unexpected reason: %s", condition.Reason)
-	}
-	if condition.Message != "bad wallclock" {
-		t.Fatalf("expected supplied message, got %q", condition.Message)
-	}
-}
-
 func TestForAgentRunPhaseTerminal(t *testing.T) {
 	merged := conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseSucceeded)
 
