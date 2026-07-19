@@ -16,9 +16,9 @@ inputs:
     description: GitHub Actions cache scope
     required: true
   load:
-    description: Load the single-platform result into the local Docker daemon
+    description: Load into the local daemon; must stay false for multi-platform builds
     required: false
-    default: "true"
+    default: "false"
   push:
     description: Push the build result to its registry
     required: false
