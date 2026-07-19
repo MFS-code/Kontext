@@ -31,7 +31,7 @@ spec:
             - /manager
           env:
             - name: KONTEXT_REPORTER_IMAGE
-              value: ""
+              value: reporter:latest
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

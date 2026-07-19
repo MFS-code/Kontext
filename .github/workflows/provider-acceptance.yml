@@ -103,7 +103,7 @@ jobs:
 
       - name: Install maintained operator
         run: |
-          kubectl apply -k config/default
+          kubectl apply -k config/overlays/dev
           kubectl rollout status deployment/controller-manager \
             --namespace kontext-system \
             --timeout=120s

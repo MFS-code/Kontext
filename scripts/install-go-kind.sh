@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Load prebuilt operator, runtime, reporter, and test images into kind and
-# install the controller. Build images first with `make kind-install`.
+# Load prebuilt operator, runtime, reporter, and test images into kind, then
+# install the controller through the development kustomize overlay.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -55,6 +55,43 @@ if [[ "${IMAGE_SET}" == "full" ]]; then
   fi
 fi
 
+KIND_OVERLAY_DIR="$(mktemp -d "${ROOT_DIR}/config/overlays/.kind.XXXXXX")"
+cleanup() {
+  rm -rf "${KIND_OVERLAY_DIR}"
+}
+trap cleanup EXIT
+
+cat >"${KIND_OVERLAY_DIR}/kustomization.yaml" <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../dev
+
+patches:
+  - path: manager_patch.yaml
+EOF
+
+cat >"${KIND_OVERLAY_DIR}/manager_patch.yaml" <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: kontext-system
+spec:
+  template:
+    metadata:
+      annotations:
+        kontext.dev/local-operator-image-id: "${OPERATOR_IMAGE_ID}"
+    spec:
+      containers:
+        - name: manager
+          image: "${OPERATOR_IMAGE}"
+          env:
+            - name: KONTEXT_REPORTER_IMAGE
+              value: "${REPORTER_IMAGE}"
+EOF
+
 if ! kind get clusters | grep -qx "${CLUSTER_NAME}"; then
   echo "==> creating kind cluster ${CLUSTER_NAME}"
   kind create cluster --name "${CLUSTER_NAME}"
@@ -90,11 +127,7 @@ if kubectl get crd agents.kontext.dev >/dev/null 2>&1; then
   fi
 fi
 kubectl delete deployment kontext-controller -n default --ignore-not-found=true
-kubectl apply -k "${ROOT_DIR}/config/default"
-kubectl set env deployment/controller-manager -n kontext-system \
-  "KONTEXT_REPORTER_IMAGE=${REPORTER_IMAGE}"
-kubectl patch deployment/controller-manager -n kontext-system --type=merge -p \
-  "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"kontext.dev/local-operator-image-id\":\"${OPERATOR_IMAGE_ID}\"}}}}}"
+kubectl apply -k "${KIND_OVERLAY_DIR}"
 
 echo "==> waiting for controller rollout"
 kubectl rollout status deployment/controller-manager -n kontext-system --timeout=120s
