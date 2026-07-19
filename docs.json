@@ -14,6 +14,7 @@
   },
   "logo": {
     "light": "/images/logo.svg",
+    "dark": "/images/logo.svg",
     "href": "https://kontext.run"
   },
   "favicon": "/images/favicon.svg",
@@ -74,7 +75,8 @@
   "seo": {
     "metatags": {
       "og:site_name": "Kontext Docs",
-      "og:type": "website"
+      "og:type": "website",
+      "canonical": "https://docs.kontext.run"
     },
     "indexing": "navigable"
   },
