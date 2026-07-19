@@ -243,14 +243,12 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  release:
-    name: Create GitHub release
+  manifest:
+    name: Build release artifacts
     needs:
       - validate
       - images
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -283,6 +281,127 @@ jobs:
           make release-manifest IMAGE_DIGESTS=image-digests.json
           kubectl create --dry-run=client -f dist/install.yaml -o name
 
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            image-digests.json
+            dist/install.yaml
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-install:
+    name: Verify registry install, upgrade, and uninstall
+    needs:
+      - validate
+      - manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      KIND_CLUSTER_NAME: kontext-release-verification
+      KONTEXT_DIAG_DIR: ${{ github.workspace }}/.ci-diagnostics
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download current release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Create clean kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          wait: 120s
+
+      - name: Download previous release manifest when available
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          releases="$(
+            gh release list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --exclude-drafts \
+              --limit 1000 \
+              --json tagName,publishedAt
+          )"
+          if [[ "$(jq 'length' <<<"${releases}")" -eq 1000 ]]; then
+            echo "::error::release history reached the 1000-entry lookup limit"
+            exit 1
+          fi
+          previous="$(jq -r 'sort_by(.publishedAt) | last | .tagName // ""' <<<"${releases}")"
+          if [[ -z "${previous}" ]]; then
+            echo "available=false" >>"${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          mkdir -p previous-release
+          if ! gh release download "${previous}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern install.yaml \
+            --dir previous-release; then
+            echo "::warning::previous release ${previous} has no install manifest; skipping cross-version upgrade"
+            echo "available=false" >>"${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "available=true" >>"${GITHUB_OUTPUT}"
+          echo "version=${previous}" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify release lifecycle
+        env:
+          CURRENT_VERSION: ${{ needs.validate.outputs.version }}
+          HAS_PREVIOUS: ${{ steps.previous.outputs.available }}
+          PREVIOUS_VERSION: ${{ steps.previous.outputs.version }}
+        run: |
+          args=(
+            release-assets/dist/install.yaml
+            "${CURRENT_VERSION}"
+          )
+          if [[ "${HAS_PREVIOUS}" == "true" ]]; then
+            args+=(
+              previous-release/install.yaml
+              "${PREVIOUS_VERSION}"
+            )
+          fi
+          ./scripts/verify-release-install.sh "${args[@]}"
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: ./scripts/collect-kind-diagnostics.sh "${KONTEXT_DIAG_DIR}"
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-install-diagnostics-${{ github.run_id }}
+          path: ${{ env.KONTEXT_DIAG_DIR }}
+          if-no-files-found: ignore
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
+
+  release:
+    name: Create GitHub release
+    needs:
+      - validate
+      - manifest
+      - verify-install
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -298,5 +417,5 @@ jobs:
             --title "Kontext ${VERSION}" \
             --notes "Install with: kubectl apply -f https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/install.yaml. See image-digests.json for immutable image references. This release serves the kontext.dev/v1alpha1 API." \
             "${flags[@]}" \
-            image-digests.json \
-            dist/install.yaml
+            release-assets/image-digests.json \
+            release-assets/dist/install.yaml
