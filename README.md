@@ -160,6 +160,14 @@ dispatch-only, environment-protected workflow; its short-lived artifact is the
 release evidence. A keyless or render-only run is not an authenticated
 provider acceptance. See [`docs/evals.md`](docs/evals.md).
 
+## Releases
+
+A SemVer-compatible git tag publishes version-matched operator, echo, reporter,
+and reference images for `linux/amd64` and `linux/arm64`. Release artifacts
+include immutable digests; mutable `latest` and `dev` tags are not published.
+See [`docs/releases.md`](docs/releases.md) for the tag, image, and `v1alpha1`
+compatibility contract.
+
 ## Governance
 
 Each `AgentRun` is isolated and auditable. Budgets and runtime limits are
