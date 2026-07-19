@@ -66,7 +66,7 @@ it to:
 - create, read, watch, update, patch, and delete Pods;
 - create, read, watch, update, patch, and delete `Agent` and `AgentRun`
   resources;
-- read and update `Agent` and `AgentRun` status.
+- read, patch, and update `Agent` and `AgentRun` status.
 
 These permissions are cluster-wide because Kontext reconciles namespaced
 resources in every namespace. Runtime Pods do not inherit the controller's
