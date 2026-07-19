@@ -61,6 +61,9 @@ Kontext provides generic `Agent` and `AgentRun` primitives. Consumer-specific co
 
 ### M6 — Packaging + observability
 - Kustomize install exists under `config/default`. Helm/metrics still open.
+- Tag-driven releases publish version-matched operator, echo, reporter, and
+  reference images for `linux/amd64` and `linux/arm64`, with immutable digests
+  attached to the GitHub release.
 
 ### M7 — External integration spike ✅
 - Validated a `Service` `Agent`, knowledge `ConfigMap`, and task `AgentRun` from an external client.

@@ -1,0 +1,286 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      registry_owner: ${{ steps.tag.outputs.registry_owner }}
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version and source commit
+        id: tag
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME}"
+          core='v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+          prerelease_id='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
+          pattern="^${core}(-${prerelease_id}(\.${prerelease_id})*)?$"
+          if [[ ! "${version}" =~ ${pattern} ]]; then
+            echo "::error::release tags must use vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-PRERELEASE"
+            exit 1
+          fi
+
+          git fetch origin "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${DEFAULT_BRANCH}"; then
+            echo "::error::release tag ${version} does not point to a commit on ${DEFAULT_BRANCH}"
+            exit 1
+          fi
+          if gh release view "${version}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::release ${version} already exists"
+            exit 1
+          fi
+
+          echo "version=${version}" >>"${GITHUB_OUTPUT}"
+          echo "registry_owner=${GITHUB_REPOSITORY_OWNER,,}" >>"${GITHUB_OUTPUT}"
+
+  images:
+    name: Publish ${{ matrix.name }}
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      REGISTRY_OWNER: ${{ needs.validate.outputs.registry_owner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: operator
+            package: kontext-operator
+            context: .
+            dockerfile: Dockerfile
+          - name: echo
+            package: kontext-echo
+            context: runtimes/echo
+            dockerfile: runtimes/echo/Dockerfile
+          - name: reporter
+            package: kontext-reporter
+            context: .
+            dockerfile: runtimes/reporter/Dockerfile
+          - name: reference
+            package: kontext-reference
+            context: .
+            dockerfile: runtimes/reference/Dockerfile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Resolve existing immutable image
+        id: existing
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.REGISTRY_OWNER }}/${{ matrix.package }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          reference="${IMAGE}:${VERSION}"
+          inspect_error="${RUNNER_TEMP}/inspect-${{ matrix.name }}.log"
+          if ! manifest="$(
+            docker buildx imagetools inspect "${reference}" \
+              --format '{{json .Manifest}}' 2>"${inspect_error}"
+          )"; then
+            error_message="$(<"${inspect_error}")"
+            normalized_error="${error_message,,}"
+            if [[ "${normalized_error}" == *"not found"* ||
+              "${normalized_error}" == *"manifest unknown"* ]]; then
+              echo "exists=false" >>"${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "::error::failed to inspect existing release image ${reference}"
+            printf '%s\n' "${error_message}" >&2
+            exit 1
+          fi
+
+          images="$(docker buildx imagetools inspect "${reference}" --format '{{json .Image}}')"
+          for platform in linux/amd64 linux/arm64; do
+            revision="$(
+              jq -r \
+                --arg platform "${platform}" \
+                '.[$platform].config.Labels["org.opencontainers.image.revision"] // empty' \
+                <<<"${images}"
+            )"
+            if [[ "${revision}" != "${GITHUB_SHA}" ]]; then
+              echo "::error::${reference} already exists for revision ${revision:-unknown}; release tags are immutable"
+              exit 1
+            fi
+          done
+
+          echo "exists=true" >>"${GITHUB_OUTPUT}"
+          echo "digest=$(jq -r '.digest' <<<"${manifest}")" >>"${GITHUB_OUTPUT}"
+
+      - name: Build and push multi-arch image
+        id: build
+        if: steps.existing.outputs.exists != 'true'
+        uses: ./.github/actions/build-image
+        with:
+          context: ${{ matrix.context }}
+          dockerfile: ${{ matrix.dockerfile }}
+          tags: ${{ env.REGISTRY }}/${{ env.REGISTRY_OWNER }}/${{ matrix.package }}:${{ needs.validate.outputs.version }}
+          cache-scope: release-${{ matrix.name }}
+          load: "false"
+          push: "true"
+          platforms: linux/amd64,linux/arm64
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.validate.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Make package public
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGES_TOKEN || github.token }}
+          PACKAGE: ${{ matrix.package }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+        run: |
+          if [[ "${OWNER_TYPE}" == "Organization" ]]; then
+            endpoint="orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/${PACKAGE}"
+          else
+            endpoint="user/packages/container/${PACKAGE}"
+          fi
+
+          for attempt in 1 2 3 4 5; do
+            if gh api --method PATCH "${endpoint}" --field visibility=public >/dev/null &&
+              [[ "$(gh api "${endpoint}" --jq .visibility)" == "public" ]]; then
+              exit 0
+            fi
+            if [[ "${attempt}" -lt 5 ]]; then
+              sleep $((attempt * 2))
+            fi
+          done
+          echo "::error::could not make ${REGISTRY}/${REGISTRY_OWNER}/${PACKAGE} public"
+          exit 1
+
+      - name: Verify anonymous multi-arch pull
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.REGISTRY_OWNER }}/${{ matrix.package }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          anonymous_config="$(mktemp -d "${RUNNER_TEMP}/docker-anonymous.XXXXXX")"
+          trap 'rm -rf "${anonymous_config}"' EXIT
+          manifest="$(
+            DOCKER_CONFIG="${anonymous_config}" \
+              docker buildx imagetools inspect "${IMAGE}:${VERSION}" \
+              --format '{{json .Manifest}}'
+          )"
+          for platform in linux/amd64 linux/arm64; do
+            os="${platform%/*}"
+            architecture="${platform#*/}"
+            if ! jq -e \
+              --arg os "${os}" \
+              --arg architecture "${architecture}" \
+              'any(.manifests[]?; .platform.os == $os and .platform.architecture == $architecture)' \
+              <<<"${manifest}" >/dev/null; then
+              echo "::error::${IMAGE}:${VERSION} is missing ${platform}"
+              exit 1
+            fi
+          done
+
+      - name: Record immutable image reference
+        env:
+          DIGEST: ${{ steps.existing.outputs.digest || steps.build.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.REGISTRY_OWNER }}/${{ matrix.package }}
+          IMAGE_NAME: ${{ matrix.name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          mkdir -p image-metadata
+          jq -n \
+            --arg name "${IMAGE_NAME}" \
+            --arg image "${IMAGE}" \
+            --arg tag "${VERSION}" \
+            --arg digest "${DIGEST}" \
+            '{
+              name: $name,
+              image: $image,
+              tag: $tag,
+              reference: ($image + ":" + $tag),
+              digest: $digest,
+              immutableReference: ($image + "@" + $digest),
+              platforms: ["linux/amd64", "linux/arm64"]
+            }' >"image-metadata/${IMAGE_NAME}.json"
+
+      - name: Upload image metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-image-${{ matrix.name }}
+          path: image-metadata/${{ matrix.name }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Create GitHub release
+    needs:
+      - validate
+      - images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download image metadata
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-image-*
+          path: image-metadata
+          merge-multiple: true
+
+      - name: Assemble digest manifest
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          jq -s \
+            --arg releaseTag "${VERSION}" \
+            '{
+              apiVersion: "kontext.dev/release-images/v1alpha1",
+              releaseTag: $releaseTag,
+              controlPlaneAPI: "kontext.dev/v1alpha1",
+              images: sort_by(.name)
+            }' image-metadata/*.json >image-digests.json
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          flags=()
+          if [[ "${VERSION}" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "Kontext ${VERSION}" \
+            --notes "Versioned Kontext images for linux/amd64 and linux/arm64. See image-digests.json for immutable references. This release serves the kontext.dev/v1alpha1 API." \
+            "${flags[@]}" \
+            image-digests.json

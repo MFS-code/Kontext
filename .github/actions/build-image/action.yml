@@ -27,6 +27,10 @@ inputs:
     description: Optional comma-delimited target platforms
     required: false
     default: ""
+  labels:
+    description: Optional newline-delimited OCI image labels
+    required: false
+    default: ""
 
 outputs:
   digest:
@@ -45,5 +49,6 @@ runs:
         load: ${{ inputs.load }}
         push: ${{ inputs.push }}
         platforms: ${{ inputs.platforms }}
+        labels: ${{ inputs.labels }}
         cache-from: type=gha,scope=${{ inputs.cache-scope }}
         cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope }}
