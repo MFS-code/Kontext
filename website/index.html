@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontext — agents are workloads</title>
+<meta name="description" content="Kontext is a Kubernetes-native control plane for running AI agents as production workloads.">
+<link rel="canonical" href="https://kontext.run/">
+<meta name="theme-color" content="#fcfbf8">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Kontext">
+<meta property="og:url" content="https://kontext.run/">
+<meta property="og:title" content="Kontext — agents are workloads">
+<meta property="og:description" content="A Kubernetes control plane for AI agents. Apply an AgentRun, watch runtime logs, read .status.result.">
+<meta property="og:image" content="https://kontext.run/favicon.svg">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Kontext — agents are workloads">
+<meta name="twitter:description" content="A Kubernetes control plane for AI agents. Apply an AgentRun, watch runtime logs, read .status.result.">
+<meta name="twitter:image" content="https://kontext.run/favicon.svg">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main>
+  <h1><a class="title" href="/">kontext</a></h1>
+
+  <p class="tagline">Agents are workloads</p>
+
+  <p class="lede">
+    Kontext is a Kubernetes control plane for AI agents.
+    An <strong>Agent</strong> is a custom resource reconciled into real Pods:
+    apply it, watch runtime logs, read the result. No new platform to learn.
+  </p>
+
+  <pre class="terminal"><span class="tok-key">apiVersion</span>: <span class="tok-str">kontext.dev/v1alpha1</span>
+<span class="tok-key">kind</span>: <span class="tok-str">AgentRun</span>
+<span class="tok-key">metadata</span>:
+  <span class="tok-key">name</span>: <span class="tok-str">review</span>
+<span class="tok-key">spec</span>:
+  <span class="tok-key">goal</span>: <span class="tok-str">"Summarize the failure modes in this release"</span>
+  <span class="tok-key">runtime</span>:
+    <span class="tok-key">image</span>: <span class="tok-str">ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1</span>
+
+<span class="tok-prompt">$</span> <span class="tok-cmd">kubectl</span> apply -f run.yaml
+<span class="tok-prompt">$</span> <span class="tok-cmd">kubectl</span> logs -f run-review
+<span class="tok-prompt">$</span> <span class="tok-cmd">kubectl</span> get agentrun review \
+    -o jsonpath=<span class="tok-str">'{.status.result}'</span></pre>
+
+  <p class="hint">
+    alpha ·
+    <a href="https://docs.kontext.run/docs/quickstart">install without cloning</a>
+    · <a href="https://docs.kontext.run">docs</a>
+  </p>
+
+  <section>
+    <h2>Why Kubernetes</h2>
+    <p>
+      Scheduling, secrets, RBAC, budgets, logs, restarts: agents need what
+      Kubernetes already does. Kontext adds two resources, <code>Agent</code> and
+      <code>AgentRun</code>, and leaves the rest to the cluster. Service agents are
+      re-cast automatically when they die. Wallclock budgets are enforced by the
+      controller. Results live in <code>status</code>, queryable like any other object.
+    </p>
+  </section>
+
+  <section>
+    <h2>Bring your own runtime</h2>
+    <p>
+      Any container can be an agent. Ship your own image, or start with the
+      echo and reference runtimes that come with a release.
+    </p>
+  </section>
+
+  <footer>
+    <span>v1alpha1 · MIT</span>
+    <span>
+      <a href="https://docs.kontext.run">docs</a>
+      <a href="https://github.com/MFS-code/Kontext">github</a>
+      <a href="https://github.com/MFS-code/Kontext/blob/main/SUPPORT.md">support</a>
+      <a href="https://github.com/MFS-code/Kontext/blob/main/SECURITY.md">security</a>
+    </span>
+  </footer>
+</main>
+</body>
+</html>

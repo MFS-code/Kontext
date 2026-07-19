@@ -1,3 +1,9 @@
+---
+title: Operations
+description: Alpha support matrix, failure boundaries, identity, secrets, network, budgets, and troubleshooting.
+sidebarTitle: Operations
+---
+
 # Alpha operations and support
 
 This document is the operational contract for the Kontext public alpha. It

@@ -47,7 +47,8 @@ jobs:
       KONTEXT_PROVIDER: ${{ inputs.provider }}
       KONTEXT_MODEL: ${{ inputs.model }}
       KONTEXT_PROVIDER_ENDPOINT: ${{ inputs.endpoint }}
-      KONTEXT_ACCEPTANCE_RECORD: ${{ runner.temp }}/provider-evals/acceptance.json
+      # runner.* is unavailable in job-level env; keep the record under the workspace.
+      KONTEXT_ACCEPTANCE_RECORD: ${{ github.workspace }}/.provider-evals/acceptance.json
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

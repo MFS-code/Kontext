@@ -1,3 +1,9 @@
+---
+title: Releases
+description: Version tags, GHCR images, digest-pinned install.yaml, upgrades, and uninstall.
+sidebarTitle: Releases
+---
+
 # Release and image versioning
 
 Kontext releases use SemVer-compatible git tags:

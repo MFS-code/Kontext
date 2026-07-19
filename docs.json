@@ -1,0 +1,110 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Kontext",
+  "theme": "mint",
+  "description": "Kubernetes-native control plane for running AI agents as production workloads.",
+  "colors": {
+    "primary": "#1a1c1a",
+    "light": "#4a4d4a",
+    "dark": "#fcfbf8"
+  },
+  "appearance": {
+    "default": "light",
+    "strict": true
+  },
+  "logo": {
+    "light": "/images/logo.svg",
+    "href": "https://kontext.run"
+  },
+  "favicon": "/images/favicon.svg",
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/MFS-code/Kontext"
+      },
+      {
+        "label": "Website",
+        "href": "https://kontext.run"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Quickstart",
+      "href": "/docs/quickstart"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/MFS-code/Kontext"
+    },
+    "links": [
+      {
+        "header": "Product",
+        "items": [
+          {
+            "label": "Website",
+            "href": "https://kontext.run"
+          },
+          {
+            "label": "Releases",
+            "href": "https://github.com/MFS-code/Kontext/releases"
+          }
+        ]
+      },
+      {
+        "header": "Project",
+        "items": [
+          {
+            "label": "Support",
+            "href": "https://github.com/MFS-code/Kontext/blob/main/SUPPORT.md"
+          },
+          {
+            "label": "Security",
+            "href": "https://github.com/MFS-code/Kontext/blob/main/SECURITY.md"
+          },
+          {
+            "label": "Contributing",
+            "href": "https://github.com/MFS-code/Kontext/blob/main/CONTRIBUTING.md"
+          }
+        ]
+      }
+    ]
+  },
+  "seo": {
+    "metatags": {
+      "og:site_name": "Kontext Docs",
+      "og:type": "website"
+    },
+    "indexing": "navigable"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": [
+          "docs/index",
+          "docs/quickstart",
+          "docs/resources",
+          "docs/service-workload"
+        ]
+      },
+      {
+        "group": "Operate",
+        "pages": [
+          "docs/operations",
+          "docs/releases",
+          "docs/runtimes",
+          "docs/evals"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "SPEC",
+          "docs/when-not-to-use-agents"
+        ]
+      }
+    ]
+  }
+}
