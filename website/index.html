@@ -12,9 +12,11 @@
 <meta property="og:url" content="https://kontext.run/">
 <meta property="og:title" content="Kontext — agents are workloads">
 <meta property="og:description" content="A Kubernetes control plane for AI agents. Apply an AgentRun, watch runtime logs, read .status.result.">
+<meta property="og:image" content="https://kontext.run/favicon.svg">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Kontext — agents are workloads">
 <meta name="twitter:description" content="A Kubernetes control plane for AI agents. Apply an AgentRun, watch runtime logs, read .status.result.">
+<meta name="twitter:image" content="https://kontext.run/favicon.svg">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/styles.css">
 </head>
@@ -55,7 +57,7 @@ spec:
   provider: echo
   model: echo-model
   runtime:
-    image: ghcr.io/mfs-code/kontext-echo:${VERSION}
+    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1
   budget:
     wallclock: 5m
 

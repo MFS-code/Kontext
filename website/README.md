@@ -68,5 +68,5 @@ Footer and docs site link to repository policies rather than duplicating them:
 - [`SECURITY.md`](https://github.com/MFS-code/Kontext/blob/main/SECURITY.md)
 - [`CONTRIBUTING.md`](https://github.com/MFS-code/Kontext/blob/main/CONTRIBUTING.md)
 
-Those files land with the alpha operations documentation PR when it merges to
-`main`. Until then the GitHub links 404; prefer GitHub Issues for contact.
+Those files are on `main`. Prefer GitHub Issues for contact when unsure
+which channel fits.
