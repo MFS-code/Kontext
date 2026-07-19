@@ -9,7 +9,7 @@ Agents are workloads. Kontext is the Kubernetes-native control plane for running
 ## Decisions locked
 
 - **API model: Option B — `Agent` (definition) + `AgentRun` (execution).** Idiomatic K8s (mirrors `Deployment`/`CronJob` → `Job` → `Pod`). Gives run history + governance for free. See `SPEC.md`.
-- **Language: Go + kubebuilder.** Greenfield operator under `cmd/`, `internal/`, `config/`. Optional runtime images under `runtimes/` (echo, python-anthropic).
+- **Language: Go + kubebuilder.** Greenfield operator under `cmd/`, `internal/`, `config/`. Maintained runtime and support images live under `runtimes/` (echo, reference, reporter); the old Python Anthropic source remains only as an unmaintained migration example.
 - **Scope: MVP.** Prove the thesis and support real external workloads. Out of scope for now: A2A service mesh, `AgentTeam`, vcluster hypothesis-testing, KEDA autoscaling, web dashboard, OperatorHub, multi-provider sprawl.
 - **Delivery:** Milestones are incremental product slices with explicit completion criteria.
 
@@ -37,8 +37,8 @@ Kontext provides generic `Agent` and `AgentRun` primitives. Consumer-specific co
 
 ### M4 — Bring-your-own-runtime hardening (implementation complete)
 - The echo conformance oracle remains keyless and uses the accepted legacy
-  payload during the v1alpha1 transition. The Python Anthropic image is a
-  legacy behavior oracle, not the maintained primary runtime.
+  payload during the v1alpha1 transition. The Python Anthropic source is an
+  unmaintained, non-conformant migration example and is not published.
 - Versioned results, the reusable reporter, and optional stdout capture support existing Linux images with explicit commands.
 - The maintained Go reference runtime has a provider-neutral core, deterministic fake-provider path, and direct Anthropic and OpenAI-compatible HTTP transports.
 - The maintained runtime has a bounded provider-neutral loop with allowlisted knowledge, Kubernetes-read, and shell tools.

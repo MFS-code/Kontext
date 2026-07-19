@@ -304,7 +304,8 @@ user and security context remain unchanged.
 `runtimes/echo` is the deterministic control-plane conformance oracle. During
 the v1alpha1 transition it intentionally writes the legacy termination payload
 documented above. `runtimes/reference` is the maintained model-backed runtime.
-`runtimes/python-anthropic` is retained only as a legacy behavior oracle.
+`runtimes/python-anthropic` is retained only as an unmaintained source-level
+migration example; it does not conform to this contract and is not published.
 Arbitrary conforming images remain supported and need not use any of these
 implementations.
 
