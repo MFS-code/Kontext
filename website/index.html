@@ -24,7 +24,7 @@
 <main>
   <h1><a class="title" href="/">kontext</a></h1>
 
-  <p class="tagline">Agents are workloads.</p>
+  <p class="tagline">Agents are workloads</p>
 
   <p class="lede">
     Kontext is a Kubernetes control plane for AI agents.
@@ -32,19 +32,19 @@
     apply it, watch runtime logs, read the result. No new platform to learn.
   </p>
 
-  <pre>apiVersion: kontext.dev/v1alpha1
-kind: AgentRun
-metadata:
-  name: review
-spec:
-  goal: "Summarize the failure modes in this release"
-  runtime:
-    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1
+  <pre class="terminal"><span class="tok-key">apiVersion</span>: <span class="tok-str">kontext.dev/v1alpha1</span>
+<span class="tok-key">kind</span>: <span class="tok-str">AgentRun</span>
+<span class="tok-key">metadata</span>:
+  <span class="tok-key">name</span>: <span class="tok-str">review</span>
+<span class="tok-key">spec</span>:
+  <span class="tok-key">goal</span>: <span class="tok-str">"Summarize the failure modes in this release"</span>
+  <span class="tok-key">runtime</span>:
+    <span class="tok-key">image</span>: <span class="tok-str">ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1</span>
 
-<b>$</b> kubectl apply -f run.yaml
-<b>$</b> kubectl logs -f run-review
-<b>$</b> kubectl get agentrun review \
-    -o jsonpath='{.status.result}'</pre>
+<span class="tok-prompt">$</span> <span class="tok-cmd">kubectl</span> apply -f run.yaml
+<span class="tok-prompt">$</span> <span class="tok-cmd">kubectl</span> logs -f run-review
+<span class="tok-prompt">$</span> <span class="tok-cmd">kubectl</span> get agentrun review \
+    -o jsonpath=<span class="tok-str">'{.status.result}'</span></pre>
 
   <p class="hint">
     alpha ·

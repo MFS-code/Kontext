@@ -6,6 +6,11 @@
   --code-bg: #f4f3ee;
   --accent: #1a1c1a;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* terminal: quiet IDE light palette on warm paper */
+  --tok-prompt: #2f6f55;
+  --tok-cmd: #2a5580;
+  --tok-key: #5a4d78;
+  --tok-str: #8a5a3c;
 }
 
 * { box-sizing: border-box; }
@@ -98,10 +103,26 @@ pre {
   line-height: 1.65;
   margin: 0 0 10px;
   white-space: pre;
+  color: var(--ink);
 }
 
-pre b { color: var(--accent); font-weight: 600; }
-pre i { color: var(--muted); font-style: normal; }
+pre.terminal .tok-prompt {
+  color: var(--tok-prompt);
+  font-weight: 600;
+}
+
+pre.terminal .tok-cmd {
+  color: var(--tok-cmd);
+  font-weight: 600;
+}
+
+pre.terminal .tok-key {
+  color: var(--tok-key);
+}
+
+pre.terminal .tok-str {
+  color: var(--tok-str);
+}
 
 .hint {
   font-family: var(--mono);
