@@ -101,7 +101,7 @@ pre i { color: var(--muted); font-style: normal; }
   font-family: var(--mono);
   font-size: 12px;
   color: var(--muted);
-  margin: 0 0 40px;
+  margin: 0 0 20px;
 }
 
 .hint a { color: var(--accent); text-decoration: none; }
