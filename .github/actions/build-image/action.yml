@@ -1,0 +1,49 @@
+name: Build container image
+description: Build a Kontext image with consistent Buildx caching
+
+inputs:
+  context:
+    description: Docker build context
+    required: true
+  dockerfile:
+    description: Dockerfile path relative to the repository root
+    required: false
+    default: Dockerfile
+  tags:
+    description: Newline-delimited image tags
+    required: true
+  cache-scope:
+    description: GitHub Actions cache scope
+    required: true
+  load:
+    description: Load into the local daemon; must stay false for multi-platform builds
+    required: false
+    default: "false"
+  push:
+    description: Push the build result to its registry
+    required: false
+    default: "false"
+  platforms:
+    description: Optional comma-delimited target platforms
+    required: false
+    default: ""
+
+outputs:
+  digest:
+    description: Image manifest digest
+    value: ${{ steps.build.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - id: build
+      uses: docker/build-push-action@v6
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.dockerfile }}
+        tags: ${{ inputs.tags }}
+        load: ${{ inputs.load }}
+        push: ${{ inputs.push }}
+        platforms: ${{ inputs.platforms }}
+        cache-from: type=gha,scope=${{ inputs.cache-scope }}
+        cache-to: type=gha,mode=max,scope=${{ inputs.cache-scope }}

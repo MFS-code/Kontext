@@ -64,26 +64,22 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build reusable reporter image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          file: runtimes/reporter/Dockerfile
-          push: false
-          load: true
+          dockerfile: runtimes/reporter/Dockerfile
           tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
-          cache-from: type=gha,scope=reporter
-          cache-to: type=gha,mode=max,scope=reporter
+          cache-scope: reporter
+          load: "true"
 
       - name: Build model-agnostic reference runtime image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          file: runtimes/reference/Dockerfile
-          push: false
-          load: true
+          dockerfile: runtimes/reference/Dockerfile
           tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
-          cache-from: type=gha,scope=reference
-          cache-to: type=gha,mode=max,scope=reference
+          cache-scope: reference
+          load: "true"
 
       - name: Smoke test reference runtime execution
         run: |
@@ -132,14 +128,13 @@ jobs:
           [[ "${failure_output}" == *'"outcome":"Failed"'* ]]
 
       - name: Build Anthropic reference runtime image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: runtimes/python-anthropic
-          push: false
-          load: true
+          dockerfile: runtimes/python-anthropic/Dockerfile
           tags: ${{ env.KONTEXT_ANTHROPIC_IMAGE }}
-          cache-from: type=gha,scope=anthropic
-          cache-to: type=gha,mode=max,scope=anthropic
+          cache-scope: anthropic
+          load: "true"
 
   e2e:
     name: Kind e2e
@@ -193,56 +188,48 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build operator image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          push: false
-          load: true
           tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
-          cache-from: type=gha,scope=operator
-          cache-to: type=gha,mode=max,scope=operator
+          cache-scope: operator
+          load: "true"
 
       - name: Build echo runtime image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: runtimes/echo
-          push: false
-          load: true
+          dockerfile: runtimes/echo/Dockerfile
           tags: ${{ env.KONTEXT_ECHO_IMAGE }}
-          cache-from: type=gha,scope=echo
-          cache-to: type=gha,mode=max,scope=echo
+          cache-scope: echo
+          load: "true"
 
       - name: Build reusable reporter image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          file: runtimes/reporter/Dockerfile
-          push: false
-          load: true
+          dockerfile: runtimes/reporter/Dockerfile
           tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
-          cache-from: type=gha,scope=reporter
-          cache-to: type=gha,mode=max,scope=reporter
+          cache-scope: reporter
+          load: "true"
 
       - name: Build model-agnostic reference runtime image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          file: runtimes/reference/Dockerfile
-          push: false
-          load: true
+          dockerfile: runtimes/reference/Dockerfile
           tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
-          cache-from: type=gha,scope=reference
-          cache-to: type=gha,mode=max,scope=reference
+          cache-scope: reference
+          load: "true"
 
       - name: Build stdout-capture fixture image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: runtimes/stdout-fixture
-          push: false
-          load: true
+          dockerfile: runtimes/stdout-fixture/Dockerfile
           tags: ${{ env.KONTEXT_STDOUT_FIXTURE_IMAGE }}
-          cache-from: type=gha,scope=stdout-fixture
-          cache-to: type=gha,mode=max,scope=stdout-fixture
+          cache-scope: stdout-fixture
+          load: "true"
 
       - name: Create kind cluster
         uses: helm/kind-action@v1
@@ -307,36 +294,30 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build operator image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          push: false
-          load: true
           tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
-          cache-from: type=gha,scope=network-policy-operator
-          cache-to: type=gha,mode=max,scope=network-policy-operator
+          cache-scope: network-policy-operator
+          load: "true"
 
       - name: Build reusable reporter image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          file: runtimes/reporter/Dockerfile
-          push: false
-          load: true
+          dockerfile: runtimes/reporter/Dockerfile
           tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
-          cache-from: type=gha,scope=network-policy-reporter
-          cache-to: type=gha,mode=max,scope=network-policy-reporter
+          cache-scope: network-policy-reporter
+          load: "true"
 
       - name: Build model-agnostic reference runtime image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          file: runtimes/reference/Dockerfile
-          push: false
-          load: true
+          dockerfile: runtimes/reference/Dockerfile
           tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
-          cache-from: type=gha,scope=network-policy-reference
-          cache-to: type=gha,mode=max,scope=network-policy-reference
+          cache-scope: network-policy-reference
+          load: "true"
 
       - name: Run Calico NetworkPolicy acceptance
         run: ./scripts/e2e-kind-network-policy.sh

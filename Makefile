@@ -6,6 +6,10 @@ REPORTER_IMG ?= kontext-reporter:dev
 REFERENCE_IMG ?= kontext-reference:dev
 STDOUT_FIXTURE_IMG ?= kontext-stdout-fixture:dev
 
+# Generic image-build inputs. Convenience targets below select these per image.
+DOCKERFILE ?= Dockerfile
+CONTEXT ?= .
+
 # Get the currently used golang version
 GO_VERSION ?= 1.26.5
 
@@ -96,29 +100,34 @@ run: manifests generate fmt vet ## Run a controller from your host.
 
 ##@ Build
 
+.PHONY: docker-build-image
+docker-build-image: ## Build IMAGE from DOCKERFILE and CONTEXT.
+	@test -n "$(IMAGE)" || { echo "IMAGE is required" >&2; exit 2; }
+	docker build -f "$(DOCKERFILE)" -t "$(IMAGE)" "$(CONTEXT)"
+
 .PHONY: docker-build
 docker-build: ## Build docker image for the operator.
-	docker build -t ${IMG} .
+	$(MAKE) docker-build-image IMAGE="$(IMG)" DOCKERFILE="Dockerfile" CONTEXT="."
 
 .PHONY: docker-build-echo
 docker-build-echo: ## Build docker image for the echo runtime.
-	docker build -t ${ECHO_IMG} runtimes/echo
+	$(MAKE) docker-build-image IMAGE="$(ECHO_IMG)" DOCKERFILE="runtimes/echo/Dockerfile" CONTEXT="runtimes/echo"
 
 .PHONY: docker-build-anthropic
 docker-build-anthropic: ## Build docker image for the Anthropic reference runtime.
-	docker build -t ${ANTHROPIC_IMG} runtimes/python-anthropic
+	$(MAKE) docker-build-image IMAGE="$(ANTHROPIC_IMG)" DOCKERFILE="runtimes/python-anthropic/Dockerfile" CONTEXT="runtimes/python-anthropic"
 
 .PHONY: docker-build-reporter
 docker-build-reporter: ## Build the reusable result reporter image.
-	docker build -f runtimes/reporter/Dockerfile -t ${REPORTER_IMG} .
+	$(MAKE) docker-build-image IMAGE="$(REPORTER_IMG)" DOCKERFILE="runtimes/reporter/Dockerfile" CONTEXT="."
 
 .PHONY: docker-build-reference
 docker-build-reference: ## Build the model-agnostic reference runtime image.
-	docker build -f runtimes/reference/Dockerfile -t ${REFERENCE_IMG} .
+	$(MAKE) docker-build-image IMAGE="$(REFERENCE_IMG)" DOCKERFILE="runtimes/reference/Dockerfile" CONTEXT="."
 
 .PHONY: docker-build-stdout-fixture
 docker-build-stdout-fixture: ## Build the generic image used by stdout-capture e2e.
-	docker build -t ${STDOUT_FIXTURE_IMG} runtimes/stdout-fixture
+	$(MAKE) docker-build-image IMAGE="$(STDOUT_FIXTURE_IMG)" DOCKERFILE="runtimes/stdout-fixture/Dockerfile" CONTEXT="runtimes/stdout-fixture"
 
 .PHONY: docker-build-all
 docker-build-all: docker-build docker-build-echo docker-build-anthropic docker-build-reporter docker-build-reference ## Build operator and runtime images.

@@ -71,36 +71,30 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build maintained operator image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          push: false
-          load: true
           tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
-          cache-from: type=gha,scope=provider-acceptance-operator
-          cache-to: type=gha,mode=max,scope=provider-acceptance-operator
+          cache-scope: provider-acceptance-operator
+          load: "true"
 
       - name: Build reusable reporter image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          file: runtimes/reporter/Dockerfile
-          push: false
-          load: true
+          dockerfile: runtimes/reporter/Dockerfile
           tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
-          cache-from: type=gha,scope=provider-acceptance-reporter
-          cache-to: type=gha,mode=max,scope=provider-acceptance-reporter
+          cache-scope: provider-acceptance-reporter
+          load: "true"
 
       - name: Build maintained reference runtime image
-        uses: docker/build-push-action@v6
+        uses: ./.github/actions/build-image
         with:
           context: .
-          file: runtimes/reference/Dockerfile
-          push: false
-          load: true
+          dockerfile: runtimes/reference/Dockerfile
           tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
-          cache-from: type=gha,scope=provider-acceptance-reference
-          cache-to: type=gha,mode=max,scope=provider-acceptance-reference
+          cache-scope: provider-acceptance-reference
+          load: "true"
 
       - name: Create ephemeral kind cluster
         uses: helm/kind-action@v1
