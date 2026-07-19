@@ -253,7 +253,6 @@ scripts/                   kind install + e2e
 | Doc | Purpose |
 |---|---|
 | [`SPEC.md`](SPEC.md) | API and runtime-image contract |
-| [`ROADMAP.md`](ROADMAP.md) | Milestones and locked decisions |
 | [`docs/operations.md`](docs/operations.md) | Alpha support matrix, security boundaries, troubleshooting, and lifecycle |
 | [`docs/releases.md`](docs/releases.md) | Release tags, installation, upgrades, and uninstall |
 | [`docs/runtimes.md`](docs/runtimes.md) | Runtime roles, result paths, static context, and tools |
