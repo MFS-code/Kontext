@@ -4,6 +4,11 @@ A Kubernetes-native control plane for running, governing, and observing AI agent
 
 The thesis: **agents are workloads.** An agent should not live in a screen session or behind a bespoke orchestration service. It should be a resource your cluster understands — created with `kubectl apply`, observed with `kubectl logs -f`, governed by RBAC, budgets, and owner references, and restarted by a controller when it dies.
 
+Public surfaces (after DNS is wired):
+
+- Marketing site: [kontext.run](https://kontext.run)
+- Docs: [docs.kontext.run](https://docs.kontext.run)
+
 After the [quickstart](#quickstart-on-kind) below, this is the whole workflow:
 
 ```bash
@@ -37,7 +42,9 @@ backward-compatible text projection. The full versioned contract is in
 ## Install a tagged release
 
 An existing Kubernetes cluster needs only kubectl and permission to create
-CRDs, cluster-scoped RBAC, a Namespace, and a Deployment:
+CRDs, cluster-scoped RBAC, a Namespace, and a Deployment. The install URL
+requires a matching [GitHub release](https://github.com/MFS-code/Kontext/releases);
+until the first alpha tag is published, use [Quickstart on kind](#quickstart-on-kind).
 
 ```bash
 VERSION=v0.1.0-alpha.1
@@ -50,8 +57,9 @@ kubectl rollout status deployment/controller-manager \
 
 The release manifest pins the operator and trusted reporter images by digest.
 It does not require Docker, kind, or a repository clone. See
-[`docs/releases.md`](docs/releases.md) before upgrading or uninstalling because
-deleting the CRDs also deletes every `Agent` and `AgentRun`.
+[`docs/releases.md`](docs/releases.md) (also on [docs.kontext.run](https://docs.kontext.run/docs/releases))
+before upgrading or uninstalling because deleting the CRDs also deletes every
+`Agent` and `AgentRun`.
 
 Before operating an alpha installation, read the
 [alpha support, security, and troubleshooting contract](docs/operations.md).

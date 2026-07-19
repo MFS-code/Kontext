@@ -1,3 +1,9 @@
+---
+title: API specification
+description: Agent, AgentRun, and runtime-image contract for kontext.dev/v1alpha1.
+sidebarTitle: API spec
+---
+
 # Kontext API Spec (DRAFT — v1alpha1)
 
 > Status: draft for review. This contract keeps Kontext a **general** agent runtime. Features that require application-specific vocabulary or behavior belong in the consumer's runtime image, not the control plane.

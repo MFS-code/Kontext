@@ -54,3 +54,7 @@ vendor/
 
 # Local development files
 AGENTS.md
+
+# Local Node tooling when previewing Mintlify docs
+node_modules/
+

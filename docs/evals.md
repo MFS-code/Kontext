@@ -1,3 +1,9 @@
+---
+title: Evaluations
+description: How kontext-eval grades AgentRuns outside the agent Pod.
+sidebarTitle: Evaluations
+---
+
 # Evaluations
 
 Evaluations run outside agent Pods. `kontext-eval` creates ordinary

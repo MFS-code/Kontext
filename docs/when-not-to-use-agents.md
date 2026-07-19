@@ -1,3 +1,9 @@
+---
+title: When not to use agents
+description: Prefer deterministic Jobs and scripts when model judgment is not justified.
+sidebarTitle: When not to use agents
+---
+
 # When not to use an agent
 
 Use an agent when the task genuinely needs model judgment over variable input

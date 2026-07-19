@@ -1,3 +1,9 @@
+---
+title: Runtimes
+description: Echo, reference, and bring-your-own runtime roles and result capture paths.
+sidebarTitle: Runtimes
+---
+
 # Runtime choices
 
 Kontext controls Pods; the container controls agent behavior. Choose the
