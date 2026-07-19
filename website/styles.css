@@ -28,7 +28,7 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  padding: 40px 0 0;
+  padding: 32px 0 0;
 }
 
 .brand {
@@ -58,20 +58,20 @@ h1 {
   line-height: 1.1;
   font-weight: 700;
   letter-spacing: -0.03em;
-  margin: 96px 0 8px;
+  margin: 56px 0 6px;
 }
 
 .tagline {
   font-size: 20px;
   font-weight: 550;
   color: var(--ink);
-  margin: 0 0 16px;
+  margin: 0 0 12px;
 }
 
 .lede {
   font-size: 17px;
   color: var(--muted);
-  margin: 0 0 40px;
+  margin: 0 0 28px;
   max-width: 56ch;
 }
 
@@ -84,13 +84,13 @@ pre {
   background: var(--code-bg);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 20px;
+  padding: 16px 18px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   font-family: var(--mono);
   font-size: 13px;
-  line-height: 1.7;
-  margin: 0 0 12px;
+  line-height: 1.65;
+  margin: 0 0 10px;
   white-space: pre;
 }
 
@@ -101,7 +101,7 @@ pre i { color: var(--muted); font-style: normal; }
   font-family: var(--mono);
   font-size: 12px;
   color: var(--muted);
-  margin: 0 0 64px;
+  margin: 0 0 40px;
 }
 
 .hint a { color: var(--accent); text-decoration: none; }
@@ -110,7 +110,7 @@ pre i { color: var(--muted); font-style: normal; }
 
 section {
   border-top: 1px solid var(--line);
-  padding: 32px 0;
+  padding: 22px 0;
 }
 
 section p {
@@ -171,7 +171,7 @@ code {
 
 footer {
   border-top: 1px solid var(--line);
-  padding: 28px 0 48px;
+  padding: 22px 0 40px;
   display: flex;
   justify-content: space-between;
   font-family: var(--mono);
@@ -191,7 +191,7 @@ footer a:focus-visible {
 }
 
 .not-found {
-  padding: 96px 0 64px;
+  padding: 64px 0 48px;
 }
 
 .not-found h1 {
@@ -200,9 +200,9 @@ footer a:focus-visible {
 }
 
 @media (max-width: 480px) {
-  h1 { margin-top: 64px; font-size: 42px; }
+  h1 { margin-top: 40px; font-size: 42px; }
   .tagline { font-size: 18px; }
-  pre { font-size: 12px; padding: 16px; }
+  pre { font-size: 12px; padding: 14px; }
   footer { flex-direction: column; gap: 12px; }
   footer a { margin: 0 16px 0 0; }
   nav a { margin-left: 14px; }
