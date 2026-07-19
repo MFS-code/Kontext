@@ -1,0 +1,70 @@
+name: Feature request
+description: Propose a general control-plane or maintained-runtime capability
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Kontext must remain general. Consumer-specific workflows belong in runtime images or external orchestration.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the concrete user or operator problem
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current workaround
+      description: Explain how this is handled today
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe observable behavior without prescribing an implementation
+    validations:
+      required: true
+
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Likely owner
+      options:
+        - Kubernetes API or controller
+        - Pod construction or policy
+        - Maintained reference runtime
+        - Release, installation, or operations
+        - External runtime or consumer
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: generality
+    attributes:
+      label: Why this belongs in Kontext
+      description: Explain why the capability is useful beyond one provider, runtime, or consumer
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and security impact
+      description: Note API, upgrade, RBAC, identity, network, or data-retention effects
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and the roadmap.
+          required: true
+        - label: I considered whether this belongs in a runtime image or external orchestrator instead.
+          required: true
