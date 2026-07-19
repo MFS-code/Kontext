@@ -53,6 +53,9 @@ It does not require Docker, kind, or a repository clone. See
 [`docs/releases.md`](docs/releases.md) before upgrading or uninstalling because
 deleting the CRDs also deletes every `Agent` and `AgentRun`.
 
+Before operating an alpha installation, read the
+[alpha support, security, and troubleshooting contract](docs/operations.md).
+
 ## Quickstart on kind
 
 Requires Docker, [kind](https://kind.sigs.k8s.io/), and kubectl.
@@ -197,6 +200,13 @@ may intentionally omit `budget.wallclock`.
 - **Immutable run specs** — an `AgentRun` snapshots its configuration at creation, so history doesn't drift when the `Agent` changes.
 - **Standard lifecycle** — owner references give you GC cascade, conditions record transitions, and `kubectl` is the debugging surface.
 
+## Contributing and support
+
+- Read [SUPPORT.md](SUPPORT.md) before opening an issue.
+- Report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
+- Development and pull request guidance lives in
+  [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Development
 
 ```bash
@@ -236,17 +246,23 @@ scripts/                   kind install + e2e
 |---|---|
 | [`SPEC.md`](SPEC.md) | API and runtime-image contract |
 | [`ROADMAP.md`](ROADMAP.md) | Milestones and locked decisions |
+| [`docs/operations.md`](docs/operations.md) | Alpha support matrix, security boundaries, troubleshooting, and lifecycle |
+| [`docs/releases.md`](docs/releases.md) | Release tags, installation, upgrades, and uninstall |
 | [`docs/runtimes.md`](docs/runtimes.md) | Runtime roles, result paths, static context, and tools |
 | [`docs/evals.md`](docs/evals.md) | Deterministic evals and provider acceptance records |
-| [`docs/operations.md`](docs/operations.md) | Infrastructure dependencies and failure modes |
 | [`docs/when-not-to-use-agents.md`](docs/when-not-to-use-agents.md) | Choosing a deterministic Job or script instead |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Development and pull request workflow |
+| [`SECURITY.md`](SECURITY.md) | Supported versions and private vulnerability reporting |
+| [`SUPPORT.md`](SUPPORT.md) | Alpha support scope and useful bug reports |
 | [`DEPRECATED.md`](DEPRECATED.md) | The earlier Python prototype, preserved on `deprecated/hackathon-python` |
 
 ## Status
 
 `v1alpha1` is alpha on purpose: the API shape is allowed to evolve. `Service` mode and standalone `AgentRun`s are implemented and covered by envtest and kind e2e; `Task` and `Scheduled` modes exist in the schema but are not reconciled yet.
 
-Publishing immutable versioned images remains separate release work.
+No public alpha tag has been published yet. The release workflow publishes and
+verifies versioned images and installation artifacts when a version tag is
+pushed from `main`.
 
 ## License
 

@@ -1,0 +1,104 @@
+name: Bug report
+description: Report reproducible incorrect behavior in a supported alpha path
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read `SUPPORT.md` and `docs/operations.md` first. Do not include Secrets, credentials, private provider output, or unredacted internal addresses.
+
+  - type: input
+    id: version
+    attributes:
+      label: Kontext version
+      description: Release tag or commit SHA
+      placeholder: v0.1.0-alpha.1
+    validations:
+      required: true
+
+  - type: input
+    id: kubernetes
+    attributes:
+      label: Kubernetes environment
+      description: Distribution and server version
+      placeholder: kind with Kubernetes v1.32.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Node architecture
+      options:
+        - linux/amd64
+        - linux/arm64
+        - Mixed
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - GitHub release install.yaml
+        - Local kind workflow
+        - Source Kustomize overlay
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: resource
+    attributes:
+      label: Resource and mode
+      description: State whether this is a standalone AgentRun or an Agent mode
+      placeholder: standalone AgentRun
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include phase, conditions, and status message when relevant
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide minimal commands and a sanitized manifest
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Include relevant events, controller logs, runtime logs, and Pod state
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: I removed credentials and private data.
+          required: true
+        - label: This uses a supported path listed in docs/operations.md, or I identified the unsupported path clearly.
+          required: true

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Support guide
+    url: https://github.com/MFS-code/Kontext/blob/main/SUPPORT.md
+    about: Read the alpha support scope and reporting guidance
+  - name: Private security report
+    url: https://github.com/MFS-code/Kontext/security/advisories/new
+    about: Report vulnerabilities without opening a public issue
