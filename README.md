@@ -49,7 +49,9 @@ kubectl rollout status deployment/controller-manager \
 ```
 
 The release manifest pins the operator and trusted reporter images by digest.
-It does not require Docker, kind, or a repository clone.
+It does not require Docker, kind, or a repository clone. See
+[`docs/releases.md`](docs/releases.md) before upgrading or uninstalling because
+deleting the CRDs also deletes every `Agent` and `AgentRun`.
 
 ## Quickstart on kind
 
