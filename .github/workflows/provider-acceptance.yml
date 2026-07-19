@@ -42,6 +42,7 @@ jobs:
       KONTEXT_ACCEPTANCE_NAMESPACE: provider-acceptance
       KONTEXT_ACCEPTANCE_SCENARIO: ${{ inputs.scenario }}
       KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
+      KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
       KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
       KONTEXT_PROVIDER: ${{ inputs.provider }}
       KONTEXT_MODEL: ${{ inputs.model }}
@@ -79,6 +80,17 @@ jobs:
           cache-from: type=gha,scope=provider-acceptance-operator
           cache-to: type=gha,mode=max,scope=provider-acceptance-operator
 
+      - name: Build reusable reporter image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runtimes/reporter/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
+          cache-from: type=gha,scope=provider-acceptance-reporter
+          cache-to: type=gha,mode=max,scope=provider-acceptance-reporter
+
       - name: Build maintained reference runtime image
         uses: docker/build-push-action@v6
         with:
@@ -99,11 +111,12 @@ jobs:
       - name: Load maintained images
         run: |
           kind load docker-image "${KONTEXT_OPERATOR_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+          kind load docker-image "${KONTEXT_REPORTER_IMAGE}" --name "${KIND_CLUSTER_NAME}"
           kind load docker-image "${KONTEXT_REFERENCE_IMAGE}" --name "${KIND_CLUSTER_NAME}"
 
       - name: Install maintained operator
         run: |
-          kubectl apply -k config/default
+          kubectl apply -k config/overlays/dev
           kubectl rollout status deployment/controller-manager \
             --namespace kontext-system \
             --timeout=120s
