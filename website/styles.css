@@ -26,7 +26,7 @@ main {
 
 header {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: baseline;
   padding: 32px 0 0;
 }
@@ -47,10 +47,6 @@ nav a {
   margin-left: 20px;
 }
 
-nav a:first-child {
-  margin-left: 0;
-}
-
 nav a:hover,
 nav a:focus-visible {
   color: var(--ink);
@@ -62,7 +58,7 @@ h1 {
   line-height: 1.1;
   font-weight: 700;
   letter-spacing: 0;
-  margin: 56px 0 6px;
+  margin: 36px 0 6px;
 }
 
 h1 .title {
@@ -81,7 +77,7 @@ h1 .title {
 .lede {
   font-size: 17px;
   color: var(--muted);
-  margin: 0 0 28px;
+  margin: 0 0 22px;
   max-width: 56ch;
 }
 
@@ -120,7 +116,7 @@ pre i { color: var(--muted); font-style: normal; }
 
 section {
   border-top: 1px solid var(--line);
-  padding: 22px 0;
+  padding: 18px 0;
 }
 
 section p {
@@ -181,7 +177,7 @@ code {
 
 footer {
   border-top: 1px solid var(--line);
-  padding: 22px 0 40px;
+  padding: 18px 0 32px;
   display: flex;
   justify-content: space-between;
   font-family: var(--mono);
@@ -210,7 +206,7 @@ footer a:focus-visible {
 }
 
 @media (max-width: 480px) {
-  h1 { margin-top: 40px; font-size: 42px; }
+  h1 { margin-top: 28px; font-size: 42px; }
   .tagline { font-size: 18px; }
   pre { font-size: 12px; padding: 14px; }
   footer { flex-direction: column; gap: 12px; }
