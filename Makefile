@@ -114,7 +114,7 @@ docker-build-echo: ## Build docker image for the echo runtime.
 	$(MAKE) docker-build-image IMAGE="$(ECHO_IMG)" DOCKERFILE="runtimes/echo/Dockerfile" CONTEXT="runtimes/echo"
 
 .PHONY: docker-build-anthropic
-docker-build-anthropic: ## Build docker image for the Anthropic reference runtime.
+docker-build-anthropic: ## Build the unmaintained legacy Python example.
 	$(MAKE) docker-build-image IMAGE="$(ANTHROPIC_IMG)" DOCKERFILE="runtimes/python-anthropic/Dockerfile" CONTEXT="runtimes/python-anthropic"
 
 .PHONY: docker-build-reporter
@@ -130,7 +130,7 @@ docker-build-stdout-fixture: ## Build the generic image used by stdout-capture e
 	$(MAKE) docker-build-image IMAGE="$(STDOUT_FIXTURE_IMG)" DOCKERFILE="runtimes/stdout-fixture/Dockerfile" CONTEXT="runtimes/stdout-fixture"
 
 .PHONY: docker-build-all
-docker-build-all: docker-build docker-build-echo docker-build-anthropic docker-build-reporter docker-build-reference ## Build operator and runtime images.
+docker-build-all: docker-build docker-build-echo docker-build-reporter docker-build-reference ## Build operator and maintained runtime images.
 
 .PHONY: kind-install
 kind-install: docker-build docker-build-echo docker-build-reporter docker-build-reference docker-build-stdout-fixture ## Build kind images and install the operator into kind.

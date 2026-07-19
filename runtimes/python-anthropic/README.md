@@ -1,23 +1,23 @@
-# Legacy python-anthropic behavior oracle
+# Unmaintained Python Anthropic example
 
-This image is retained as a legacy behavior oracle. It is not the maintained
-primary runtime; new provider work and release acceptance target the Go
-`runtimes/reference` image.
+This source is retained only as a migration reference for the original Python
+runtime. It is not maintained, built by CI, or published with Kontext
+releases. New deployments and provider work should use the Go
+[`runtimes/reference`](../reference) image.
 
-It fulfills one `AgentRun` by sending the goal to the Anthropic Messages API
-and reporting through the accepted transition contract (see `SPEC.md`).
+The implementation predates the current runtime contract and intentionally
+preserves incompatible historical behavior:
 
-Contract surface used:
+- it aliases `KONTEXT_MODEL` values instead of treating them as opaque;
+- it invents and enforces a five-minute wallclock default inside the runtime;
+- it writes only the legacy termination payload rather than the versioned
+  result envelope.
 
-- Reads `KONTEXT_GOAL`, `KONTEXT_MODEL`, `KONTEXT_PROVIDER`, `KONTEXT_TOOLS`,
-  `KONTEXT_BUDGET_TOKENS`, `KONTEXT_BUDGET_WALLCLOCK`, `KONTEXT_AGENT_NAME`.
-- Expects `ANTHROPIC_API_KEY` injected from the Agent's `secretRef`.
-- Streams progress to stdout (`kubectl logs -f`).
-- Writes the legacy `{result, tokensUsed, dollarsUsed}` JSON payload to
-  `/dev/termination-log`, which the v1alpha1 controller still parses into
-  `AgentRun.status`.
+Do not use this image as evidence of conformance with [`SPEC.md`](../../SPEC.md).
+The v1alpha1 controller still accepts its legacy result payload solely for
+backward compatibility.
 
-Build:
+For historical investigation, build it explicitly:
 
 ```bash
 docker build -t kontext-runtime-anthropic:dev runtimes/python-anthropic

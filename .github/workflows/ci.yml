@@ -46,14 +46,12 @@ jobs:
       - name: Scan for known Go vulnerabilities
         run: make vulncheck
 
-  # Build optional runtime images independently so Dockerfile breakage is
-  # visible even when a specific image is not exercised by every kind scenario.
+  # Smoke maintained support and runtime images independently before kind.
   image-smoke:
     name: Image smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      KONTEXT_ANTHROPIC_IMAGE: kontext-runtime-anthropic:dev
       KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
       KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
     steps:
@@ -124,14 +122,6 @@ jobs:
           set -e
           [[ "${failure_code}" -eq 1 ]]
           [[ "${failure_output}" == *'"outcome":"Failed"'* ]]
-
-      - name: Build Anthropic reference runtime image
-        uses: ./.github/actions/build-image
-        with:
-          context: runtimes/python-anthropic
-          dockerfile: runtimes/python-anthropic/Dockerfile
-          tags: ${{ env.KONTEXT_ANTHROPIC_IMAGE }}
-          cache-scope: anthropic
 
   e2e:
     name: Kind e2e
