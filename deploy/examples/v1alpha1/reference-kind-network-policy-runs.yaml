@@ -10,7 +10,7 @@ spec:
   tools: [shell]
   serviceAccountName: reference-network-reader
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -50,7 +50,7 @@ spec:
   tools: [kubernetes_read]
   serviceAccountName: reference-network-reader
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:

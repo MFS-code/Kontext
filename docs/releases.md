@@ -36,6 +36,29 @@ GitHub release is created if anonymous access cannot be verified.
 The unmaintained `runtimes/python-anthropic` migration example is not
 published.
 
+## Install
+
+Install a tagged release on an existing cluster without cloning the repository
+or building images:
+
+```bash
+VERSION=v0.1.0-alpha.1
+kubectl apply -f \
+  "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml"
+```
+
+`install.yaml` contains the CRDs, Namespace, RBAC, and controller Deployment.
+Its operator and trusted reporter references use the immutable digests recorded
+in `image-digests.json`, while `app.kubernetes.io/version` and
+`kontext.dev/release` retain the human-readable release tag.
+
+Given a downloaded digest manifest, the release artifact is reproducible from
+the tagged source:
+
+```bash
+make release-manifest IMAGE_DIGESTS=image-digests.json
+```
+
 ## API relationship
 
 The git tag, GitHub release, and image tags identify one version of the Kontext

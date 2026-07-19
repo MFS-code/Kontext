@@ -5,6 +5,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_NAMESPACE="kontext-e2e-tools"
+APPLY_EXAMPLE="${ROOT_DIR}/scripts/apply-example.sh"
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -90,7 +91,7 @@ echo "==> cleaning previous e2e resources"
 cleanup_e2e_resources
 
 echo "==> applying standalone echo task run"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/echo-task-run.yaml"
+"${APPLY_EXAMPLE}" echo-task-run.yaml
 
 echo "==> waiting for AgentRun to succeed"
 phase=""
@@ -115,7 +116,7 @@ fi
 echo "task result: ${result}"
 
 echo "==> verifying plain image logs without structured result capture"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/plain-logs-run.yaml"
+"${APPLY_EXAMPLE}" plain-logs-run.yaml
 wait_for_run_phase plain-logs Succeeded
 plain_result="$(kubectl get agentrun plain-logs -o jsonpath='{.status.result}')"
 plain_output="$(kubectl get agentrun plain-logs -o jsonpath='{.status.output}')"
@@ -132,7 +133,7 @@ if [[ -n "${plain_result}" ||
 fi
 
 echo "==> verifying a native versioned termination envelope"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/native-envelope-run.yaml"
+"${APPLY_EXAMPLE}" native-envelope-run.yaml
 wait_for_run_phase native-envelope Succeeded
 native_result="$(kubectl get agentrun native-envelope -o jsonpath='{.status.result}')"
 native_input_tokens="$(
@@ -153,7 +154,7 @@ if [[ "${native_result}" != '{"answer":"native"}' ||
 fi
 
 echo "==> verifying last-line capture from an unmodified image"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/stdout-last-line-run.yaml"
+"${APPLY_EXAMPLE}" stdout-last-line-run.yaml
 wait_for_run_phase stdout-last-line Succeeded
 last_line_result="$(kubectl get agentrun stdout-last-line -o jsonpath='{.status.result}')"
 last_line_media_type="$(kubectl get agentrun stdout-last-line -o jsonpath='{.status.output.mediaType}')"
@@ -172,7 +173,7 @@ if [[ "${last_line_logs}" != *"ordinary workload log"* ]]; then
 fi
 
 echo "==> verifying structured envelope capture"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/stdout-envelope-run.yaml"
+"${APPLY_EXAMPLE}" stdout-envelope-run.yaml
 wait_for_run_phase stdout-envelope Succeeded
 structured_result="$(kubectl get agentrun stdout-envelope -o jsonpath='{.status.result}')"
 input_tokens="$(kubectl get agentrun stdout-envelope -o jsonpath='{.status.usage.inputTokens}')"
@@ -187,7 +188,7 @@ if [[ "${input_tokens}" != "0" || "${output_tokens}" != "7" ]]; then
 fi
 
 echo "==> verifying non-zero child exit propagation"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/stdout-failure-run.yaml"
+"${APPLY_EXAMPLE}" stdout-failure-run.yaml
 wait_for_run_phase stdout-failure Failed
 failure_exit_code="$(
   kubectl get pod run-stdout-failure \
@@ -199,7 +200,7 @@ if [[ "${failure_exit_code}" != "7" ]]; then
 fi
 
 echo "==> verifying SIGTERM forwarding to the child"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/stdout-signal-run.yaml"
+"${APPLY_EXAMPLE}" stdout-signal-run.yaml
 for _ in $(seq 1 60); do
   signal_phase="$(kubectl get pod run-stdout-signal -o jsonpath='{.status.phase}' 2>/dev/null || true)"
   if [[ "${signal_phase}" == "Running" ]]; then
@@ -220,7 +221,7 @@ if [[ "${signal_result}" != "signal reached child" ]]; then
 fi
 
 echo "==> verifying model-agnostic reference runtime"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/reference-fake-run.yaml"
+"${APPLY_EXAMPLE}" reference-fake-run.yaml
 wait_for_run_phase reference-fake Succeeded
 reference_result="$(kubectl get agentrun reference-fake -o jsonpath='{.status.result}')"
 reference_input_tokens="$(kubectl get agentrun reference-fake -o jsonpath='{.status.usage.inputTokens}')"
@@ -243,7 +244,7 @@ if [[ "${reference_logs}" != *'"apiVersion":"kontext.dev/event/v1alpha1"'* ]]; t
 fi
 
 echo "==> verifying bounded reference-runtime tool loop"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/reference-fake-tool-run.yaml"
+"${APPLY_EXAMPLE}" reference-fake-tool-run.yaml
 wait_for_run_phase reference-fake-tool Succeeded
 tool_result="$(kubectl get agentrun reference-fake-tool -o jsonpath='{.status.result}')"
 tool_logs="$(kubectl logs run-reference-fake-tool -c runtime)"
@@ -258,7 +259,7 @@ if [[ "${tool_logs}" != *'"type":"tool"'* ||
 fi
 
 echo "==> verifying Kubernetes read policy and restricted shell execution"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/reference-kind-policy-runs.yaml"
+"${APPLY_EXAMPLE}" reference-kind-policy-runs.yaml
 
 wait_for_run_phase reference-kubernetes-pods Succeeded "${TOOLS_NAMESPACE}"
 pods_logs="$(
@@ -347,7 +348,7 @@ if [[ "${wallclock_phase}" != "BudgetExceeded" || -n "${wallclock_pod}" ]]; then
 fi
 
 echo "==> applying service echo agent"
-kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/echo-service-agent.yaml"
+"${APPLY_EXAMPLE}" echo-service-agent.yaml
 
 echo "==> waiting for live service run"
 for _ in $(seq 1 60); do

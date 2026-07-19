@@ -112,7 +112,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: http
-          image: kontext-reference:dev
+          image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
           command: ["/bin/httpd"]
           args: ["-f", "-p", "8080", "-h", "/www"]
           ports:
@@ -176,7 +176,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: http
-          image: kontext-reference:dev
+          image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
           command: ["/bin/httpd"]
           args: ["-f", "-p", "8080", "-h", "/www"]
           ports:

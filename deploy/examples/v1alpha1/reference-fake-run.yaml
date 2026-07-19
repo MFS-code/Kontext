@@ -7,7 +7,7 @@ spec:
   provider: fake
   model: vendor/opaque-model@2026
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
   env:
     - name: KONTEXT_FAKE_SCENARIO
       value: success
