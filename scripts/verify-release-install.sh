@@ -22,7 +22,7 @@ wait_for_run_phase() {
   local name="$1"
   local expected="$2"
   local phase=""
-  for _ in $(seq 1 90); do
+  for _ in $(seq 1 180); do
     phase="$(
       kubectl get agentrun "${name}" \
         -o jsonpath='{.status.phase}' 2>/dev/null || true
@@ -54,11 +54,11 @@ install_release() {
   local reporter_image=""
   operator_image="$(
     kubectl get deployment controller-manager -n kontext-system \
-      -o jsonpath='{.spec.template.spec.containers[0].image}'
+      -o jsonpath='{.spec.template.spec.containers[?(@.name=="manager")].image}'
   )"
   reporter_image="$(
     kubectl get deployment controller-manager -n kontext-system \
-      -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="KONTEXT_REPORTER_IMAGE")].value}'
+      -o jsonpath='{.spec.template.spec.containers[?(@.name=="manager")].env[?(@.name=="KONTEXT_REPORTER_IMAGE")].value}'
   )"
   if [[ "${operator_image}" != *@sha256:* || "${reporter_image}" != *@sha256:* ]]; then
     echo "install manifest did not deploy digest-pinned images" >&2

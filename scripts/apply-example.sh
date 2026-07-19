@@ -84,7 +84,8 @@ if [[ -n "${KONTEXT_RELEASE_TAG:-}" ]]; then
   core='v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
   prerelease_id='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
   release_pattern="^${core}(-${prerelease_id}(\.${prerelease_id})*)?$"
-  if [[ ! "${KONTEXT_RELEASE_TAG}" =~ ${release_pattern} ]]; then
+  if [[ ! "${KONTEXT_RELEASE_TAG}" =~ ${release_pattern} ||
+    "${#KONTEXT_RELEASE_TAG}" -gt 63 ]]; then
     echo "invalid KONTEXT_RELEASE_TAG: ${KONTEXT_RELEASE_TAG}" >&2
     exit 2
   fi
