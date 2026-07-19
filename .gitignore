@@ -51,6 +51,7 @@ vendor/
 
 # CI diagnostics
 .ci-diagnostics/
+.provider-evals/
 
 # Local development files
 AGENTS.md
