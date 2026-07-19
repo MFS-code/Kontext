@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kontext — agents are workloads</title>
-<meta name="description" content="Kontext is a Kubernetes-native control plane for running AI agents as production workloads. Install from a release manifest, apply an AgentRun, read .status.result.">
+<meta name="description" content="Kontext runs AI agents as Kubernetes workloads. Apply an Agent, watch the Pod, read the result.">
 <link rel="canonical" href="https://kontext.run/">
 <meta name="theme-color" content="#fcfbf8">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Kontext">
 <meta property="og:url" content="https://kontext.run/">
 <meta property="og:title" content="Kontext — agents are workloads">
-<meta property="og:description" content="A Kubernetes control plane for AI agents. Apply an AgentRun, watch runtime logs, read .status.result.">
+<meta property="og:description" content="AI agents as Kubernetes workloads. Apply, watch, read the result.">
 <meta property="og:image" content="https://kontext.run/favicon.svg">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Kontext — agents are workloads">
-<meta name="twitter:description" content="A Kubernetes control plane for AI agents. Apply an AgentRun, watch runtime logs, read .status.result.">
+<meta name="twitter:description" content="AI agents as Kubernetes workloads. Apply, watch, read the result.">
 <meta name="twitter:image" content="https://kontext.run/favicon.svg">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/styles.css">
@@ -35,92 +35,48 @@
   <p class="tagline">Agents are workloads.</p>
 
   <p class="lede">
-    Kontext is a Kubernetes control plane for AI agents.
-    An <strong>Agent</strong> is a custom resource reconciled into real Pods:
-    apply it, watch runtime logs, read the result. No new platform to learn.
+    Run AI agents on Kubernetes like any other workload:
+    apply a resource, follow the Pod, read the result.
   </p>
 
-  <pre><i># install a published release (no clone, no image build)</i>
-VERSION=v0.1.0-alpha.1
-<b>$</b> kubectl apply -f \
-    "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml"
-<b>$</b> kubectl rollout status deployment/controller-manager \
-    -n kontext-system --timeout=120s
-
-<i># run.yaml — keyless echo runtime</i>
-apiVersion: kontext.dev/v1alpha1
+  <pre>apiVersion: kontext.dev/v1alpha1
 kind: AgentRun
 metadata:
   name: review
 spec:
   goal: "Summarize the failure modes in this release"
-  provider: echo
-  model: echo-model
   runtime:
     image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1
-  budget:
-    wallclock: 5m
 
 <b>$</b> kubectl apply -f run.yaml
-<b>$</b> kubectl logs -f run-review                 <i># runtime logs, live</i>
+<b>$</b> kubectl logs -f run-review
 <b>$</b> kubectl get agentrun review \
-    -o jsonpath='{.status.result}'           <i># the answer</i></pre>
+    -o jsonpath='{.status.result}'</pre>
 
   <p class="hint">
-    alpha · requires a
-    <a href="https://github.com/MFS-code/Kontext/releases">published GitHub release</a>
-    · <a href="https://docs.kontext.run/docs/quickstart">docs</a>
+    alpha ·
+    <a href="https://docs.kontext.run/docs/quickstart">install without cloning</a>
+    · <a href="https://docs.kontext.run">docs</a>
   </p>
 
   <section>
-    <h2>Why Kubernetes</h2>
+    <h2>Same cluster, same tools</h2>
     <p>
-      Scheduling, secrets, RBAC, budgets, logs, restarts: agents need what
-      Kubernetes already does. Kontext adds two resources, <code>Agent</code> and
-      <code>AgentRun</code>, and leaves the rest to the cluster. Service agents are
-      re-cast automatically when they die. Wallclock budgets are enforced by the
-      controller. Results live in <code>status</code>, queryable like any other object.
+      Secrets, RBAC, logs, and restarts stay in Kubernetes.
+      Kontext adds <code>Agent</code> and <code>AgentRun</code> — nothing else to operate.
     </p>
   </section>
 
   <section>
     <h2>Bring your own runtime</h2>
     <p>
-      Any container image that reads a few <code>KONTEXT_*</code> env vars and
-      optionally writes a result envelope is a valid agent. Kontext never inspects
-      what the agent does beyond that I/O boundary. Releases ship a keyless echo
-      runtime for control-plane checks and a maintained Go reference runtime for
-      model-backed work.
+      Any container can be an agent. Ship your own image, or start with the
+      echo and reference runtimes that come with a release.
     </p>
-  </section>
-
-  <section>
-    <h2>Budgets that mean something</h2>
-    <p>
-      <code>budget.wallclock</code> is enforced by the controller: after expiry the run
-      becomes <code>BudgetExceeded</code> and the Pod is deleted. Token and dollar fields
-      are reported by the runtime when available; they are measurements, not
-      hard stops, unless your runtime enforces them.
-    </p>
-  </section>
-
-  <section>
-    <h2>Alpha boundaries</h2>
-    <p>
-      <code>v1alpha1</code> is unstable on purpose. Matching API version labels are not
-      compatibility guarantees between Kontext releases. Service mode and standalone
-      <code>AgentRun</code>s are implemented; Task and Scheduled modes exist in the schema
-      but are not reconciled yet. Read the release notes before upgrading.
-    </p>
-    <ul>
-      <li><a href="https://docs.kontext.run">Documentation</a></li>
-      <li><a href="https://docs.kontext.run/docs/releases">Release and install contract</a></li>
-      <li><a href="https://github.com/MFS-code/Kontext/blob/main/SPEC.md">API spec</a></li>
-    </ul>
   </section>
 
   <footer>
-    <span>v1alpha1 · MIT license</span>
+    <span>v1alpha1 · MIT</span>
     <span>
       <a href="https://docs.kontext.run">docs</a>
       <a href="https://github.com/MFS-code/Kontext">github</a>
