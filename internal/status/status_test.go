@@ -50,7 +50,7 @@ func TestObservePodMalformedTerminationOnSuccessFails(t *testing.T) {
 					State: corev1.ContainerState{
 						Terminated: &corev1.ContainerStateTerminated{
 							ExitCode: exitCode,
-							Message:  `{"result":"partial",`,
+							Message:  `{"partial":`,
 						},
 					},
 				},
@@ -63,6 +63,12 @@ func TestObservePodMalformedTerminationOnSuccessFails(t *testing.T) {
 	}
 	if observation.Result != "" {
 		t.Fatalf("expected empty result for malformed payload, got %q", observation.Result)
+	}
+	if observation.ExitCode == nil || *observation.ExitCode != 0 {
+		t.Fatalf("expected exit code 0, got %#v", observation.ExitCode)
+	}
+	if !strings.Contains(observation.Message, "termination payload was malformed") {
+		t.Fatalf("expected malformed payload message, got %q", observation.Message)
 	}
 }
 

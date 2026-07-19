@@ -172,6 +172,8 @@ func (r *AgentRunReconciler) enforceWallclock(ctx context.Context, run *kontextv
 
 	limit, parseErr := status.ParseWallclock(run.Spec.Budget.Wallclock)
 	if parseErr != nil {
+		// AgentRun specs are immutable, so an invalid budget cannot become
+		// valid in place; applying a correction creates a new run.
 		_, err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 			setStatusConditions(
 				&next.Conditions,
