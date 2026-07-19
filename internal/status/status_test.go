@@ -13,40 +13,30 @@ import (
 	"github.com/kontext-dev/kontext/internal/status"
 )
 
-func TestParseTerminationMessageJSON(t *testing.T) {
-	payload, err := status.ParseTerminationMessage(`{"result":"done","tokensUsed":42,"dollarsUsed":1.5}`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestObservePodPlainTextTermination(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: podbuilder.RuntimeContainerName,
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+						Message:  "plain answer",
+					},
+				},
+			}},
+		},
 	}
-	if payload.Result != "done" {
-		t.Fatalf("expected result done, got %q", payload.Result)
-	}
-	if payload.Usage == nil || payload.Usage.TotalTokens == nil || *payload.Usage.TotalTokens != 42 {
-		t.Fatalf("expected tokens 42, got %#v", payload.Usage)
-	}
-	if payload.Usage.Dollars == nil || *payload.Usage.Dollars != 1.5 {
-		t.Fatalf("expected dollars 1.5, got %#v", payload.Usage)
-	}
-}
 
-func TestParseTerminationMessagePlainText(t *testing.T) {
-	payload, err := status.ParseTerminationMessage("plain answer")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("expected Succeeded, got %s", observation.Phase)
 	}
-	if payload.Result != "plain answer" {
-		t.Fatalf("expected plain answer, got %q", payload.Result)
+	if observation.Result != "plain answer" {
+		t.Fatalf("expected plain answer, got %q", observation.Result)
 	}
-}
-
-func TestParseTerminationMessageMalformedJSON(t *testing.T) {
-	raw := `{"result":"partial",`
-	payload, err := status.ParseTerminationMessage(raw)
-	if err == nil {
-		t.Fatalf("expected error for malformed JSON payload")
-	}
-	if payload.Result != raw {
-		t.Fatalf("expected raw message preserved as result, got %q", payload.Result)
+	if observation.Output == nil || observation.Output.MediaType != "text/plain" {
+		t.Fatalf("expected text output, got %#v", observation.Output)
 	}
 }
 
@@ -60,7 +50,7 @@ func TestObservePodMalformedTerminationOnSuccessFails(t *testing.T) {
 					State: corev1.ContainerState{
 						Terminated: &corev1.ContainerStateTerminated{
 							ExitCode: exitCode,
-							Message:  `{"result":"partial",`,
+							Message:  `{"partial":`,
 						},
 					},
 				},
@@ -73,6 +63,12 @@ func TestObservePodMalformedTerminationOnSuccessFails(t *testing.T) {
 	}
 	if observation.Result != "" {
 		t.Fatalf("expected empty result for malformed payload, got %q", observation.Result)
+	}
+	if observation.ExitCode == nil || *observation.ExitCode != 0 {
+		t.Fatalf("expected exit code 0, got %#v", observation.ExitCode)
+	}
+	if !strings.Contains(observation.Message, "termination payload was malformed") {
+		t.Fatalf("expected malformed payload message, got %q", observation.Message)
 	}
 }
 
@@ -288,24 +284,22 @@ func TestObservePodLegacyPayloadWithoutMetricsLeavesUsageAbsent(t *testing.T) {
 }
 
 func TestParseWallclock(t *testing.T) {
-	if got := status.ParseWallclock("5m", 30); got != 5*60*1e9 {
-		t.Fatalf("expected 5m, got %v", got)
+	got, err := status.ParseWallclock("5m")
+	if err != nil {
+		t.Fatalf("parse valid wallclock: %v", err)
 	}
-	if got := status.ParseWallclock("", 30); got != 30*1e9 {
-		t.Fatalf("expected default 30s, got %v", got)
+	if got != 5*time.Minute {
+		t.Fatalf("expected 5m, got %v", got)
 	}
 }
 
-func TestParseWallclockDetailedInvalid(t *testing.T) {
-	result := status.ParseWallclockDetailed("not-a-duration", 30)
-	if result.Valid {
-		t.Fatalf("expected invalid wallclock")
+func TestParseWallclockInvalid(t *testing.T) {
+	duration, err := status.ParseWallclock("not-a-duration")
+	if err == nil {
+		t.Fatal("expected invalid wallclock error")
 	}
-	if result.Duration != 30*1e9 {
-		t.Fatalf("expected default duration, got %v", result.Duration)
-	}
-	if result.Warning == "" {
-		t.Fatalf("expected warning message")
+	if duration != 0 {
+		t.Fatalf("invalid wallclock returned duration %s", duration)
 	}
 }
 
@@ -465,35 +459,12 @@ func TestObservePodUnknownPhaseDefaultsPending(t *testing.T) {
 	}
 }
 
-func TestParseTerminationMessageEmpty(t *testing.T) {
-	payload, err := status.ParseTerminationMessage("   ")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestParseWallclockRejectsNonPositive(t *testing.T) {
+	duration, err := status.ParseWallclock("0s")
+	if err == nil {
+		t.Fatal("expected non-positive wallclock error")
 	}
-	if payload.Result != "" || payload.Usage != nil {
-		t.Fatalf("expected empty payload, got %#v", payload)
-	}
-}
-
-func TestParseWallclockDetailedValidDuration(t *testing.T) {
-	result := status.ParseWallclockDetailed("90s", 30)
-	if !result.Valid {
-		t.Fatalf("expected valid result")
-	}
-	if result.Duration != 90*time.Second {
-		t.Fatalf("expected 90s, got %v", result.Duration)
-	}
-	if result.Warning != "" {
-		t.Fatalf("expected no warning, got %q", result.Warning)
-	}
-}
-
-func TestParseWallclockDetailedNonPositive(t *testing.T) {
-	result := status.ParseWallclockDetailed("0s", 30)
-	if result.Valid {
-		t.Fatalf("expected non-positive duration to be invalid")
-	}
-	if result.Duration != 30*time.Second {
-		t.Fatalf("expected default duration, got %v", result.Duration)
+	if duration != 0 {
+		t.Fatalf("non-positive wallclock returned duration %s", duration)
 	}
 }

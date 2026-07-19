@@ -321,7 +321,8 @@ func (r *AgentReconciler) setAgentStatus(
 	requeue bool,
 	updates ...metav1.Condition,
 ) (ctrl.Result, error) {
-	next.Conditions = conditions.Merge(agent.Status.Conditions, updates...)
+	next.Conditions = agent.Status.Conditions
+	setStatusConditions(&next.Conditions, agent.Generation, updates...)
 	if err := patchStatus(ctx, r.Client, agent, func() {
 		agent.Status = next
 	}); err != nil {
