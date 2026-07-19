@@ -3,12 +3,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -25,12 +26,14 @@ import (
 const (
 	defaultBackoffInitial = 5
 	defaultBackoffMax     = 60
+	maxRunSuffix          = int32(1<<31 - 1)
 )
 
 // AgentReconciler reconciles an Agent object.
 type AgentReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
 }
 
 // +kubebuilder:rbac:groups=kontext.dev,resources=agents,verbs=get;list;watch;create;update;patch;delete
@@ -56,8 +59,13 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1alpha1.Agent) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	runs, err := r.observeServiceRuns(ctx, agent)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if agent.Spec.Goal == "" {
-		return r.setAgentStatus(ctx, agent, agent.Status, false, metav1.Condition{
+		return r.setAgentStatus(ctx, agent, runs.status(agent.Generation), false, metav1.Condition{
 			Type:    conditions.Ready,
 			Status:  metav1.ConditionFalse,
 			Reason:  "MissingGoal",
@@ -65,27 +73,12 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 		})
 	}
 
-	currentRun, missingCurrentRun, err := r.getCurrentRun(ctx, agent)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if missingCurrentRun {
-		logger.Info("current service run missing; minting replacement", "agent", agent.Name, "run", agent.Status.CurrentRunName)
-	}
-
-	if currentRun != nil && !status.IsTerminalPhase(currentRun.Status.Phase) {
-		return r.setAgentStatus(ctx, agent, kontextv1alpha1.AgentStatus{
-			CurrentRunName:     currentRun.Name,
-			LastRunName:        agent.Status.LastRunName,
-			RunsCreated:        agent.Status.RunsCreated,
-			Restarts:           agent.Status.Restarts,
-			ObservedGeneration: agent.Generation,
-		}, false, metav1.Condition{
+	if runs.current != nil && !status.IsTerminalPhase(runs.current.Status.Phase) {
+		return r.setAgentStatus(ctx, agent, runs.status(agent.Generation), false, metav1.Condition{
 			Type:    conditions.Ready,
 			Status:  metav1.ConditionTrue,
 			Reason:  "RunActive",
-			Message: fmt.Sprintf("Service run %s is active.", currentRun.Name),
+			Message: fmt.Sprintf("Service run %s is active.", runs.current.Name),
 		}, metav1.Condition{
 			Type:    conditions.Progressing,
 			Status:  metav1.ConditionFalse,
@@ -94,48 +87,43 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 		})
 	}
 
-	if currentRun != nil && status.IsTerminalPhase(currentRun.Status.Phase) {
-		delay := r.backoffDelay(*agent)
-		if since := timeSinceCompletion(currentRun); since < delay {
-			logger.Info("waiting before service recast", "delay", delay-since, "run", currentRun.Name)
+	if runs.current != nil && status.IsTerminalPhase(runs.current.Status.Phase) &&
+		runs.current.Status.CompletionTime != nil {
+		delay := r.backoffDelay(*agent, runs.maxSuffix-1)
+		if since := time.Since(runs.current.Status.CompletionTime.Time); since < delay {
+			logger.Info("waiting before service recast", "delay", delay-since, "run", runs.current.Name)
+			if _, err := r.setAgentStatus(ctx, agent, runs.status(agent.Generation), false); err != nil {
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{RequeueAfter: delay - since}, nil
 		}
 	}
 
-	runName := fmt.Sprintf("%s-%d", agent.Name, agent.Status.RunsCreated+1)
+	if runs.maxSuffix == maxRunSuffix {
+		return ctrl.Result{}, fmt.Errorf("service run suffix exhausted for Agent %s/%s", agent.Namespace, agent.Name)
+	}
+	nextSuffix := runs.maxSuffix + 1
+	runName := fmt.Sprintf("%s-%d", agent.Name, nextSuffix)
 	run := r.buildServiceRun(agent, runName)
 	if err := controllerutil.SetControllerReference(agent, run, r.Scheme); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	created := true
 	if err := r.Create(ctx, run); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return ctrl.Result{}, err
 		}
-		created = false
-		var existing kontextv1alpha1.AgentRun
-		if err := r.Get(ctx, types.NamespacedName{
-			Namespace: agent.Namespace,
-			Name:      runName,
-		}, &existing); err != nil {
-			return ctrl.Result{}, err
-		}
-		run = &existing
+		return r.handleServiceRunAlreadyExists(ctx, agent, runName)
 	}
 
 	nextStatus := kontextv1alpha1.AgentStatus{
 		CurrentRunName:     run.Name,
-		LastRunName:        agent.Status.CurrentRunName,
-		RunsCreated:        agent.Status.RunsCreated,
-		Restarts:           agent.Status.Restarts,
+		RunsCreated:        nextSuffix,
+		Restarts:           nextSuffix - 1,
 		ObservedGeneration: agent.Generation,
 	}
-	if created {
-		nextStatus.RunsCreated = agent.Status.RunsCreated + 1
-		if currentRun != nil {
-			nextStatus.Restarts = agent.Status.Restarts + 1
-		}
+	if runs.current != nil {
+		nextStatus.LastRunName = runs.current.Name
 	}
 
 	return r.setAgentStatus(ctx, agent, nextStatus, true, metav1.Condition{
@@ -151,21 +139,111 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 	})
 }
 
-func (r *AgentReconciler) getCurrentRun(ctx context.Context, agent *kontextv1alpha1.Agent) (*kontextv1alpha1.AgentRun, bool, error) {
-	if agent.Status.CurrentRunName == "" {
-		return nil, false, nil
+func (r *AgentReconciler) handleServiceRunAlreadyExists(
+	ctx context.Context,
+	agent *kontextv1alpha1.Agent,
+	runName string,
+) (ctrl.Result, error) {
+	if r.APIReader == nil {
+		return ctrl.Result{}, fmt.Errorf("cannot verify existing AgentRun %s/%s: APIReader is not configured", agent.Namespace, runName)
 	}
-	var run kontextv1alpha1.AgentRun
-	if err := r.Get(ctx, types.NamespacedName{
-		Namespace: agent.Namespace,
-		Name:      agent.Status.CurrentRunName,
-	}, &run); err != nil {
+
+	var existing kontextv1alpha1.AgentRun
+	if err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: agent.Namespace, Name: runName}, &existing); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, true, nil
+			return ctrl.Result{Requeue: true}, nil
 		}
-		return nil, false, err
+		return ctrl.Result{}, err
 	}
-	return &run, false, nil
+
+	if metav1.IsControlledBy(&existing, agent) {
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	return ctrl.Result{}, fmt.Errorf(
+		"service run name collision: AgentRun %s/%s is not controlled by Agent %s/%s",
+		existing.Namespace,
+		existing.Name,
+		agent.Namespace,
+		agent.Name,
+	)
+}
+
+type observedServiceRuns struct {
+	current   *kontextv1alpha1.AgentRun
+	previous  *kontextv1alpha1.AgentRun
+	maxSuffix int32
+}
+
+func (r *AgentReconciler) observeServiceRuns(
+	ctx context.Context,
+	agent *kontextv1alpha1.Agent,
+) (observedServiceRuns, error) {
+	var children kontextv1alpha1.AgentRunList
+	if err := r.List(
+		ctx,
+		&children,
+		client.InNamespace(agent.Namespace),
+		client.MatchingLabels{podbuilder.LabelAgentName: agent.Name},
+	); err != nil {
+		return observedServiceRuns{}, err
+	}
+
+	var observed observedServiceRuns
+	var previousSuffix int32
+	for i := range children.Items {
+		run := &children.Items[i]
+		if !metav1.IsControlledBy(run, agent) {
+			continue
+		}
+		suffix, ok := serviceRunSuffix(agent.Name, run.Name)
+		if !ok {
+			continue
+		}
+		switch {
+		case suffix > observed.maxSuffix:
+			observed.previous = observed.current
+			previousSuffix = observed.maxSuffix
+			observed.current = run
+			observed.maxSuffix = suffix
+		case suffix > previousSuffix:
+			observed.previous = run
+			previousSuffix = suffix
+		}
+	}
+	return observed, nil
+}
+
+func serviceRunSuffix(agentName, runName string) (int32, bool) {
+	prefix := agentName + "-"
+	if !strings.HasPrefix(runName, prefix) {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(strings.TrimPrefix(runName, prefix), 10, 32)
+	if err != nil || value < 1 {
+		return 0, false
+	}
+	suffix := int32(value)
+	return suffix, runName == fmt.Sprintf("%s-%d", agentName, suffix)
+}
+
+func (runs observedServiceRuns) status(generation int64) kontextv1alpha1.AgentStatus {
+	// Run suffixes form a monotonic creation sequence, so deleting old runs
+	// does not reduce the historical creation and restart counters.
+	next := kontextv1alpha1.AgentStatus{
+		RunsCreated:        runs.maxSuffix,
+		ObservedGeneration: generation,
+	}
+	if runs.maxSuffix > 0 {
+		next.Restarts = runs.maxSuffix - 1
+	}
+	if runs.current != nil {
+		next.CurrentRunName = runs.current.Name
+	}
+	if runs.previous != nil {
+		next.LastRunName = runs.previous.Name
+	}
+	return next
 }
 
 func (r *AgentReconciler) buildServiceRun(agent *kontextv1alpha1.Agent, runName string) *kontextv1alpha1.AgentRun {
@@ -203,7 +281,7 @@ func (r *AgentReconciler) buildServiceRun(agent *kontextv1alpha1.Agent, runName 
 	return run
 }
 
-func (r *AgentReconciler) backoffDelay(agent kontextv1alpha1.Agent) time.Duration {
+func (r *AgentReconciler) backoffDelay(agent kontextv1alpha1.Agent, restarts int32) time.Duration {
 	initial := int32(defaultBackoffInitial)
 	maximum := int32(defaultBackoffMax)
 	if agent.Spec.Backoff != nil {
@@ -215,26 +293,25 @@ func (r *AgentReconciler) backoffDelay(agent kontextv1alpha1.Agent) time.Duratio
 		}
 	}
 
-	attempt := agent.Status.Restarts
+	attempt := restarts
 	if attempt < 1 {
 		attempt = 1
 	}
 	delay := time.Duration(initial) * time.Second
-	for i := int32(1); i < attempt; i++ {
-		delay *= 2
-	}
 	maxDelay := time.Duration(maximum) * time.Second
-	if delay > maxDelay {
-		delay = maxDelay
+	if delay >= maxDelay {
+		return maxDelay
+	}
+	for i := int32(1); i < attempt; i++ {
+		if delay > maxDelay-delay {
+			return maxDelay
+		}
+		delay *= 2
+		if delay >= maxDelay {
+			return maxDelay
+		}
 	}
 	return delay
-}
-
-func timeSinceCompletion(run *kontextv1alpha1.AgentRun) time.Duration {
-	if run.Status.CompletionTime != nil {
-		return time.Since(run.Status.CompletionTime.Time)
-	}
-	return 0
 }
 
 func (r *AgentReconciler) setAgentStatus(

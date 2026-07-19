@@ -69,8 +69,9 @@ func newAgentRunReconciler() *controller.AgentRunReconciler {
 
 func newAgentReconciler() *controller.AgentReconciler {
 	return &controller.AgentReconciler{
-		Client: k8sClient,
-		Scheme: scheme,
+		Client:    k8sClient,
+		APIReader: k8sClient,
+		Scheme:    scheme,
 	}
 }
 
