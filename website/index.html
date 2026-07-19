@@ -61,10 +61,13 @@ spec:
   </p>
 
   <section>
-    <h2>Same cluster, same tools</h2>
+    <h2>Why Kubernetes</h2>
     <p>
-      Secrets, RBAC, logs, and restarts stay in Kubernetes.
-      Kontext adds <code>Agent</code> and <code>AgentRun</code> — nothing else to operate.
+      Scheduling, secrets, RBAC, budgets, logs, restarts: agents need what
+      Kubernetes already does. Kontext adds two resources, <code>Agent</code> and
+      <code>AgentRun</code>, and leaves the rest to the cluster. Service agents are
+      re-cast automatically when they die. Wallclock budgets are enforced by the
+      controller. Results live in <code>status</code>, queryable like any other object.
     </p>
   </section>
 
