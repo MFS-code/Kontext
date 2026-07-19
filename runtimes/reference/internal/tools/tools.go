@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
+	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
+	"github.com/kontext-dev/kontext/runtimes/reference/internal/mcpclient"
 	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
 )
 
@@ -15,7 +18,8 @@ const (
 	NameKubernetesRead = "kubernetes_read"
 	NameShell          = "shell"
 
-	maxSafeCapturedBytes = int64(8 << 20)
+	maxSafeCapturedBytes  = int64(8 << 20)
+	startupCleanupTimeout = 2 * time.Second
 )
 
 type Config struct {
@@ -27,12 +31,14 @@ type Config struct {
 	Stdout           io.Writer
 	Stderr           io.Writer
 	Kubernetes       KubernetesConfig
+	MCP              config.MCPConfig
 }
 
 type Registry struct {
 	allowed     map[string]implementation
 	known       map[string]struct{}
 	definitions []runtimeapi.ToolDefinition
+	mcp         *mcpclient.Manager
 }
 
 type implementation interface {
@@ -59,7 +65,12 @@ func (err *Error) Error() string {
 	return fmt.Sprintf("%s: %s", err.Code, err.Message)
 }
 
-func New(config Config) (*Registry, error) {
+func New(toolConfig Config) (*Registry, error) {
+	return NewWithContext(context.Background(), toolConfig)
+}
+
+func NewWithContext(ctx context.Context, toolConfig Config) (*Registry, error) {
+	config := toolConfig
 	if config.MaxCapturedBytes <= 0 {
 		config.MaxCapturedBytes = maxSafeCapturedBytes
 	}
@@ -79,6 +90,20 @@ func New(config Config) (*Registry, error) {
 		config.Stderr = io.Discard
 	}
 
+	mcpManager, err := mcpclient.New(ctx, config.MCP, config.Stderr)
+	if err != nil {
+		code := "invalid_tool_configuration"
+		message := err.Error()
+		var mcpError *mcpclient.Error
+		if errors.As(err, &mcpError) && mcpError.Code != "" {
+			code = mcpError.Code
+			message = mcpError.Message
+		}
+		return nil, &Error{
+			Code:    code,
+			Message: message,
+		}
+	}
 	implementations := map[string]implementation{
 		NameReadKnowledge: newKnowledgeTool(config.KnowledgeRoot, config.MaxCapturedBytes),
 		NameKubernetesRead: newKubernetesTool(
@@ -91,9 +116,23 @@ func New(config Config) (*Registry, error) {
 			config.MaxCapturedBytes,
 		),
 	}
+	for _, definition := range mcpManager.Definitions() {
+		if _, collision := implementations[definition.Name]; collision {
+			closeMCPManagerAfterStartupFailure(mcpManager)
+			return nil, &Error{
+				Code:    "tool_name_collision",
+				Message: fmt.Sprintf("MCP tool %q collides with another available tool", definition.Name),
+			}
+		}
+		implementations[definition.Name] = &mcpImplementation{
+			manager:    mcpManager,
+			definition: definition,
+		}
+	}
 	registry := &Registry{
 		allowed: make(map[string]implementation, len(config.Allowed)),
 		known:   make(map[string]struct{}, len(implementations)),
+		mcp:     mcpManager,
 	}
 	for name := range implementations {
 		registry.known[name] = struct{}{}
@@ -102,9 +141,10 @@ func New(config Config) (*Registry, error) {
 		name := strings.TrimSpace(configuredName)
 		selected, exists := implementations[name]
 		if !exists {
+			closeMCPManagerAfterStartupFailure(mcpManager)
 			return nil, &Error{
 				Code:    "unknown_tool",
-				Message: fmt.Sprintf("configured tool %q is not built into the reference runtime", name),
+				Message: fmt.Sprintf("configured tool %q is not available in the reference runtime", name),
 			}
 		}
 		if _, duplicate := registry.allowed[name]; duplicate {
@@ -114,6 +154,41 @@ func New(config Config) (*Registry, error) {
 		registry.definitions = append(registry.definitions, selected.Definition())
 	}
 	return registry, nil
+}
+
+func closeMCPManagerAfterStartupFailure(manager *mcpclient.Manager) {
+	ctx, cancel := context.WithTimeout(context.Background(), startupCleanupTimeout)
+	defer cancel()
+	_ = manager.Close(ctx)
+}
+
+type mcpImplementation struct {
+	manager    *mcpclient.Manager
+	definition runtimeapi.ToolDefinition
+}
+
+func (tool *mcpImplementation) Definition() runtimeapi.ToolDefinition {
+	return tool.definition
+}
+
+func (tool *mcpImplementation) Execute(
+	ctx context.Context,
+	arguments []byte,
+) (outcome, error) {
+	result, err := tool.manager.Execute(ctx, tool.definition.Name, arguments)
+	return outcome{
+		Content:   result.Content,
+		IsError:   result.IsError,
+		ErrorCode: result.ErrorCode,
+		Truncated: result.Truncated,
+	}, err
+}
+
+func (registry *Registry) Close(ctx context.Context) error {
+	if registry == nil || registry.mcp == nil {
+		return nil
+	}
+	return registry.mcp.Close(ctx)
 }
 
 func (registry *Registry) Definitions() []runtimeapi.ToolDefinition {

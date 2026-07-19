@@ -123,8 +123,12 @@ metadata:
   namespace: kontext-network-policy-e2e
 spec:
   podSelector:
-    matchLabels:
-      app.kubernetes.io/name: kontext-agentrun
+    matchExpressions:
+      - key: kontext.dev/run
+        operator: In
+        values:
+          - reference-network-http
+          - reference-network-kubernetes
   policyTypes: ["Egress"]
   egress:
     - to:

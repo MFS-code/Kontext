@@ -1,0 +1,434 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kontext-network-policy-e2e
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: playwright-mcp
+  namespace: kontext-network-policy-e2e
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: playwright-fixture
+  namespace: kontext-network-policy-e2e
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: reference-browser-runtime
+  namespace: kontext-network-policy-e2e
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: playwright-fixture-content
+  namespace: kontext-network-policy-e2e
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <title>Kontext Playwright fixture</title>
+      </head>
+      <body>
+        <main>
+          <h1>Kontext Playwright fixture</h1>
+          <label for="name">Name</label>
+          <input id="name" autocomplete="off">
+          <button id="submit" type="button">Submit</button>
+          <p id="status" role="status">State: empty</p>
+          <section aria-label="Deterministic snapshot padding">
+            <ul>
+              <li>Accessibility fixture row 01</li>
+              <li>Accessibility fixture row 02</li>
+              <li>Accessibility fixture row 03</li>
+              <li>Accessibility fixture row 04</li>
+              <li>Accessibility fixture row 05</li>
+              <li>Accessibility fixture row 06</li>
+              <li>Accessibility fixture row 07</li>
+              <li>Accessibility fixture row 08</li>
+              <li>Accessibility fixture row 09</li>
+              <li>Accessibility fixture row 10</li>
+              <li>Accessibility fixture row 11</li>
+              <li>Accessibility fixture row 12</li>
+              <li>Accessibility fixture row 13</li>
+              <li>Accessibility fixture row 14</li>
+              <li>Accessibility fixture row 15</li>
+              <li>Accessibility fixture row 16</li>
+              <li>Accessibility fixture row 17</li>
+              <li>Accessibility fixture row 18</li>
+            </ul>
+          </section>
+        </main>
+        <script>
+          const marker = "Kontext accepted";
+          const status = document.querySelector("#status");
+          const saved = localStorage.getItem("kontext-marker");
+          const cookieSaved = document.cookie.split("; ").includes("kontext-marker=accepted");
+          status.textContent = saved === marker || cookieSaved
+            ? `State: ${marker}`
+            : "State: empty";
+          document.querySelector("#submit").addEventListener("click", () => {
+            if (document.querySelector("#name").value === "Kontext") {
+              localStorage.setItem("kontext-marker", marker);
+              document.cookie = "kontext-marker=accepted; SameSite=Strict";
+              status.textContent = `State: ${marker}`;
+            }
+          });
+        </script>
+      </body>
+    </html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playwright-fixture
+  namespace: kontext-network-policy-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: playwright-fixture
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: playwright-fixture
+    spec:
+      serviceAccountName: playwright-fixture
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: http
+          image: kontext-reference:dev
+          command: ["/bin/httpd"]
+          args: ["-f", "-p", "8080", "-h", "/www"]
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: content
+              mountPath: /www
+              readOnly: true
+      volumes:
+        - name: content
+          configMap:
+            name: playwright-fixture-content
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: playwright-fixture
+  namespace: kontext-network-policy-e2e
+spec:
+  selector:
+    app.kubernetes.io/name: playwright-fixture
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unrelated-http
+  namespace: kontext-network-policy-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: unrelated-http
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: unrelated-http
+    spec:
+      serviceAccountName: playwright-fixture
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: http
+          image: kontext-reference:dev
+          command: ["/bin/httpd"]
+          args: ["-f", "-p", "8080", "-h", "/www"]
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: content
+              mountPath: /www
+              readOnly: true
+      volumes:
+        - name: content
+          configMap:
+            name: playwright-fixture-content
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: unrelated-http
+  namespace: kontext-network-policy-e2e
+spec:
+  selector:
+    app.kubernetes.io/name: unrelated-http
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playwright-mcp
+  namespace: kontext-network-policy-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: playwright-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: playwright-mcp
+    spec:
+      serviceAccountName: playwright-mcp
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp
+          image: mcr.microsoft.com/playwright/mcp@sha256:3d871c22ea2d4cca0966e2cfb1860e1cb03eb7353725a3d6cffd133296fb04eb
+          imagePullPolicy: IfNotPresent
+          command: ["node", "/app/cli.js"]
+          args:
+            - --headless
+            - --browser
+            - chromium
+            - --no-sandbox
+            - --isolated
+            - --image-responses
+            - omit
+            - --port
+            - "8931"
+            - --host
+            - 0.0.0.0
+            - --allowed-hosts
+            - playwright-mcp.kontext-network-policy-e2e.svc.cluster.local:8931
+          env:
+            - name: HOME
+              value: /tmp/home
+            - name: TMPDIR
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/xdg-cache
+            - name: XDG_CONFIG_HOME
+              value: /tmp/xdg-config
+            - name: PLAYWRIGHT_MCP_PING_TIMEOUT_MS
+              value: "30000"
+          ports:
+            - name: mcp
+              containerPort: 8931
+          readinessProbe:
+            tcpSocket:
+              port: mcp
+            initialDelaySeconds: 2
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: dev-shm
+              mountPath: /dev/shm
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: dev-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: playwright-mcp
+  namespace: kontext-network-policy-e2e
+spec:
+  selector:
+    app.kubernetes.io/name: playwright-mcp
+  ports:
+    - name: mcp
+      port: 8931
+      targetPort: mcp
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: playwright-mcp-egress
+  namespace: kontext-network-policy-e2e
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: playwright-mcp
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: playwright-fixture
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: playwright-mcp-ingress
+  namespace: kontext-network-policy-e2e
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: playwright-mcp
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: kontext.dev/run
+                operator: In
+                values:
+                  - reference-playwright-browser
+                  - reference-playwright-fresh
+                  - reference-playwright-deny
+                  - reference-playwright-cancel
+      ports:
+        - protocol: TCP
+          port: 8931
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: playwright-fixture-ingress
+  namespace: kontext-network-policy-e2e
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: playwright-fixture
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: playwright-mcp
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: reference-browser-runtime-egress
+  namespace: kontext-network-policy-e2e
+spec:
+  podSelector:
+    matchExpressions:
+      - key: kontext.dev/run
+        operator: In
+        values:
+          - reference-playwright-browser
+          - reference-playwright-fresh
+          - reference-playwright-deny
+          - reference-playwright-cancel
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: playwright-mcp
+      ports:
+        - protocol: TCP
+          port: 8931

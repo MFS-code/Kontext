@@ -25,6 +25,7 @@ func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 		"KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES": "4096",
 		"KONTEXT_EMIT_TOOL_OUTPUT":            "true",
 		"KONTEXT_PROVIDER_ENDPOINT":           "http://provider.default.svc:8080/v1",
+		"KONTEXT_FAKE_TOOL_SEQUENCE":          `[{"name":"one","arguments":{}}]`,
 		"ANTHROPIC_API_KEY":                   "anthropic-secret",
 		"OPENAI_API_KEY":                      "openai-secret",
 	}
@@ -61,6 +62,9 @@ func TestLoadPreservesOpaqueModelAndParsesOptionalInputs(t *testing.T) {
 	}
 	if loaded.ProviderEndpoint != "http://provider.default.svc:8080/v1" {
 		t.Fatalf("unexpected endpoint %q", loaded.ProviderEndpoint)
+	}
+	if loaded.FakeToolSequence != `[{"name":"one","arguments":{}}]` {
+		t.Fatalf("unexpected fake tool sequence %q", loaded.FakeToolSequence)
 	}
 	if loaded.AnthropicAPIKey != "anthropic-secret" ||
 		loaded.OpenAIAPIKey != "openai-secret" {

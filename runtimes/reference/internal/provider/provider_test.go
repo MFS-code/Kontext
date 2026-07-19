@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,6 +116,23 @@ func TestResolveValidatesFakeScenarios(t *testing.T) {
 	if !ok || string(fake.ToolArguments) != "{}" {
 		t.Fatalf("unexpected zero-argument fake %#v", selected)
 	}
+	for _, sequence := range []string{
+		"",
+		`not-json`,
+		`[]`,
+		`[{"arguments":{}}]`,
+		`[{"name":"tool"}]`,
+		`[{"name":"tool","arguments":[]}]`,
+		`[{"name":"tool","arguments":{},"extra":true}]`,
+	} {
+		if _, err := provider.Resolve(config.Config{
+			Provider:         "fake",
+			FakeScenario:     provider.FakeScenarioToolSequence,
+			FakeToolSequence: sequence,
+		}); err == nil {
+			t.Fatalf("expected invalid tool sequence %q to fail", sequence)
+		}
+	}
 }
 
 func TestFakeProviderScenarios(t *testing.T) {
@@ -220,6 +238,193 @@ func TestFakeProviderScenarios(t *testing.T) {
 			"Fake provider received read_knowledge result: tool loop works" {
 			t.Fatalf("unexpected final output %q", got)
 		}
+	})
+}
+
+func TestFakeToolSequenceOrdersCallsAndReturnsBoundedResults(t *testing.T) {
+	selected, err := provider.Resolve(config.Config{
+		Provider:     "fake",
+		FakeScenario: provider.FakeScenarioToolSequence,
+		FakeToolSequence: `[
+			{"name":"first","arguments":{"step":1}},
+			{"name":"second","arguments":{"step":2}}
+		]`,
+	})
+	if err != nil {
+		t.Fatalf("resolve sequence: %v", err)
+	}
+	request := completionRequest("model")
+	request.Tools = []runtimeapi.ToolDefinition{
+		{Name: "first", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		{Name: "second", InputSchema: json.RawMessage(`{"type":"object"}`)},
+	}
+
+	first, err := selected.Complete(context.Background(), request)
+	if err != nil {
+		t.Fatalf("first completion: %v", err)
+	}
+	firstCall := runtimeapi.MessageToolCalls(first.Message)
+	if len(firstCall) != 1 ||
+		firstCall[0].ID != "fake-tool-call-001" ||
+		firstCall[0].Name != "first" {
+		t.Fatalf("unexpected first call %#v", firstCall)
+	}
+	request.Messages = appendToolResult(
+		request.Messages,
+		first.Message,
+		firstCall[0],
+		runtimeapi.ToolResult{Content: "first bounded result"},
+	)
+
+	second, err := selected.Complete(context.Background(), request)
+	if err != nil {
+		t.Fatalf("second completion: %v", err)
+	}
+	secondCall := runtimeapi.MessageToolCalls(second.Message)
+	if len(secondCall) != 1 ||
+		secondCall[0].ID != "fake-tool-call-002" ||
+		secondCall[0].Name != "second" {
+		t.Fatalf("unexpected second call %#v", secondCall)
+	}
+	request.Messages = appendToolResult(
+		request.Messages,
+		second.Message,
+		secondCall[0],
+		runtimeapi.ToolResult{
+			Content:   "second bounded result",
+			IsError:   true,
+			ErrorCode: "expected_error",
+			Truncated: true,
+		},
+	)
+
+	final, err := selected.Complete(context.Background(), request)
+	if err != nil {
+		t.Fatalf("terminal completion: %v", err)
+	}
+	output := runtimeapi.MessageText(final.Message)
+	for _, expected := range []string{
+		"Fake provider completed tool sequence:",
+		"first bounded result",
+		"second bounded result",
+		`"errorCode":"expected_error"`,
+		`"truncated":true`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("terminal output %q does not contain %q", output, expected)
+		}
+	}
+}
+
+func TestFakeToolSequenceRejectsMissingAndOutOfOrderTools(t *testing.T) {
+	selected, err := provider.Resolve(config.Config{
+		Provider:         "fake",
+		FakeScenario:     provider.FakeScenarioToolSequence,
+		FakeToolSequence: `[{"name":"required","arguments":{}}]`,
+	})
+	if err != nil {
+		t.Fatalf("resolve sequence: %v", err)
+	}
+	request := completionRequest("model")
+	if _, err := selected.Complete(context.Background(), request); err == nil ||
+		!strings.Contains(err.Error(), `"required" was not exposed`) {
+		t.Fatalf("expected missing tool error, got %v", err)
+	}
+
+	request.Tools = []runtimeapi.ToolDefinition{{Name: "required"}}
+	request.Messages = append(request.Messages, runtimeapi.Message{
+		Role: runtimeapi.RoleAssistant,
+		Content: []runtimeapi.ContentBlock{{
+			Type: runtimeapi.ContentTypeToolCall,
+			ToolCall: &runtimeapi.ToolCall{
+				ID:        "fake-tool-call-001",
+				Name:      "different",
+				Arguments: json.RawMessage(`{}`),
+			},
+		}},
+	}, runtimeapi.Message{
+		Role: runtimeapi.RoleTool,
+		Content: []runtimeapi.ContentBlock{{
+			Type: runtimeapi.ContentTypeToolResult,
+			ToolResult: &runtimeapi.ToolResult{
+				CallID: "fake-tool-call-001",
+				Name:   "different",
+			},
+		}},
+	})
+	if _, err := selected.Complete(context.Background(), request); err == nil ||
+		!strings.Contains(err.Error(), `configured tool "required"`) {
+		t.Fatalf("expected ordering error, got %v", err)
+	}
+}
+
+func TestFakeToolSequenceRejectsUncorrelatedCallIDs(t *testing.T) {
+	selected, err := provider.Resolve(config.Config{
+		Provider:         "fake",
+		FakeScenario:     provider.FakeScenarioToolSequence,
+		FakeToolSequence: `[{"name":"required","arguments":{}}]`,
+	})
+	if err != nil {
+		t.Fatalf("resolve sequence: %v", err)
+	}
+	for _, test := range []struct {
+		name      string
+		assistant bool
+		callID    string
+		resultID  string
+	}{
+		{name: "missing assistant call", assistant: false, resultID: "fake-tool-call-001"},
+		{name: "unexpected deterministic id", assistant: true, callID: "other", resultID: "other"},
+		{name: "mismatched result id", assistant: true, callID: "fake-tool-call-001", resultID: "other"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := completionRequest("model")
+			request.Tools = []runtimeapi.ToolDefinition{{Name: "required"}}
+			if test.assistant {
+				request.Messages = append(request.Messages, runtimeapi.Message{
+					Role: runtimeapi.RoleAssistant,
+					Content: []runtimeapi.ContentBlock{{
+						Type: runtimeapi.ContentTypeToolCall,
+						ToolCall: &runtimeapi.ToolCall{
+							ID:        test.callID,
+							Name:      "required",
+							Arguments: json.RawMessage(`{}`),
+						},
+					}},
+				})
+			}
+			request.Messages = append(request.Messages, runtimeapi.Message{
+				Role: runtimeapi.RoleTool,
+				Content: []runtimeapi.ContentBlock{{
+					Type: runtimeapi.ContentTypeToolResult,
+					ToolResult: &runtimeapi.ToolResult{
+						CallID: test.resultID,
+						Name:   "required",
+					},
+				}},
+			})
+			if _, err := selected.Complete(context.Background(), request); err == nil ||
+				!strings.Contains(err.Error(), "fake_tool_sequence_mismatch") {
+				t.Fatalf("expected correlation error, got %v", err)
+			}
+		})
+	}
+}
+
+func appendToolResult(
+	messages []runtimeapi.Message,
+	assistant runtimeapi.Message,
+	call runtimeapi.ToolCall,
+	result runtimeapi.ToolResult,
+) []runtimeapi.Message {
+	result.CallID = call.ID
+	result.Name = call.Name
+	return append(messages, assistant, runtimeapi.Message{
+		Role: runtimeapi.RoleTool,
+		Content: []runtimeapi.ContentBlock{{
+			Type:       runtimeapi.ContentTypeToolResult,
+			ToolResult: &result,
+		}},
 	})
 }
 

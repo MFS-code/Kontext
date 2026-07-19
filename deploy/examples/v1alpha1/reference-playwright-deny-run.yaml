@@ -1,0 +1,42 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: reference-playwright-deny
+  namespace: kontext-network-policy-e2e
+spec:
+  goal: Prove browser egress denies metadata and unrelated cluster destinations.
+  provider: fake
+  model: test/playwright-tool-sequence
+  tools:
+    - browser_navigate
+  serviceAccountName: reference-browser-runtime
+  runtime:
+    image: kontext-reference:dev
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+  env:
+    - name: KONTEXT_MCP_CONFIG
+      value: >-
+        {"servers":[{"name":"playwright","transport":"http","endpoint":"http://playwright-mcp.kontext-network-policy-e2e.svc.cluster.local:8931/mcp","timeout":"3s","maxRetries":0}]}
+    - name: KONTEXT_FAKE_SCENARIO
+      value: tool_sequence
+    - name: KONTEXT_FAKE_TOOL_SEQUENCE
+      value: >-
+        [{"name":"browser_navigate","arguments":{"url":"http://169.254.169.254/latest/meta-data/"}},{"name":"browser_navigate","arguments":{"url":"http://unrelated-http.kontext-network-policy-e2e.svc.cluster.local:8080/"}}]
+    - name: KONTEXT_MAX_TURNS
+      value: "3"
+    - name: KONTEXT_MAX_TOOL_CALLS
+      value: "2"
+    - name: KONTEXT_MAX_TOOL_RESULT_BYTES
+      value: "512"
+    - name: KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES
+      value: "1024"
+  budget:
+    tokens: 4096
+    wallclock: 45s

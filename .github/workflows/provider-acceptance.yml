@@ -46,9 +46,15 @@ jobs:
       KONTEXT_PROVIDER: ${{ inputs.provider }}
       KONTEXT_MODEL: ${{ inputs.model }}
       KONTEXT_PROVIDER_ENDPOINT: ${{ inputs.endpoint }}
+      KONTEXT_ACCEPTANCE_RECORD: ${{ runner.temp }}/provider-evals/acceptance.json
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Initialize provider acceptance record
+        env:
+          KONTEXT_ACCEPTANCE_INITIALIZE_ONLY: "true"
+        run: ./scripts/provider-acceptance-kind.sh
 
       - name: Validate provider selection
         run: |
@@ -113,6 +119,15 @@ jobs:
         env:
           KONTEXT_PROVIDER_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: ./scripts/provider-acceptance-kind.sh
+
+      - name: Upload provider acceptance record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.KONTEXT_ACCEPTANCE_RECORD }}
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Collect redacted failure diagnostics
         if: failure()

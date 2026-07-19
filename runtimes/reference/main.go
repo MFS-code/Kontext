@@ -59,11 +59,12 @@ func run(
 	execution := engine.Runner{
 		Emitter: emitter,
 		Now:     now,
-		ResolveTools: func(runtimeConfig config.Config) (engine.ToolExecutor, error) {
-			return tools.New(tools.Config{
+		ResolveToolsContext: func(ctx context.Context, runtimeConfig config.Config) (engine.ToolExecutor, error) {
+			return tools.NewWithContext(ctx, tools.Config{
 				Allowed: runtimeConfig.Tools,
 				Stdout:  stdout,
 				Stderr:  stderr,
+				MCP:     runtimeConfig.MCP,
 			})
 		},
 	}.Run(ctx, runtimeConfig)

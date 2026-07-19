@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/conversation"
 	"github.com/kontext-dev/kontext/runtimes/reference/internal/events"
@@ -234,10 +233,6 @@ func (runner Runner) providerTurn(
 	}
 
 	response.Usage = state.usage
-	runner.emit(events.TypeOutput, map[string]any{
-		"mediaType": resultv1alpha1.DefaultMediaType,
-		"value":     runtimeapi.MessageText(response.Message),
-	})
 	return turnOutcome{
 		kind:     turnOutcomeFinal,
 		response: response,

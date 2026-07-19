@@ -77,17 +77,36 @@ spec:
                 type: object
               env:
                 items:
-                  description: EnvVar is a name/value pair injected into the runtime
-                    Pod.
+                  description: EnvVar is a name/value or Secret-backed value injected
+                    into the runtime Pod.
                   properties:
                     name:
                       type: string
                     value:
                       type: string
+                    valueFrom:
+                      properties:
+                        secretKeyRef:
+                          properties:
+                            key:
+                              minLength: 1
+                              type: string
+                            name:
+                              minLength: 1
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                      required:
+                      - secretKeyRef
+                      type: object
                   required:
                   - name
-                  - value
                   type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of value or valueFrom must be configured
+                    rule: has(self.value) != has(self.valueFrom)
                 type: array
               goal:
                 type: string

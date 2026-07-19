@@ -23,6 +23,7 @@ type Config struct {
 	Provider  string
 	Model     string
 	Tools     []string
+	MCP       MCPConfig
 
 	TokenBudget             *int64
 	WallclockBudget         *time.Duration
@@ -41,6 +42,7 @@ type Config struct {
 	FakeDelay         time.Duration
 	FakeToolName      string
 	FakeToolArguments string
+	FakeToolSequence  string
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -53,6 +55,10 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	model, err := requiredOpaque(getenv, "KONTEXT_MODEL")
+	if err != nil {
+		return Config{}, err
+	}
+	mcpConfig, err := loadMCPConfig(getenv)
 	if err != nil {
 		return Config{}, err
 	}
@@ -162,6 +168,7 @@ func Load(getenv func(string) string) (Config, error) {
 		Provider:                strings.ToLower(provider),
 		Model:                   model,
 		Tools:                   parseTools(getenv("KONTEXT_TOOLS")),
+		MCP:                     mcpConfig,
 		TokenBudget:             tokenBudget,
 		WallclockBudget:         wallclockBudget,
 		DollarBudget:            dollarBudget,
@@ -178,6 +185,7 @@ func Load(getenv func(string) string) (Config, error) {
 		FakeDelay:               fakeDelay,
 		FakeToolName:            strings.TrimSpace(getenv("KONTEXT_FAKE_TOOL_NAME")),
 		FakeToolArguments:       strings.TrimSpace(getenv("KONTEXT_FAKE_TOOL_ARGUMENTS")),
+		FakeToolSequence:        strings.TrimSpace(getenv("KONTEXT_FAKE_TOOL_SEQUENCE")),
 	}, nil
 }
 

@@ -86,6 +86,10 @@ vulncheck: $(GOVULNCHECK) ## Scan for known Go vulnerabilities in reachable code
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
+.PHONY: build-eval
+build-eval: fmt vet ## Build the external evaluation runner.
+	go build -o bin/kontext-eval ./cmd/kontext-eval
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go

@@ -270,7 +270,21 @@ func buildEnv(run *kontextv1alpha1.AgentRun) ([]corev1.EnvVar, error) {
 				extra.Name,
 			)
 		}
-		env = append(env, corev1.EnvVar{Name: extra.Name, Value: extra.Value})
+		item := corev1.EnvVar{Name: extra.Name}
+		if extra.Value != nil {
+			item.Value = *extra.Value
+		}
+		if extra.ValueFrom != nil {
+			item.ValueFrom = &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: extra.ValueFrom.SecretKeyRef.Name,
+					},
+					Key: extra.ValueFrom.SecretKeyRef.Key,
+				},
+			}
+		}
+		env = append(env, item)
 	}
 
 	if runtimepolicy.NeedsAPIKey(provider) {

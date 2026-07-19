@@ -35,15 +35,29 @@ Kontext provides generic `Agent` and `AgentRun` primitives. Consumer-specific co
 - Service reconciler keeps one live child `AgentRun` and re-casts with backoff.
 - **Done when:** deleting the live Pod mints a replacement run (`scripts/e2e-kind.sh`).
 
-### M4 — Bring-your-own-runtime hardening
-- Echo runtime shipped (`runtimes/echo/`). Anthropic Python runner remains under `runtimes/python-anthropic/`.
+### M4 — Bring-your-own-runtime hardening (implementation complete)
+- The echo conformance oracle remains keyless and uses the accepted legacy
+  payload during the v1alpha1 transition. The Python Anthropic image is a
+  legacy behavior oracle, not the maintained primary runtime.
 - Versioned results, the reusable reporter, and optional stdout capture support existing Linux images with explicit commands.
 - The maintained Go reference runtime has a provider-neutral core, deterministic fake-provider path, and direct Anthropic and OpenAI-compatible HTTP transports.
 - The maintained runtime has a bounded provider-neutral loop with allowlisted knowledge, Kubernetes-read, and shell tools.
+- Issue #20's implementation adds allowlisted stdio/HTTP MCP tools and the
+  isolated Playwright acceptance path without adding MCP vocabulary to the
+  CRDs.
+- Issue #21 adds external deterministic evals, all four bring-your-own result
+  paths, keyless failure acceptance, operations guidance, and bounded provider
+  acceptance records. A protected authenticated provider dispatch is still a
+  required pre-alpha release action, not evidence produced by keyless CI.
 
-### M5 — Governance
-- Per-agent ServiceAccount, finalizers, budget enforcement, CEL validation on the CRDs, events on transitions.
-- **Done when:** demo: "capped at $2, ran under this SA, failed on budget, Kubernetes recorded the lifecycle."
+### M5 — Governance (remaining)
+- Expand CEL/admission validation beyond the shipped immutable-run and
+  restricted-security checks.
+- Add richer Kubernetes Events and metrics for budget decisions, failures, and
+  Service recasts.
+- Decide whether authoritative dollar-limit enforcement and finalizer-backed
+  cleanup belong in the alpha contract, then implement only the retained
+  behavior.
 
 ### M6 — Packaging + observability
 - Kustomize install exists under `config/default`. Helm/metrics still open.
@@ -54,5 +68,6 @@ Kontext provides generic `Agent` and `AgentRun` primitives. Consumer-specific co
 ## Immediate next actions
 
 1. M2 Task templating when a concrete consumer needs parameterized triggers.
-2. M5 governance (CEL, per-agent SA, richer events).
-3. Publish immutable maintained runtime images and run protected provider acceptance.
+2. M5 governance (remaining CEL/admission coverage, Events, and metrics).
+3. Dispatch and retain the protected provider acceptance record before alpha.
+4. Publish immutable maintained runtime images as separately tracked release work.

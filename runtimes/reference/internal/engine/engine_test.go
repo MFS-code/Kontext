@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"testing"
@@ -225,6 +226,67 @@ func TestRunnerExecutesToolCallsAndReturnsResultsToProvider(t *testing.T) {
 	)
 	if len(results) != 1 || results[0].Content != `{"status":"ok"}` {
 		t.Fatalf("tool result was not returned to provider: %#v", results)
+	}
+}
+
+func TestRunnerClosesToolsWithFreshContextAndReportsCleanupFailure(t *testing.T) {
+	executor := &closingToolExecutor{
+		staticToolExecutor: *lookupExecutor(runtimeapi.ToolResult{Content: "ok"}),
+		close: func(ctx context.Context) error {
+			if ctx.Err() != nil {
+				t.Fatalf("cleanup received an already-cancelled context: %v", ctx.Err())
+			}
+			return errors.New("close failed")
+		},
+	}
+	selectedProvider := &scriptedProvider{responses: []runtimeapi.CompletionResponse{
+		toolCallResponse("call-1"),
+		finalResponse("done"),
+	}}
+	emitter := &recordingEmitter{}
+	runner := runnerWithTools(selectedProvider, executor)
+	runner.Emitter = emitter
+	result := runner.Run(context.Background(), baseConfig())
+	if result.ExitCode == 0 || result.Envelope.Error == nil ||
+		result.Envelope.Error.Code != "tool_cleanup_failed" {
+		t.Fatalf("cleanup failure did not fail successful run: %#v", result)
+	}
+	if executor.closeCalls != 1 {
+		t.Fatalf("expected one cleanup call, got %d", executor.closeCalls)
+	}
+	if result.Envelope.Output == nil || string(result.Envelope.Output.Value) != `"done"` {
+		t.Fatalf("cleanup failure discarded completed output: %#v", result.Envelope.Output)
+	}
+	if !emitter.has(events.TypeOutput) {
+		t.Fatalf("completed output was not emitted after failed cleanup: %#v", emitter.types)
+	}
+	if !emitter.has(events.TypeError) {
+		t.Fatalf("cleanup failure was not observable: %#v", emitter.types)
+	}
+}
+
+func TestRunnerCleanupFailureDoesNotReplaceExistingFailure(t *testing.T) {
+	executor := &closingToolExecutor{
+		staticToolExecutor: *lookupExecutor(runtimeapi.ToolResult{}),
+		close: func(context.Context) error {
+			return errors.New("close failed")
+		},
+	}
+	selectedProvider := &scriptedProvider{responses: []runtimeapi.CompletionResponse{
+		{
+			Message: runtimeapi.Message{
+				Role:    runtimeapi.RoleAssistant,
+				Content: []runtimeapi.ContentBlock{{Type: runtimeapi.ContentTypeText, Text: "partial"}},
+			},
+			StopReason: runtimeapi.StopReasonMaxTokens,
+		},
+	}}
+	result := runnerWithTools(selectedProvider, executor).Run(context.Background(), baseConfig())
+	if result.Envelope.Error == nil || result.Envelope.Error.Code != "max_tokens_reached" {
+		t.Fatalf("cleanup replaced existing failure: %#v", result.Envelope.Error)
+	}
+	if executor.closeCalls != 1 {
+		t.Fatalf("expected one cleanup call, got %d", executor.closeCalls)
 	}
 }
 
@@ -750,6 +812,17 @@ type staticToolExecutor struct {
 	result      runtimeapi.ToolResult
 	err         error
 	calls       []runtimeapi.ToolCall
+}
+
+type closingToolExecutor struct {
+	staticToolExecutor
+	close      func(context.Context) error
+	closeCalls int
+}
+
+func (executor *closingToolExecutor) Close(ctx context.Context) error {
+	executor.closeCalls++
+	return executor.close(ctx)
 }
 
 func (executor *staticToolExecutor) Definitions() []runtimeapi.ToolDefinition {

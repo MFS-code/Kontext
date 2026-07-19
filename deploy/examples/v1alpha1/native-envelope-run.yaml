@@ -1,0 +1,17 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: native-envelope
+spec:
+  goal: Write a native versioned termination envelope.
+  provider: echo
+  model: fixture-model
+  runtime:
+    image: kontext-stdout-fixture:dev
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        echo "ordinary native workload log"
+        printf '%s' '{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":{"answer":"native"}},"usage":{"inputTokens":0,"outputTokens":1,"totalTokens":1}}' > /dev/termination-log
+  budget:
+    wallclock: 2m

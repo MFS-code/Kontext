@@ -51,6 +51,8 @@ cleanup_e2e_resources() {
   kubectl delete agent echo-service --ignore-not-found=true --wait=true || status=1
   kubectl delete agentrun \
     echo-review \
+    plain-logs \
+    native-envelope \
     stdout-last-line \
     stdout-envelope \
     stdout-failure \
@@ -111,6 +113,44 @@ if [[ "${phase}" != "Succeeded" ]]; then
   exit 1
 fi
 echo "task result: ${result}"
+
+echo "==> verifying plain image logs without structured result capture"
+kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/plain-logs-run.yaml"
+wait_for_run_phase plain-logs Succeeded
+plain_result="$(kubectl get agentrun plain-logs -o jsonpath='{.status.result}')"
+plain_output="$(kubectl get agentrun plain-logs -o jsonpath='{.status.output}')"
+plain_logs="$(kubectl logs run-plain-logs -c runtime)"
+plain_init_containers="$(
+  kubectl get pod run-plain-logs -o jsonpath='{.spec.initContainers[*].name}'
+)"
+if [[ -n "${plain_result}" ||
+  -n "${plain_output}" ||
+  "${plain_logs}" != *"ordinary image log"* ||
+  "${plain_init_containers}" == *"inject-reporter"* ]]; then
+  echo "plain image path unexpectedly captured a result or changed its logs" >&2
+  exit 1
+fi
+
+echo "==> verifying a native versioned termination envelope"
+kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/native-envelope-run.yaml"
+wait_for_run_phase native-envelope Succeeded
+native_result="$(kubectl get agentrun native-envelope -o jsonpath='{.status.result}')"
+native_input_tokens="$(
+  kubectl get agentrun native-envelope -o jsonpath='{.status.usage.inputTokens}'
+)"
+native_output_tokens="$(
+  kubectl get agentrun native-envelope -o jsonpath='{.status.usage.outputTokens}'
+)"
+native_init_containers="$(
+  kubectl get pod run-native-envelope -o jsonpath='{.spec.initContainers[*].name}'
+)"
+if [[ "${native_result}" != '{"answer":"native"}' ||
+  "${native_input_tokens}" != "0" ||
+  "${native_output_tokens}" != "1" ||
+  "${native_init_containers}" == *"inject-reporter"* ]]; then
+  echo "native envelope path did not preserve structured output without injection" >&2
+  exit 1
+fi
 
 echo "==> verifying last-line capture from an unmodified image"
 kubectl apply -f "${ROOT_DIR}/deploy/examples/v1alpha1/stdout-last-line-run.yaml"

@@ -51,8 +51,9 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `budget.wallclock`   | duration string                       | no  | e.g. `5m`. Enforced by controller.                             |
 | `budget.dollars`     | number ≥ 0                            | no  |                                                                |
 | `secretRef.name`     | string                                | no  | Provider credentials Secret.                                   |
+| `knowledgeConfigMapRef.name` | string                       | no  | Static ConfigMap context mounted read-only at `/kontext/knowledge`. |
 | `serviceAccountName` | string                                | no  | Per-agent identity.                                            |
-| `env`                | []EnvVar                              | no  | Extra env passthrough to the Pod.                              |
+| `env`                | []EnvVar                              | no  | Extra literal or Secret-backed env passed to the Pod.          |
 | `schedule`           | string (cron)                         | no  | Only for `Scheduled`.                                          |
 | `backoff`            | object                                | no  | Re-cast backoff policy for `Service`. Controller-defaulted.    |
 
@@ -90,7 +91,9 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 | `tools`              | []string | no  |                                                  |
 | `budget`             | object   | no  | Resolved snapshot.                               |
 | `secretRef.name`     | string   | no  |                                                  |
+| `knowledgeConfigMapRef.name` | string | no | Static ConfigMap context mounted read-only at `/kontext/knowledge`. |
 | `serviceAccountName` | string   | no  |                                                  |
+| `env`                | []EnvVar | no  | Resolved literal or Secret-backed env snapshot.  |
 | `runtime.image`      | string   | yes | Resolved from Agent.                             |
 | `runtime.command`    | []string | no  | Required when stdout capture is configured.      |
 | `runtime.args`       | []string | no  | Appended to the declared command.                |
@@ -138,8 +141,14 @@ Any container can be a Kontext agent if it follows this. Kontext never inspects 
 The controller injects, on the Pod:
 
 - Env vars: `KONTEXT_GOAL`, `KONTEXT_MODEL`, `KONTEXT_PROVIDER`, `KONTEXT_TOOLS` (comma-separated), `KONTEXT_BUDGET_TOKENS`, `KONTEXT_BUDGET_WALLCLOCK`, `KONTEXT_BUDGET_DOLLARS`, `KONTEXT_AGENT_NAME`, `KONTEXT_RUN_NAME`.
-- Optionally a mounted `/kontext/input.json` with the same data (richer/structured payloads).
 - Provider credentials mounted from `secretRef` as env (e.g. `ANTHROPIC_API_KEY`).
+- Optional static ConfigMap context from `knowledgeConfigMapRef`, mounted
+  read-only at `/kontext/knowledge`. This is not RAG: the control plane does no
+  ingestion, embedding, ranking, or retrieval.
+- Generic `spec.env` entries. Each entry selects exactly one literal `value` or
+  `valueFrom.secretKeyRef{name,key}`. Controller-managed variables cannot be
+  overridden through either form. Secret values remain Kubernetes Secret data;
+  they are not copied into Agent/AgentRun fields or controller logs.
 
 ### Output — logs and execution events
 
@@ -156,8 +165,15 @@ The controller injects, on the Pod:
 
 ### Output — result
 
-- On completion, write a compact versioned envelope to
-  `/dev/termination-log` (and optionally `/kontext/result.json`):
+The terminal envelope is optional at the control-plane boundary. An unchanged
+plain image that exits `0` without writing `/dev/termination-log` succeeds with
+absent `status.output` and an empty `status.result`. Native runtimes and images
+using injected stdout capture write richer structured output, usage, timing,
+and execution metadata.
+
+On completion, a runtime that provides a structured result writes a compact
+versioned envelope to `/dev/termination-log` (and may also write
+`/kontext/result.json`):
 
 ```json
 {
@@ -233,10 +249,11 @@ recorded only when they are present in the payload. For compatibility, the
 process exit code remains authoritative for legacy payloads; a legacy `error`
 field is retained as diagnostic text but does not turn exit `0` into failure.
 
-Exit `0` plus a successful envelope means success. A non-zero process exit
-always fails the run. A failed envelope also fails the run even if the process
-exits zero. Malformed or partially written JSON is an actionable failure, not
-a successful plain-text result.
+Exit `0` with no termination payload or with a successful envelope means
+success. A non-zero process exit always fails the run. A failed envelope also
+fails the run even if the process exits zero. If a JSON-looking termination
+payload is present, malformed or partially written JSON remains an actionable
+failure rather than silently becoming a successful plain-text result.
 
 ### Optional result reporter
 
@@ -282,13 +299,23 @@ otherwise empty shared volume; it drops capabilities, disables privilege
 escalation, and uses a read-only root filesystem. The workload container's own
 user and security context remain unchanged.
 
+### Runtime roles
+
+`runtimes/echo` is the deterministic control-plane conformance oracle. During
+the v1alpha1 transition it intentionally writes the legacy termination payload
+documented above. `runtimes/reference` is the maintained model-backed runtime.
+`runtimes/python-anthropic` is retained only as a legacy behavior oracle.
+Arbitrary conforming images remain supported and need not use any of these
+implementations.
+
 ### Maintained reference runtime
 
 `runtimes/reference` is the optional maintained Go runtime. It owns a small
 provider-neutral completion loop behind a normalized provider interface; it is
 not an agent framework. The runtime image bundles the reporter as PID 1 and
-emits its final versioned envelope through the `KONTEXT_RESULT:` stream
-contract.
+uses the internal `KONTEXT_RESULT:` capture protocol so the reporter can write
+the authoritative versioned envelope to the runtime container's termination
+message. Raw logs remain an event and diagnostic stream.
 
 The initial keyless `fake` provider is deterministic and exercises the same
 configuration, conversation, event, result, cancellation, and failure paths
@@ -352,6 +379,24 @@ The reference runtime emits versioned JSONL lifecycle, usage, tool, output, and
 error events to stdout. It retains conversation state only in memory for one
 run and does not provide retries, planning, persistent memory, retrieval,
 subagents, or background orchestration.
+
+Configured MCP servers are a maintained-runtime concern, not control-plane
+vocabulary. The reference runtime uses the official MCP Go SDK v1.6.1, which
+requires Go 1.25 or newer; this repository declares Go 1.26.5. The SDK
+negotiates protocol `2025-11-25` and accepts `2025-06-18`, `2025-03-26`, and
+`2024-11-05`. Discovered MCP tools join the same immutable allowlisted registry
+and use the same turn, call-count, output, cancellation, event, and cleanup
+controls as built-ins.
+
+The maintained Playwright MCP example is a separate restricted
+Deployment/Service reached over HTTP `/mcp`, never an AgentRun sidecar.
+Playwright MCP 0.0.78 is pinned to
+`mcr.microsoft.com/playwright/mcp@sha256:3d871c22ea2d4cca0966e2cfb1860e1cb03eb7353725a3d6cffd133296fb04eb`.
+The browser server has its own keyless identity, ephemeral profile and writable
+storage, finite resources, and NetworkPolicy. It does not add MCP or browser
+fields to either CRD. The example disables Chromium's sandbox because the
+pinned image runs in a restricted container; Playwright MCP is not itself a
+security boundary.
 
 ### Mode expectations for the image
 
