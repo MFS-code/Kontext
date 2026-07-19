@@ -156,9 +156,38 @@ jobs:
       KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
       KONTEXT_STDOUT_FIXTURE_IMAGE: kontext-stdout-fixture:dev
       KONTEXT_DIAG_DIR: ${{ github.workspace }}/.ci-diagnostics
+      KONTEXT_EVAL_DIR: ${{ github.workspace }}/.ci-evals
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Initialize keyless evaluation artifact
+        run: |
+          mkdir -p "${KONTEXT_EVAL_DIR}"
+          marker="${KONTEXT_EVAL_DIR}/not-run.json"
+          temporary="${marker}.tmp"
+          jq -n \
+            --arg commitSHA "${GITHUB_SHA:0:64}" \
+            --arg runAttempt "${GITHUB_RUN_ATTEMPT:0:32}" \
+            --arg runID "${GITHUB_RUN_ID:0:128}" \
+            '{
+              apiVersion: "kontext.dev/eval/v1alpha1",
+              kind: "EvalRunMarker",
+              suite: "keyless",
+              state: "NotRun",
+              failureStage: "workflow_not_started",
+              commitSHA: $commitSHA,
+              runID: $runID,
+              runAttempt: $runAttempt,
+              pass: false
+            }' >"${temporary}"
+          mv "${temporary}" "${marker}"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -226,6 +255,19 @@ jobs:
 
       - name: Run keyless kind end-to-end scenarios
         run: ./scripts/e2e-kind.sh
+
+      - name: Run keyless evaluation acceptance
+        run: ./scripts/eval-kind.sh
+
+      - name: Upload keyless evaluation records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyless-evals-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.KONTEXT_EVAL_DIR }}
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 5
 
       - name: Collect diagnostics on failure
         if: failure()

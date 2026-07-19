@@ -1,0 +1,17 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: plain-logs
+spec:
+  goal: Run an ordinary Linux process without structured result capture.
+  provider: echo
+  model: fixture-model
+  runtime:
+    image: kontext-stdout-fixture:dev
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        echo "ordinary image log"
+        echo "no result reporter is injected"
+  budget:
+    wallclock: 2m

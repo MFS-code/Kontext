@@ -1,0 +1,273 @@
+apiVersion: kontext.dev/eval/v1alpha1
+kind: EvalSuite
+metadata:
+  name: keyless
+spec:
+  defaults:
+    namespace: kontext-eval
+    timeout: 45s
+    runtimeImage: kontext-reference:dev
+  cases:
+    - id: same-goal-model-a
+      description: Same deterministic goal through the first opaque model identifier
+      agentRun:
+        goal: Return stable keyless output.
+        provider: fake
+        model: opaque/vendor-model-a@eval
+        runtime: {}
+        env:
+          - name: KONTEXT_FAKE_SCENARIO
+            value: success
+        budget:
+          wallclock: 30s
+      graders:
+        - type: terminalPhase
+          phase: Succeeded
+        - type: statusResult
+          statusResult:
+            exact: "Fake provider completed goal: Return stable keyless output."
+        - type: executionModel
+          model: opaque/vendor-model-a@eval
+        - type: envelopeOutcome
+          outcome: Succeeded
+        - type: podExitCode
+          exitCode: 0
+
+    - id: same-goal-model-b
+      description: Same deterministic goal through a different opaque model identifier
+      agentRun:
+        goal: Return stable keyless output.
+        provider: fake
+        model: opaque/vendor-model-b@eval
+        runtime: {}
+        env:
+          - name: KONTEXT_FAKE_SCENARIO
+            value: success
+        budget:
+          wallclock: 30s
+      graders:
+        - type: terminalPhase
+          phase: Succeeded
+        - type: statusResult
+          statusResult:
+            exact: "Fake provider completed goal: Return stable keyless output."
+        - type: executionModel
+          model: opaque/vendor-model-b@eval
+        - type: envelopeOutcome
+          outcome: Succeeded
+        - type: podExitCode
+          exitCode: 0
+
+    - id: read-knowledge-used
+      description: An allowlisted knowledge tool is called exactly once
+      agentRun:
+        goal: Read guide.txt exactly once.
+        provider: fake
+        model: opaque/tool-model@eval
+        tools: [read_knowledge]
+        knowledgeConfigMapRef:
+          name: eval-knowledge
+        runtime: {}
+        env:
+          - name: KONTEXT_FAKE_SCENARIO
+            value: tool
+          - name: KONTEXT_FAKE_TOOL_NAME
+            value: read_knowledge
+          - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+            value: '{"path":"guide.txt"}'
+          - name: KONTEXT_MAX_TURNS
+            value: "3"
+          - name: KONTEXT_MAX_TOOL_CALLS
+            value: "1"
+        budget:
+          wallclock: 30s
+      graders:
+        - type: terminalPhase
+          phase: Succeeded
+        - type: statusResult
+          statusResult:
+            exact: "Fake provider received read_knowledge result: keyless knowledge fixture"
+        - type: envelopeTurns
+          turns: 2
+        - type: envelopeToolCalls
+          toolCalls: 1
+        - type: toolEvents
+          tool:
+            name: read_knowledge
+            count: 1
+            isError: false
+        - type: podExitCode
+          exitCode: 0
+
+    - id: read-knowledge-available-not-used
+      description: Tool availability does not imply that the provider calls it
+      agentRun:
+        goal: Complete without calling the available tool.
+        provider: fake
+        model: opaque/no-tool-model@eval
+        tools: [read_knowledge]
+        knowledgeConfigMapRef:
+          name: eval-knowledge
+        runtime: {}
+        env:
+          - name: KONTEXT_FAKE_SCENARIO
+            value: success
+        budget:
+          wallclock: 30s
+      graders:
+        - type: terminalPhase
+          phase: Succeeded
+        - type: envelopeTurns
+          turns: 1
+        - type: envelopeToolCalls
+          toolCalls: 0
+        - type: eventCount
+          event:
+            type: tool
+            count: 0
+
+    - id: kubernetes-read-rbac-denied
+      description: The runtime allows ConfigMaps but the namespace ServiceAccount does not
+      agentRun:
+        goal: Attempt one ConfigMap list.
+        provider: fake
+        model: opaque/rbac-model@eval
+        tools: [kubernetes_read]
+        serviceAccountName: eval-no-rbac
+        runtime: {}
+        env:
+          - name: KONTEXT_FAKE_SCENARIO
+            value: tool
+          - name: KONTEXT_FAKE_TOOL_NAME
+            value: kubernetes_read
+          - name: KONTEXT_FAKE_TOOL_ARGUMENTS
+            value: '{"operation":"list","resource":"configmaps"}'
+          - name: KONTEXT_MAX_TURNS
+            value: "3"
+          - name: KONTEXT_MAX_TOOL_CALLS
+            value: "1"
+        budget:
+          wallclock: 30s
+      graders:
+        - type: terminalPhase
+          phase: Succeeded
+        - type: envelopeToolCalls
+          toolCalls: 1
+        - type: toolEvents
+          tool:
+            name: kubernetes_read
+            count: 1
+            isError: true
+            errorCode: kubernetes_rbac_denied
+
+    - id: missing-provider-credential
+      description: An existing Secret key resolves to an empty provider credential
+      agentRun:
+        goal: Fail after the Pod starts and validates its credential.
+        provider: anthropic
+        model: opaque/credential-model@eval
+        secretRef:
+          name: eval-empty-anthropic
+        runtime: {}
+        budget:
+          wallclock: 30s
+      graders:
+        - type: terminalPhase
+          phase: Failed
+        - type: envelopeOutcome
+          outcome: Failed
+        - type: envelopeErrorCode
+          errorCode: missing_provider_credentials
+        - type: podExitCode
+          exitCode: 1
+
+    - id: provider-network-failure
+      description: A dummy credential reaches a deterministic unreachable loopback endpoint
+      agentRun:
+        goal: Fail at the unreachable provider endpoint.
+        provider: openai-compatible
+        model: opaque/network-model@eval
+        secretRef:
+          name: eval-dummy-openai
+        runtime: {}
+        env:
+          - name: KONTEXT_PROVIDER_ENDPOINT
+            value: http://127.0.0.1:1/chat/completions
+        budget:
+          wallclock: 30s
+      graders:
+        - type: terminalPhase
+          phase: Failed
+        - type: envelopeOutcome
+          outcome: Failed
+        - type: envelopeErrorCode
+          errorCode: provider_network_error
+        - type: podExitCode
+          exitCode: 1
+
+    - id: controller-wallclock
+      description: The controller cancels a running Pod and removes it at wallclock expiry
+      timeout: 30s
+      agentRun:
+        goal: Remain active until the controller cancels this run.
+        provider: fake
+        model: opaque/timeout-model@eval
+        runtime: {}
+        env:
+          - name: KONTEXT_FAKE_SCENARIO
+            value: delay
+          - name: KONTEXT_FAKE_DELAY
+            value: 30s
+        budget:
+          wallclock: 3s
+      graders:
+        - type: terminalPhase
+          phase: BudgetExceeded
+        - type: duration
+          maxDuration: 20s
+
+    - id: malformed-provider-response
+      description: The fake provider returns a malformed normalized response
+      agentRun:
+        goal: Reject the malformed provider response.
+        provider: fake
+        model: opaque/malformed-model@eval
+        runtime: {}
+        env:
+          - name: KONTEXT_FAKE_SCENARIO
+            value: malformed
+        budget:
+          wallclock: 30s
+      graders:
+        - type: terminalPhase
+          phase: Failed
+        - type: envelopeOutcome
+          outcome: Failed
+        - type: envelopeErrorCode
+          errorCode: invalid_provider_response
+        - type: podExitCode
+          exitCode: 1
+
+    - id: reporter-process-crash
+      description: Reporter injection preserves a workload process exit code
+      agentRun:
+        goal: Preserve the fixture process crash.
+        provider: echo
+        model: opaque/crash-model@eval
+        runtime:
+          image: kontext-stdout-fixture:dev
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "fixture process is exiting" >&2
+              exit 7
+          result:
+            source: Stdout
+            format: LastLine
+        budget:
+          wallclock: 30s
+      graders:
+        - type: terminalPhase
+          phase: Failed
+        - type: podExitCode
+          exitCode: 7

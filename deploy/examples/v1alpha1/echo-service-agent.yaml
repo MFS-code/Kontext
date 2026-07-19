@@ -13,6 +13,8 @@ spec:
   env:
     - name: KONTEXT_MODE
       value: service
+  # Long-running Service: budget.wallclock is intentionally omitted. The
+  # controller must not impose a task-style deadline.
   backoff:
     initialSeconds: 3
     maxSeconds: 15

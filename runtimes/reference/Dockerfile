@@ -8,6 +8,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY pkg/result/ pkg/result/
+COPY pkg/event/ pkg/event/
 COPY runtimes/reporter/ runtimes/reporter/
 COPY runtimes/reference/ runtimes/reference/
 
