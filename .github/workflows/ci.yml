@@ -70,6 +70,7 @@ jobs:
           dockerfile: runtimes/reporter/Dockerfile
           tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
           cache-scope: reporter
+          load: "true"
 
       - name: Build model-agnostic reference runtime image
         uses: ./.github/actions/build-image
@@ -78,6 +79,7 @@ jobs:
           dockerfile: runtimes/reference/Dockerfile
           tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
           cache-scope: reference
+          load: "true"
 
       - name: Smoke test reference runtime execution
         run: |
@@ -132,6 +134,7 @@ jobs:
           dockerfile: runtimes/python-anthropic/Dockerfile
           tags: ${{ env.KONTEXT_ANTHROPIC_IMAGE }}
           cache-scope: anthropic
+          load: "true"
 
   e2e:
     name: Kind e2e
@@ -190,6 +193,7 @@ jobs:
           context: .
           tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
           cache-scope: operator
+          load: "true"
 
       - name: Build echo runtime image
         uses: ./.github/actions/build-image
@@ -198,6 +202,7 @@ jobs:
           dockerfile: runtimes/echo/Dockerfile
           tags: ${{ env.KONTEXT_ECHO_IMAGE }}
           cache-scope: echo
+          load: "true"
 
       - name: Build reusable reporter image
         uses: ./.github/actions/build-image
@@ -206,6 +211,7 @@ jobs:
           dockerfile: runtimes/reporter/Dockerfile
           tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
           cache-scope: reporter
+          load: "true"
 
       - name: Build model-agnostic reference runtime image
         uses: ./.github/actions/build-image
@@ -214,6 +220,7 @@ jobs:
           dockerfile: runtimes/reference/Dockerfile
           tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
           cache-scope: reference
+          load: "true"
 
       - name: Build stdout-capture fixture image
         uses: ./.github/actions/build-image
@@ -222,6 +229,7 @@ jobs:
           dockerfile: runtimes/stdout-fixture/Dockerfile
           tags: ${{ env.KONTEXT_STDOUT_FIXTURE_IMAGE }}
           cache-scope: stdout-fixture
+          load: "true"
 
       - name: Create kind cluster
         uses: helm/kind-action@v1
@@ -291,6 +299,7 @@ jobs:
           context: .
           tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
           cache-scope: network-policy-operator
+          load: "true"
 
       - name: Build reusable reporter image
         uses: ./.github/actions/build-image
@@ -299,6 +308,7 @@ jobs:
           dockerfile: runtimes/reporter/Dockerfile
           tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
           cache-scope: network-policy-reporter
+          load: "true"
 
       - name: Build model-agnostic reference runtime image
         uses: ./.github/actions/build-image
@@ -307,6 +317,7 @@ jobs:
           dockerfile: runtimes/reference/Dockerfile
           tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
           cache-scope: network-policy-reference
+          load: "true"
 
       - name: Run Calico NetworkPolicy acceptance
         run: ./scripts/e2e-kind-network-policy.sh

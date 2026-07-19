@@ -309,6 +309,63 @@ func TestAgentRunReconcilerFailsWhenPodLost(t *testing.T) {
 	}
 }
 
+func TestAgentRunReconcilerDeletesLegacyPodWithInvalidWallclock(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "legacy-invalid-wallclock",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	pod := podbuilder.BuildPod(run)
+	if err := k8sClient.Create(ctx, pod); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	runKey := types.NamespacedName{Name: run.Name, Namespace: run.Namespace}
+	reconciler := newAgentRunReconciler()
+	reconciler.Client = &legacyWallclockClient{
+		Client:    k8sClient,
+		runKey:    runKey,
+		wallclock: "not-a-duration",
+	}
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: runKey}); err != nil {
+		t.Fatalf("reconcile legacy run: %v", err)
+	}
+
+	podKey := types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
+	if err := k8sClient.Get(ctx, podKey, &corev1.Pod{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected legacy pod to be deleted, got %v", err)
+	}
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, runKey, &updated); err != nil {
+		t.Fatalf("get failed run: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", updated.Status.Phase)
+	}
+	if updated.Status.PodName != pod.Name {
+		t.Fatalf("expected pod name %q, got %q", pod.Name, updated.Status.PodName)
+	}
+	if updated.Status.CompletionTime == nil {
+		t.Fatal("expected completion time")
+	}
+	if !strings.Contains(updated.Status.Message, `invalid wallclock budget "not-a-duration"`) {
+		t.Fatalf("expected invalid wallclock diagnostics, got %q", updated.Status.Message)
+	}
+}
+
 func TestAgentRunReconcilerObservesSucceededPod(t *testing.T) {
 	ctx := context.Background()
 	podName := podbuilder.PodNameForRun("success-run")
@@ -688,6 +745,30 @@ type deleteErrorClient struct {
 
 func (c *deleteErrorClient) Delete(context.Context, client.Object, ...client.DeleteOption) error {
 	return c.err
+}
+
+// legacyWallclockClient simulates a persisted object created before CRD
+// admission validation was introduced while keeping writes on the real API server.
+type legacyWallclockClient struct {
+	client.Client
+	runKey    types.NamespacedName
+	wallclock string
+}
+
+func (c *legacyWallclockClient) Get(
+	ctx context.Context,
+	key client.ObjectKey,
+	obj client.Object,
+	opts ...client.GetOption,
+) error {
+	if err := c.Client.Get(ctx, key, obj, opts...); err != nil {
+		return err
+	}
+	run, isAgentRun := obj.(*kontextv1alpha1.AgentRun)
+	if isAgentRun && key == c.runKey {
+		run.Spec.Budget = &kontextv1alpha1.BudgetSpec{Wallclock: c.wallclock}
+	}
+	return nil
 }
 
 func updateAgentRunStatus(ctx context.Context, run *kontextv1alpha1.AgentRun, next kontextv1alpha1.AgentRunStatus) error {

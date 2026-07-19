@@ -42,6 +42,7 @@ jobs:
       KONTEXT_ACCEPTANCE_NAMESPACE: provider-acceptance
       KONTEXT_ACCEPTANCE_SCENARIO: ${{ inputs.scenario }}
       KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
+      KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
       KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
       KONTEXT_PROVIDER: ${{ inputs.provider }}
       KONTEXT_MODEL: ${{ inputs.model }}
@@ -75,6 +76,16 @@ jobs:
           context: .
           tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
           cache-scope: provider-acceptance-operator
+          load: "true"
+
+      - name: Build reusable reporter image
+        uses: ./.github/actions/build-image
+        with:
+          context: .
+          dockerfile: runtimes/reporter/Dockerfile
+          tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
+          cache-scope: provider-acceptance-reporter
+          load: "true"
 
       - name: Build maintained reference runtime image
         uses: ./.github/actions/build-image
@@ -83,6 +94,7 @@ jobs:
           dockerfile: runtimes/reference/Dockerfile
           tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
           cache-scope: provider-acceptance-reference
+          load: "true"
 
       - name: Create ephemeral kind cluster
         uses: helm/kind-action@v1
@@ -93,6 +105,7 @@ jobs:
       - name: Load maintained images
         run: |
           kind load docker-image "${KONTEXT_OPERATOR_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+          kind load docker-image "${KONTEXT_REPORTER_IMAGE}" --name "${KIND_CLUSTER_NAME}"
           kind load docker-image "${KONTEXT_REFERENCE_IMAGE}" --name "${KIND_CLUSTER_NAME}"
 
       - name: Install maintained operator

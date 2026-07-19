@@ -156,7 +156,7 @@ uninstall: manifests ## Uninstall CRDs from the K8s cluster specified in ~/.kube
 
 .PHONY: deploy
 deploy: manifests ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	kubectl apply -k config/overlays/dev
+	KONTEXT_OPERATOR_IMAGE="${IMG}" KONTEXT_REPORTER_IMAGE="${REPORTER_IMG}" ./scripts/deploy-go.sh
 
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config.

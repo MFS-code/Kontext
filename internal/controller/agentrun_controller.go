@@ -44,18 +44,19 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	pod := &corev1.Pod{}
 	podKey := client.ObjectKey{Namespace: run.Namespace, Name: podName}
-	err := r.Get(ctx, podKey, pod)
-	podMissing := apierrors.IsNotFound(err)
-	if err != nil && !podMissing {
-		return ctrl.Result{}, err
+	podErr := r.Get(ctx, podKey, pod)
+	podMissing := apierrors.IsNotFound(podErr)
+	if podErr != nil && !podMissing {
+		return ctrl.Result{}, podErr
 	}
 
 	var wallclockLimit *time.Duration
 	if !status.IsTerminalPhase(run.Status.Phase) {
-		wallclockLimit, err = parseWallclockBudget(run.Spec.Budget)
-		if err != nil {
-			return r.failInvalidWallclock(ctx, &run, pod, !podMissing, err)
+		parsedLimit, budgetErr := parseWallclockBudget(run.Spec.Budget)
+		if budgetErr != nil {
+			return r.failInvalidWallclock(ctx, &run, pod, !podMissing, budgetErr)
 		}
+		wallclockLimit = parsedLimit
 	}
 
 	if podMissing {

@@ -55,18 +55,20 @@ if [[ "${IMAGE_SET}" == "full" ]]; then
   fi
 fi
 
-KIND_OVERLAY_DIR="$(mktemp -d "${ROOT_DIR}/config/overlays/.kind.XXXXXX")"
+KIND_OVERLAY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kontext-kind-overlay.XXXXXX")"
 cleanup() {
   rm -rf "${KIND_OVERLAY_DIR}"
 }
 trap cleanup EXIT
+
+cp -R "${ROOT_DIR}/config" "${KIND_OVERLAY_DIR}/config"
 
 cat >"${KIND_OVERLAY_DIR}/kustomization.yaml" <<'EOF'
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - ../dev
+  - config/overlays/dev
 
 patches:
   - path: manager_patch.yaml
@@ -127,7 +129,8 @@ if kubectl get crd agents.kontext.dev >/dev/null 2>&1; then
   fi
 fi
 kubectl delete deployment kontext-controller -n default --ignore-not-found=true
-kubectl apply -k "${KIND_OVERLAY_DIR}"
+kubectl kustomize "${KIND_OVERLAY_DIR}" |
+  kubectl apply -f -
 
 echo "==> waiting for controller rollout"
 kubectl rollout status deployment/controller-manager -n kontext-system --timeout=120s
