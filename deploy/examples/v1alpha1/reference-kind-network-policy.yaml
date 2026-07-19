@@ -62,7 +62,7 @@ spec:
       type: RuntimeDefault
   containers:
     - name: allowed
-      image: kontext-reference:dev
+      image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
       command: ["/bin/httpd"]
       args: ["-f", "-p", "8080", "-h", "/www"]
       ports:
@@ -79,7 +79,7 @@ spec:
           mountPath: /www
           readOnly: true
     - name: blocked
-      image: kontext-reference:dev
+      image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
       command: ["/bin/httpd"]
       args: ["-f", "-p", "8081", "-h", "/www"]
       ports:

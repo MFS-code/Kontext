@@ -11,7 +11,7 @@ spec:
     - browser_navigate
   serviceAccountName: reference-browser-runtime
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:

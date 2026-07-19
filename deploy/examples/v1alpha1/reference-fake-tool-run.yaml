@@ -18,7 +18,7 @@ spec:
   knowledgeConfigMapRef:
     name: reference-tool-knowledge
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
   env:
     - name: KONTEXT_FAKE_SCENARIO
       value: tool

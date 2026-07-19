@@ -112,7 +112,7 @@ spec:
     name: reference-tool-knowledge
   serviceAccountName: kontext-reference-tools
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
@@ -148,7 +148,7 @@ spec:
     - shell
   serviceAccountName: kontext-reference-shell
   runtime:
-    image: kontext-reference:dev
+    image: ghcr.io/mfs-code/kontext-reference:RELEASE_TAG
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
