@@ -66,6 +66,9 @@ Kontext provides generic `Agent` and `AgentRun` primitives. Consumer-specific co
   attached to the GitHub release.
 - Each release includes a single install manifest with digest-pinned operator
   and reporter images for standard Kubernetes clusters.
+- Release CI installs exclusively from public registry artifacts on a clean
+  cluster and verifies upgrade, CRD retention, and complete uninstall paths
+  before creating the GitHub release.
 
 ### M7 — External integration spike ✅
 - Validated a `Service` `Agent`, knowledge `ConfigMap`, and task `AgentRun` from an external client.

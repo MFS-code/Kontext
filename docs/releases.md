@@ -59,6 +59,67 @@ the tagged source:
 make release-manifest IMAGE_DIGESTS=image-digests.json
 ```
 
+## Upgrade between alpha releases
+
+`v1alpha1` does not imply compatibility between Kontext distribution versions.
+Read the target release notes first, especially any CRD schema, defaulting,
+runtime-contract, or status changes. Back up custom resources before upgrading:
+
+```bash
+kubectl get agents,agentruns --all-namespaces -o yaml \
+  > kontext-custom-resources-backup.yaml
+```
+
+Apply the new release manifest over the existing installation and wait for the
+controller rollout:
+
+```bash
+NEW_VERSION=v0.1.0-alpha.2
+kubectl apply -f \
+  "https://github.com/MFS-code/Kontext/releases/download/${NEW_VERSION}/install.yaml"
+kubectl rollout status deployment/controller-manager \
+  --namespace kontext-system \
+  --timeout=180s
+```
+
+Kubernetes updates the CRDs, RBAC, and Deployment declaratively; existing
+`Agent` and `AgentRun` resources remain. Downgrades are not supported. Release
+CI installs the previous published manifest when available, runs a workload,
+applies the candidate manifest in place, and runs the registry-backed suite
+before publishing the new GitHub release.
+
+## Uninstall
+
+To remove only the Kontext control plane while retaining the CRDs and custom
+resources in other namespaces:
+
+```bash
+kubectl delete clusterrolebinding manager-rolebinding \
+  --ignore-not-found=true
+kubectl delete clusterrole manager-role \
+  --ignore-not-found=true
+kubectl delete namespace kontext-system \
+  --ignore-not-found=true --wait=true
+```
+
+Deleting `kontext-system` removes the controller and its ServiceAccount.
+`Agent` and `AgentRun` resources in other namespaces remain stored and can be
+reconciled again by reapplying an install manifest. Any custom resources
+created inside `kontext-system` are deleted with that Namespace.
+
+To remove Kontext completely, including both CRDs:
+
+```bash
+VERSION=v0.1.0-alpha.1
+kubectl delete -f \
+  "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml" \
+  --ignore-not-found=true --wait=true
+```
+
+Deleting a CRD deletes **all** custom resources of that kind across the
+cluster. Back them up first if their history or results must be retained.
+Release CI verifies both the retention procedure and complete removal.
+
 ## API relationship
 
 The git tag, GitHub release, and image tags identify one version of the Kontext
