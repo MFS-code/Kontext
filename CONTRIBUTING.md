@@ -91,6 +91,3 @@ runtime behavior should also exercise the appropriate kind workflow.
 
 Do not include Secrets, provider responses containing private data, generated
 credentials, or unredacted cluster diagnostics.
-
-By participating, you agree to follow the
-[Code of Conduct](CODE_OF_CONDUCT.md).

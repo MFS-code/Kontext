@@ -206,7 +206,6 @@ may intentionally omit `budget.wallclock`.
 - Report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
 - Development and pull request guidance lives in
   [CONTRIBUTING.md](CONTRIBUTING.md).
-- Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Development
 
