@@ -21,10 +21,11 @@ fi
 wait_for_run_phase() {
   local name="$1"
   local expected="$2"
+  local namespace="${3:-default}"
   local phase=""
   for _ in $(seq 1 180); do
     phase="$(
-      kubectl get agentrun "${name}" \
+      kubectl get agentrun "${name}" -n "${namespace}" \
         -o jsonpath='{.status.phase}' 2>/dev/null || true
     )"
     if [[ "${phase}" == "${expected}" ]]; then
@@ -33,13 +34,13 @@ wait_for_run_phase() {
     case "${phase}" in
       ""|Pending|Running) ;;
       *)
-        echo "expected ${name} phase=${expected}, got ${phase}" >&2
+        echo "expected ${namespace}/${name} phase=${expected}, got ${phase}" >&2
         return 1
         ;;
     esac
     sleep 1
   done
-  echo "${name} did not reach ${expected}; last phase=${phase}" >&2
+  echo "${namespace}/${name} did not reach ${expected}; last phase=${phase}" >&2
   return 1
 }
 
