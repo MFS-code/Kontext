@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tag.outputs.version }}
+      registry_owner: ${{ steps.tag.outputs.registry_owner }}
     steps:
       - name: Check out repository history
         uses: actions/checkout@v4
@@ -27,6 +28,7 @@ jobs:
       - name: Validate version and source commit
         id: tag
         env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME}"
@@ -42,9 +44,9 @@ jobs:
             exit 1
           fi
 
-          git fetch origin main
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
-            echo "::error::release tag ${version} does not point to a commit on main"
+          git fetch origin "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${DEFAULT_BRANCH}"; then
+            echo "::error::release tag ${version} does not point to a commit on ${DEFAULT_BRANCH}"
             exit 1
           fi
           if gh release view "${version}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
@@ -53,11 +55,15 @@ jobs:
           fi
 
           echo "version=${version}" >>"${GITHUB_OUTPUT}"
+          echo "registry_owner=${GITHUB_REPOSITORY_OWNER,,}" >>"${GITHUB_OUTPUT}"
 
   images:
     name: Publish ${{ matrix.name }}
     needs: validate
     runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      REGISTRY_OWNER: ${{ needs.validate.outputs.registry_owner }}
     permissions:
       contents: read
       packages: write
@@ -101,16 +107,25 @@ jobs:
       - name: Resolve existing immutable image
         id: existing
         env:
-          IMAGE: ghcr.io/mfs-code/${{ matrix.package }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.REGISTRY_OWNER }}/${{ matrix.package }}
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
           reference="${IMAGE}:${VERSION}"
+          inspect_error="${RUNNER_TEMP}/inspect-${{ matrix.name }}.log"
           if ! manifest="$(
             docker buildx imagetools inspect "${reference}" \
-              --format '{{json .Manifest}}' 2>/dev/null
+              --format '{{json .Manifest}}' 2>"${inspect_error}"
           )"; then
-            echo "exists=false" >>"${GITHUB_OUTPUT}"
-            exit 0
+            error_message="$(<"${inspect_error}")"
+            normalized_error="${error_message,,}"
+            if [[ "${normalized_error}" == *"not found"* ||
+              "${normalized_error}" == *"manifest unknown"* ]]; then
+              echo "exists=false" >>"${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "::error::failed to inspect existing release image ${reference}"
+            printf '%s\n' "${error_message}" >&2
+            exit 1
           fi
 
           images="$(docker buildx imagetools inspect "${reference}" --format '{{json .Image}}')"
@@ -137,7 +152,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           dockerfile: ${{ matrix.dockerfile }}
-          tags: ghcr.io/mfs-code/${{ matrix.package }}:${{ needs.validate.outputs.version }}
+          tags: ${{ env.REGISTRY }}/${{ env.REGISTRY_OWNER }}/${{ matrix.package }}:${{ needs.validate.outputs.version }}
           cache-scope: release-${{ matrix.name }}
           load: "false"
           push: "true"
@@ -169,23 +184,38 @@ jobs:
               sleep $((attempt * 2))
             fi
           done
-          echo "::error::could not make ghcr.io/mfs-code/${PACKAGE} public"
+          echo "::error::could not make ${REGISTRY}/${REGISTRY_OWNER}/${PACKAGE} public"
           exit 1
 
       - name: Verify anonymous multi-arch pull
         env:
-          IMAGE: ghcr.io/mfs-code/${{ matrix.package }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.REGISTRY_OWNER }}/${{ matrix.package }}
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          docker logout ghcr.io
-          manifest="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}")"
-          [[ "${manifest}" == *"linux/amd64"* ]]
-          [[ "${manifest}" == *"linux/arm64"* ]]
+          anonymous_config="$(mktemp -d "${RUNNER_TEMP}/docker-anonymous.XXXXXX")"
+          trap 'rm -rf "${anonymous_config}"' EXIT
+          manifest="$(
+            DOCKER_CONFIG="${anonymous_config}" \
+              docker buildx imagetools inspect "${IMAGE}:${VERSION}" \
+              --format '{{json .Manifest}}'
+          )"
+          for platform in linux/amd64 linux/arm64; do
+            os="${platform%/*}"
+            architecture="${platform#*/}"
+            if ! jq -e \
+              --arg os "${os}" \
+              --arg architecture "${architecture}" \
+              'any(.manifests[]?; .platform.os == $os and .platform.architecture == $architecture)' \
+              <<<"${manifest}" >/dev/null; then
+              echo "::error::${IMAGE}:${VERSION} is missing ${platform}"
+              exit 1
+            fi
+          done
 
       - name: Record immutable image reference
         env:
           DIGEST: ${{ steps.existing.outputs.digest || steps.build.outputs.digest }}
-          IMAGE: ghcr.io/mfs-code/${{ matrix.package }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.REGISTRY_OWNER }}/${{ matrix.package }}
           IMAGE_NAME: ${{ matrix.name }}
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
@@ -226,7 +256,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
 
       - name: Download image metadata
         uses: actions/download-artifact@v4
