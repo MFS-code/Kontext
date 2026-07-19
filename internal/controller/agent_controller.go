@@ -113,7 +113,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 		if !apierrors.IsAlreadyExists(err) {
 			return ctrl.Result{}, err
 		}
-		return r.handleServiceRunAlreadyExists(ctx, agent, runName, nextSuffix)
+		return r.handleServiceRunAlreadyExists(ctx, agent, runName)
 	}
 
 	nextStatus := kontextv1alpha1.AgentStatus{
@@ -143,7 +143,6 @@ func (r *AgentReconciler) handleServiceRunAlreadyExists(
 	ctx context.Context,
 	agent *kontextv1alpha1.Agent,
 	runName string,
-	expectedSuffix int32,
 ) (ctrl.Result, error) {
 	if r.APIReader == nil {
 		return ctrl.Result{}, fmt.Errorf("cannot verify existing AgentRun %s/%s: APIReader is not configured", agent.Namespace, runName)
@@ -157,8 +156,7 @@ func (r *AgentReconciler) handleServiceRunAlreadyExists(
 		return ctrl.Result{}, err
 	}
 
-	suffix, canonical := serviceRunSuffix(agent.Name, existing.Name)
-	if canonical && suffix == expectedSuffix && metav1.IsControlledBy(&existing, agent) {
+	if metav1.IsControlledBy(&existing, agent) {
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -172,10 +170,9 @@ func (r *AgentReconciler) handleServiceRunAlreadyExists(
 }
 
 type observedServiceRuns struct {
-	current    *kontextv1alpha1.AgentRun
-	previous   *kontextv1alpha1.AgentRun
-	maxSuffix  int32
-	prevSuffix int32
+	current   *kontextv1alpha1.AgentRun
+	previous  *kontextv1alpha1.AgentRun
+	maxSuffix int32
 }
 
 func (r *AgentReconciler) observeServiceRuns(
@@ -193,6 +190,7 @@ func (r *AgentReconciler) observeServiceRuns(
 	}
 
 	var observed observedServiceRuns
+	var previousSuffix int32
 	for i := range children.Items {
 		run := &children.Items[i]
 		if !metav1.IsControlledBy(run, agent) {
@@ -205,12 +203,12 @@ func (r *AgentReconciler) observeServiceRuns(
 		switch {
 		case suffix > observed.maxSuffix:
 			observed.previous = observed.current
-			observed.prevSuffix = observed.maxSuffix
+			previousSuffix = observed.maxSuffix
 			observed.current = run
 			observed.maxSuffix = suffix
-		case suffix > observed.prevSuffix:
+		case suffix > previousSuffix:
 			observed.previous = run
-			observed.prevSuffix = suffix
+			previousSuffix = suffix
 		}
 	}
 	return observed, nil
@@ -230,6 +228,8 @@ func serviceRunSuffix(agentName, runName string) (int32, bool) {
 }
 
 func (runs observedServiceRuns) status(generation int64) kontextv1alpha1.AgentStatus {
+	// Run suffixes form a monotonic creation sequence, so deleting old runs
+	// does not reduce the historical creation and restart counters.
 	next := kontextv1alpha1.AgentStatus{
 		RunsCreated:        runs.maxSuffix,
 		ObservedGeneration: generation,
