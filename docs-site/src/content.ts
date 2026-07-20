@@ -1,5 +1,5 @@
 import docsConfig from "../content/docs-nav.json";
-import { parseFrontmatter } from "./frontmatter";
+import { pageMetadataById, parseFrontmatter } from "../shared/docs.js";
 
 export type DocPageMeta = {
   id: string;
@@ -44,30 +44,17 @@ function stripNoteCallouts(markdown: string): string {
   );
 }
 
-function fileToId(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, "/");
-  if (normalized.endsWith("/SPEC.md") || normalized.endsWith("SPEC.md")) {
-    return "SPEC";
-  }
-  const match = normalized.match(/\/content\/docs\/([^/]+)\.md$/);
-  if (!match) {
-    throw new Error(`Unexpected docs path: ${filePath}`);
-  }
-  return `docs/${match[1]}`;
-}
-
-function idToPath(id: string): string {
-  if (id === "SPEC") {
-    return "/SPEC";
-  }
-  if (id === "docs/index") {
-    return "/docs";
-  }
-  return `/${id}`;
-}
-
-function parsePage(filePath: string, raw: string): DocPageMeta {
-  const id = fileToId(filePath);
+function parsePage({
+  id,
+  filePath,
+  path,
+  raw,
+}: {
+  id: string;
+  filePath: string;
+  path: string;
+  raw: string;
+}): DocPageMeta {
   const { data, content } = parseFrontmatter(raw);
   const title =
     typeof data.title === "string"
@@ -82,7 +69,7 @@ function parsePage(filePath: string, raw: string): DocPageMeta {
 
   return {
     id,
-    path: idToPath(id),
+    path,
     file: filePath,
     title,
     sidebarTitle,
@@ -93,9 +80,13 @@ function parsePage(filePath: string, raw: string): DocPageMeta {
 
 const pagesById = new Map<string, DocPageMeta>();
 
-for (const [filePath, raw] of Object.entries(modules)) {
-  const page = parsePage(filePath, raw);
-  pagesById.set(page.id, page);
+for (const [id, metadata] of pageMetadataById) {
+  const filePath = `../content/${metadata.srcFile}`;
+  const raw = modules[filePath];
+  if (raw === undefined) {
+    throw new Error(`Missing docs source: ${metadata.srcFile}`);
+  }
+  pagesById.set(id, parsePage({ id, filePath, path: metadata.routePath, raw }));
 }
 
 export const allPages: DocPageMeta[] = [...pagesById.values()].sort((a, b) =>
@@ -125,7 +116,8 @@ export function searchPages(query: string): DocPageMeta[] {
     return [];
   }
   return allPages.filter((page) => {
-    const haystack = `${page.title}\n${page.sidebarTitle}\n${page.description}\n${page.body}`.toLowerCase();
+    const haystack =
+      `${page.title}\n${page.sidebarTitle}\n${page.description}\n${page.body}`.toLowerCase();
     return haystack.includes(q);
   });
 }
