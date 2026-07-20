@@ -17,6 +17,16 @@ const (
 	MaxEventLineBytes = 64 << 10
 )
 
+var (
+	eventAPIVersionFieldMarker          = []byte(`"apiVersion"`)
+	currentEventAPIVersionMarker        = []byte(`"` + eventv1alpha1.APIVersion + `"`)
+	escapedCurrentEventAPIVersionMarker = bytes.ReplaceAll(
+		currentEventAPIVersionMarker,
+		[]byte("/"),
+		[]byte(`\/`),
+	)
+)
+
 type parsedLogs struct {
 	Events EventSummary
 	Errors []string
@@ -76,7 +86,7 @@ func ParseLogs(
 		line := append([]byte(nil), scanner.Bytes()...)
 		event, err := eventv1alpha1.Parse(line)
 		if err != nil {
-			if bytes.Contains(line, []byte(eventv1alpha1.APIVersion)) {
+			if hasCurrentEventAPIVersionMarker(line) {
 				parsed.Errors = append(parsed.Errors, fmt.Sprintf("parse required runtime event: %v", err))
 			}
 			continue
@@ -109,6 +119,29 @@ func ParseLogs(
 		parsed.Errors = append(parsed.Errors, fmt.Sprintf("scan runtime logs: %v", err))
 	}
 	return parsed
+}
+
+// hasCurrentEventAPIVersionMarker intentionally ignores event type. A line
+// claiming the current protocol version must satisfy the strict top-level
+// envelope and use a known current-version type, even when no grader requests
+// that type. JSON may encode slashes in the version string as either "/" or
+// "\/", so both exact quoted values are recognized after an apiVersion key
+// without normalizing or reparsing the malformed frame.
+func hasCurrentEventAPIVersionMarker(line []byte) bool {
+	fieldIndex := bytes.Index(line, eventAPIVersionFieldMarker)
+	if fieldIndex < 0 {
+		return false
+	}
+	valueRegion := bytes.TrimLeft(
+		line[fieldIndex+len(eventAPIVersionFieldMarker):],
+		" \t\r\n",
+	)
+	if len(valueRegion) == 0 || valueRegion[0] != ':' {
+		return false
+	}
+	valueRegion = bytes.TrimLeft(valueRegion[1:], " \t\r\n")
+	return bytes.HasPrefix(valueRegion, currentEventAPIVersionMarker) ||
+		bytes.HasPrefix(valueRegion, escapedCurrentEventAPIVersionMarker)
 }
 
 func parseEventData(event eventv1alpha1.Event) (any, error) {

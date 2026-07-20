@@ -145,14 +145,14 @@ func validateStructuredOutputGrader(grader Grader) error {
 	if grader.StructuredOutput == nil {
 		return errors.New("structuredOutput expectation is required")
 	}
+	mediaType := grader.StructuredOutput.MediaType
+	if mediaType != "" && strings.TrimSpace(mediaType) == "" {
+		return errors.New("structuredOutput.mediaType must not be blank")
+	}
 	if grader.StructuredOutput.Present == nil &&
 		grader.StructuredOutput.Valid == nil &&
-		strings.TrimSpace(grader.StructuredOutput.MediaType) == "" {
+		mediaType == "" {
 		return errors.New("structuredOutput requires present, valid, or mediaType")
-	}
-	if grader.StructuredOutput.MediaType != "" &&
-		strings.TrimSpace(grader.StructuredOutput.MediaType) == "" {
-		return errors.New("structuredOutput.mediaType must not be blank")
 	}
 	return nil
 }

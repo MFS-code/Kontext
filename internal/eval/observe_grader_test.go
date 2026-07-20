@@ -62,16 +62,57 @@ func TestParseLogsFailsRelevantMalformedAndIncompleteEvents(t *testing.T) {
 	}
 }
 
-func TestMalformedEventWithAPIVersionMarkerFailsCollection(t *testing.T) {
-	line := `{"apiVersion": "kontext.dev/event/v1alpha1","type":"tool","data":`
+func TestMalformedCurrentVersionEventMarkersFailCollection(t *testing.T) {
+	tests := map[string]string{
+		"literal slashes": `{"apiVersion": "kontext.dev/event/v1alpha1","type":"tool","data":`,
+		"escaped slashes": `{"apiVersion":"kontext.dev\/event\/v1alpha1","type":"tool","data":`,
+	}
+	for name, line := range tests {
+		t.Run(name, func(t *testing.T) {
+			parsed := ParseLogs(
+				[]byte(line+"\n"),
+				false,
+				map[eventv1alpha1.Type]struct{}{eventv1alpha1.TypeLifecycle: {}},
+				nil,
+			)
+			if len(parsed.Errors) != 1 ||
+				!strings.Contains(parsed.Errors[0], "parse required runtime event") {
+				t.Fatalf("malformed current-version frame was ignored: %#v", parsed)
+			}
+		})
+	}
+}
+
+func TestUnknownCurrentVersionEventTypeFailsCollection(t *testing.T) {
+	currentUnknown := `{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:00Z","type":"telemetry","data":{}}`
 	parsed := ParseLogs(
-		[]byte(line+"\n"),
+		[]byte(currentUnknown+"\n"),
 		false,
-		map[eventv1alpha1.Type]struct{}{eventv1alpha1.TypeTool: {}},
+		map[eventv1alpha1.Type]struct{}{eventv1alpha1.TypeLifecycle: {}},
 		nil,
 	)
-	if len(parsed.Errors) == 0 {
-		t.Fatalf("malformed escaped event frame was ignored: %#v", parsed)
+	if len(parsed.Errors) != 1 ||
+		!strings.Contains(parsed.Errors[0], `unsupported event type "telemetry"`) {
+		t.Fatalf("unknown current-version type did not fail collection: %#v", parsed)
+	}
+
+	for _, version := range []string{"kontext.dev/event/v1alpha2", "kontext.dev/event/v1alpha10"} {
+		futureUnknown := strings.Replace(currentUnknown, eventv1alpha1.APIVersion, version, 1)
+		futureUnknown = strings.Replace(
+			futureUnknown,
+			`"data":{}`,
+			`"data":{"mentionedVersion":"`+eventv1alpha1.APIVersion+`"}`,
+			1,
+		)
+		parsed = ParseLogs(
+			[]byte(futureUnknown+"\n"),
+			false,
+			map[eventv1alpha1.Type]struct{}{eventv1alpha1.TypeLifecycle: {}},
+			nil,
+		)
+		if len(parsed.Errors) != 0 {
+			t.Fatalf("%s line affected current-version collection: %#v", version, parsed)
+		}
 	}
 }
 
