@@ -1,9 +1,11 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
+import { ScrollToTop } from "./ScrollToTop";
 
 export function Layout() {
   return (
     <div className="shell">
+      <ScrollToTop />
       <header className="topbar">
         <div className="topbar-inner">
           <a className="brand" href="https://kontext.run">
