@@ -60,3 +60,5 @@ AGENTS.md
 node_modules/
 
 .vercel/
+.vercel
+.env*
