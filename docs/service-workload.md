@@ -11,9 +11,8 @@ available. The controller owns one live `AgentRun` for the `Agent` and mints a
 replacement when that run exits.
 
 <Note>
-  Use a published release image tag or digest. The example below uses the first
-  planned alpha tag; confirm it exists on
-  [Releases](https://github.com/MFS-code/Kontext/releases) before applying.
+  The example uses the published `v0.1.0-alpha.1` echo image. Pin a release tag
+  or digest in your own manifests.
 </Note>
 
 ## Apply a Service Agent

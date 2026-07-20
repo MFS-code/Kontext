@@ -85,14 +85,15 @@ successful `scripts/eval-kind.sh` removes the marker after writing and
 validating JSONL/summary output; an earlier failure leaves the marker visible
 in the always-uploaded artifact.
 
-## Protected pre-alpha acceptance
+## Protected release acceptance
 
-Before an alpha release, a maintainer must dispatch `.github/workflows/provider-acceptance.yml`
-against the protected `provider-acceptance` environment for each maintained
-transport being released. Select a small supported model, review endpoint and
-pricing, approve the environment, and require the workflow to pass. Download
-the `provider-acceptance-<run>-<attempt>` artifact and retain
-`acceptance.json` with the release evidence.
+For each release, a maintainer dispatches
+`.github/workflows/provider-acceptance.yml` against the protected
+`provider-acceptance` environment for every maintained transport in that
+release. Select a small supported model, review endpoint and pricing, approve
+the environment, and require the workflow to pass. Download the
+`provider-acceptance-<run>-<attempt>` artifact and retain `acceptance.json`
+with the release evidence.
 
 A local render or keyless run is not an authenticated provider acceptance.
 Without the protected credentials, record that the dispatch remains pending;

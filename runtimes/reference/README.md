@@ -457,11 +457,11 @@ measured usage, turns, tool calls, and pass/fail only. It excludes API keys,
 Secret values, raw logs, and model output. The workflow uploads this record on
 success or failure with short retention.
 
-Before an alpha release, dispatch the workflow for each maintained transport
-being released, approve the protected environment, require a passing run, and
+For each release, dispatch the workflow for every maintained transport being
+published, approve the protected environment, require a passing run, and
 retain the `provider-acceptance-<run>-<attempt>` artifact with the release
 evidence. Without those protected credentials, no local or keyless run counts
-as authenticated acceptance. Immutable versioned image publication is a
+as authenticated acceptance. Immutable versioned image publication remains a
 separate release step.
 
 ## Dependency inventory
