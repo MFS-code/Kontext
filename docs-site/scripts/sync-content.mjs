@@ -8,7 +8,7 @@ const repoRoot = path.resolve(docsSite, "..");
 const contentRoot = path.join(docsSite, "content");
 
 const sources = [
-  { from: "docs.json", to: "docs.json" },
+  { from: "docs-nav.json", to: "docs-nav.json" },
   { from: "SPEC.md", to: "SPEC.md" },
 ];
 

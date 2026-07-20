@@ -1,0 +1,33 @@
+{
+  "name": "Kontext",
+  "description": "Kubernetes-native control plane for running AI agents as production workloads.",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": [
+          "docs/index",
+          "docs/quickstart",
+          "docs/resources",
+          "docs/service-workload"
+        ]
+      },
+      {
+        "group": "Operate",
+        "pages": [
+          "docs/operations",
+          "docs/releases",
+          "docs/runtimes",
+          "docs/evals"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          "SPEC",
+          "docs/when-not-to-use-agents"
+        ]
+      }
+    ]
+  }
+}

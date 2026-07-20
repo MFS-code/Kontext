@@ -1,4 +1,4 @@
-import docsConfig from "../content/docs.json";
+import docsConfig from "../content/docs-nav.json";
 import { parseFrontmatter } from "./frontmatter";
 
 export type DocPageMeta = {
@@ -30,7 +30,7 @@ const specModules = import.meta.glob("../content/SPEC.md", {
 
 const modules = { ...docsModules, ...specModules };
 
-function stripMintlifyComponents(markdown: string): string {
+function stripNoteCallouts(markdown: string): string {
   return markdown.replace(
     /<Note>\s*([\s\S]*?)\s*<\/Note>/g,
     (_match, body: string) => {
@@ -87,7 +87,7 @@ function parsePage(filePath: string, raw: string): DocPageMeta {
     title,
     sidebarTitle,
     description,
-    body: stripMintlifyComponents(content.trim()),
+    body: stripNoteCallouts(content.trim()),
   };
 }
 
@@ -108,7 +108,7 @@ export const navGroups: NavGroup[] = docsConfig.navigation.groups.map(
     pages: group.pages.map((id) => {
       const page = pagesById.get(id);
       if (!page) {
-        throw new Error(`docs.json references missing page: ${id}`);
+        throw new Error(`docs-nav.json references missing page: ${id}`);
       }
       return page;
     }),

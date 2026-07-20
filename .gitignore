@@ -56,7 +56,7 @@ vendor/
 # Local development files
 AGENTS.md
 
-# Local Node tooling when previewing Mintlify docs
+# Local Node tooling (docs-site, etc.)
 node_modules/
 
 .vercel/

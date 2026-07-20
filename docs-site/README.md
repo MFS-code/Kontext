@@ -1,7 +1,7 @@
 # Docs site (`docs.kontext.run`)
 
 Self-hosted documentation app (ViaBOM-style). Renders repository Markdown from
-`docs/*.md` and `SPEC.md`, with navigation from root `docs.json`. Visual
+`docs/*.md` and `SPEC.md`, with navigation from root `docs-nav.json`. Visual
 language matches [`website/`](../website/).
 
 `npm run sync` copies those sources into `docs-site/content/` (gitignored) before

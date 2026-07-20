@@ -43,41 +43,42 @@ function pageIdToSrc(id) {
   return `${id}.md`;
 }
 
-function loadPagesFromDocsJson() {
-  const docsJsonPath = path.join(contentRoot, "docs.json");
-  if (!fs.existsSync(docsJsonPath)) {
-    throw new Error(`Missing ${docsJsonPath}; run npm run sync first`);
+function loadPagesFromNav() {
+  const navPath = path.join(contentRoot, "docs-nav.json");
+  if (!fs.existsSync(navPath)) {
+    throw new Error(`Missing ${navPath}; run npm run sync first`);
   }
-  const config = JSON.parse(fs.readFileSync(docsJsonPath, "utf8"));
+  const config = JSON.parse(fs.readFileSync(navPath, "utf8"));
   const ids = config.navigation.groups.flatMap((group) => group.pages);
-  return ids.map((id) => {
-    const src = pageIdToSrc(id);
-    const srcPath = path.join(contentRoot, src);
-    if (!fs.existsSync(srcPath)) {
-      throw new Error(`docs.json references missing page: ${id} (${src})`);
-    }
-    const raw = fs.readFileSync(srcPath, "utf8");
-    const { data, body } = stripFrontmatter(raw);
-    return {
-      id,
-      title: typeof data.title === "string" ? data.title : id,
-      description: typeof data.description === "string" ? data.description : "",
-      src,
-      mdOut: src,
-      raw,
-      body,
-    };
-  });
+  return {
+    config,
+    pages: ids.map((id) => {
+      const src = pageIdToSrc(id);
+      const srcPath = path.join(contentRoot, src);
+      if (!fs.existsSync(srcPath)) {
+        throw new Error(`docs-nav.json references missing page: ${id} (${src})`);
+      }
+      const raw = fs.readFileSync(srcPath, "utf8");
+      const { data, body } = stripFrontmatter(raw);
+      return {
+        id,
+        title: typeof data.title === "string" ? data.title : id,
+        description:
+          typeof data.description === "string" ? data.description : "",
+        src,
+        mdOut: src,
+        raw,
+        body,
+      };
+    }),
+  };
 }
 
 if (!fs.existsSync(dist)) {
   throw new Error(`Missing dist directory at ${dist}; run vite build first`);
 }
 
-const pages = loadPagesFromDocsJson();
-const docsConfig = JSON.parse(
-  fs.readFileSync(path.join(contentRoot, "docs.json"), "utf8"),
-);
+const { config: docsConfig, pages } = loadPagesFromNav();
 const siteDescription =
   typeof docsConfig.description === "string"
     ? docsConfig.description
