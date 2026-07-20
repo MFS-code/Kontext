@@ -43,26 +43,7 @@ type Registry struct {
 
 type implementation interface {
 	Definition() runtimeapi.ToolDefinition
-	Execute(context.Context, []byte) (outcome, error)
-}
-
-type outcome struct {
-	Content   string
-	IsError   bool
-	ErrorCode string
-	Truncated bool
-}
-
-type Error struct {
-	Code    string
-	Message string
-}
-
-func (err *Error) Error() string {
-	if err.Code == "" {
-		return err.Message
-	}
-	return fmt.Sprintf("%s: %s", err.Code, err.Message)
+	Execute(context.Context, []byte) (runtimeapi.ToolResult, error)
 }
 
 func NewWithContext(ctx context.Context, toolConfig Config) (*Registry, error) {
@@ -71,7 +52,7 @@ func NewWithContext(ctx context.Context, toolConfig Config) (*Registry, error) {
 		config.MaxCapturedBytes = maxSafeCapturedBytes
 	}
 	if config.MaxCapturedBytes > maxSafeCapturedBytes {
-		return nil, &Error{
+		return nil, &runtimeapi.CodedError{
 			Code: "invalid_tool_configuration",
 			Message: fmt.Sprintf(
 				"captured tool output cannot exceed %d bytes",
@@ -88,16 +69,13 @@ func NewWithContext(ctx context.Context, toolConfig Config) (*Registry, error) {
 
 	mcpManager, err := mcpclient.New(ctx, config.MCP, config.Stderr)
 	if err != nil {
-		code := "invalid_tool_configuration"
-		message := err.Error()
-		var mcpError *mcpclient.Error
-		if errors.As(err, &mcpError) && mcpError.Code != "" {
-			code = mcpError.Code
-			message = mcpError.Message
+		var codedError *runtimeapi.CodedError
+		if errors.As(err, &codedError) && codedError.Code != "" {
+			return nil, codedError
 		}
-		return nil, &Error{
-			Code:    code,
-			Message: message,
+		return nil, &runtimeapi.CodedError{
+			Code:    "invalid_tool_configuration",
+			Message: err.Error(),
 		}
 	}
 	implementations := map[string]implementation{
@@ -115,7 +93,7 @@ func NewWithContext(ctx context.Context, toolConfig Config) (*Registry, error) {
 	for _, definition := range mcpManager.Definitions() {
 		if _, collision := implementations[definition.Name]; collision {
 			closeMCPManagerAfterStartupFailure(mcpManager)
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code:    "tool_name_collision",
 				Message: fmt.Sprintf("MCP tool %q collides with another available tool", definition.Name),
 			}
@@ -138,7 +116,7 @@ func NewWithContext(ctx context.Context, toolConfig Config) (*Registry, error) {
 		selected, exists := implementations[name]
 		if !exists {
 			closeMCPManagerAfterStartupFailure(mcpManager)
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code:    "unknown_tool",
 				Message: fmt.Sprintf("configured tool %q is not available in the reference runtime", name),
 			}
@@ -170,14 +148,8 @@ func (tool *mcpImplementation) Definition() runtimeapi.ToolDefinition {
 func (tool *mcpImplementation) Execute(
 	ctx context.Context,
 	arguments []byte,
-) (outcome, error) {
-	result, err := tool.manager.Execute(ctx, tool.definition.Name, arguments)
-	return outcome{
-		Content:   result.Content,
-		IsError:   result.IsError,
-		ErrorCode: result.ErrorCode,
-		Truncated: result.Truncated,
-	}, err
+) (runtimeapi.ToolResult, error) {
+	return tool.manager.Execute(ctx, tool.definition.Name, arguments)
 }
 
 func (registry *Registry) Close(ctx context.Context) error {
@@ -220,12 +192,12 @@ func (registry *Registry) Execute(
 		}
 		return result, nil
 	}
-	toolOutcome, err := selected.Execute(ctx, call.Arguments)
+	toolResult, err := selected.Execute(ctx, call.Arguments)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return runtimeapi.ToolResult{}, err
 		}
-		var toolError *Error
+		var toolError *runtimeapi.CodedError
 		if errors.As(err, &toolError) {
 			result.IsError = true
 			result.ErrorCode = toolError.Code
@@ -237,9 +209,7 @@ func (registry *Registry) Execute(
 		result.Content = err.Error()
 		return result, nil
 	}
-	result.Content = toolOutcome.Content
-	result.IsError = toolOutcome.IsError
-	result.ErrorCode = toolOutcome.ErrorCode
-	result.Truncated = toolOutcome.Truncated
-	return result, nil
+	toolResult.CallID = call.ID
+	toolResult.Name = call.Name
+	return toolResult, nil
 }

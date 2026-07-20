@@ -25,25 +25,6 @@ const (
 	processTerminationGrace = 500 * time.Millisecond
 )
 
-type Error struct {
-	Code    string
-	Message string
-}
-
-func (err *Error) Error() string {
-	if err.Code == "" {
-		return err.Message
-	}
-	return fmt.Sprintf("%s: %s", err.Code, err.Message)
-}
-
-type Result struct {
-	Content   string
-	IsError   bool
-	ErrorCode string
-	Truncated bool
-}
-
 type Manager struct {
 	servers         []*server
 	tools           map[string]*remoteTool
@@ -84,7 +65,7 @@ func New(ctx context.Context, mcpConfig config.MCPConfig, stderr io.Writer) (*Ma
 		}
 		if err := current.connect(ctx); err != nil {
 			manager.closeAfterStartupFailure()
-			var clientError *Error
+			var clientError *runtimeapi.CodedError
 			if errors.As(err, &clientError) {
 				return nil, clientError
 			}
@@ -98,7 +79,7 @@ func New(ctx context.Context, mcpConfig config.MCPConfig, stderr io.Writer) (*Ma
 		for _, discovered := range current.frozen {
 			if len(manager.definitions) >= maxDiscoveredTools {
 				manager.closeAfterStartupFailure()
-				return nil, &Error{
+				return nil, &runtimeapi.CodedError{
 					Code: "mcp_discovery_limit_exceeded",
 					Message: fmt.Sprintf(
 						"configured MCP servers expose more than %d tools in total",
@@ -108,7 +89,7 @@ func New(ctx context.Context, mcpConfig config.MCPConfig, stderr io.Writer) (*Ma
 			}
 			if _, collision := manager.tools[discovered.name]; collision {
 				manager.closeAfterStartupFailure()
-				return nil, &Error{
+				return nil, &runtimeapi.CodedError{
 					Code:    "mcp_invalid_tool_definition",
 					Message: fmt.Sprintf("MCP tool name %q is provided more than once", discovered.name),
 				}
@@ -123,7 +104,7 @@ func New(ctx context.Context, mcpConfig config.MCPConfig, stderr io.Writer) (*Ma
 				len(discovered.definition.InputSchema)
 			if manager.definitionBytes > maxTotalToolDefinitionBytes {
 				manager.closeAfterStartupFailure()
-				return nil, &Error{
+				return nil, &runtimeapi.CodedError{
 					Code: "mcp_discovery_limit_exceeded",
 					Message: fmt.Sprintf(
 						"configured MCP tool definitions exceed the %d-byte total limit",
@@ -148,9 +129,9 @@ func (manager *Manager) Execute(
 	ctx context.Context,
 	name string,
 	arguments json.RawMessage,
-) (Result, error) {
+) (runtimeapi.ToolResult, error) {
 	if manager == nil {
-		return Result{
+		return runtimeapi.ToolResult{
 			IsError:   true,
 			ErrorCode: "mcp_unavailable",
 			Content:   "MCP execution is unavailable",
@@ -158,14 +139,14 @@ func (manager *Manager) Execute(
 	}
 	selected, exists := manager.tools[name]
 	if !exists {
-		return Result{
+		return runtimeapi.ToolResult{
 			IsError:   true,
 			ErrorCode: "unknown_tool",
 			Content:   fmt.Sprintf("tool %q is not available", name),
 		}, nil
 	}
 	if err := validateArguments(selected.name, selected.schema, arguments); err != nil {
-		return Result{
+		return runtimeapi.ToolResult{
 			IsError:   true,
 			ErrorCode: "mcp_invalid_arguments",
 			Content:   err.Error(),
@@ -239,7 +220,7 @@ func (current *server) connect(ctx context.Context) error {
 	)
 	if err != nil {
 		_ = current.closeSession(ctx)
-		var clientError *Error
+		var clientError *runtimeapi.CodedError
 		if errors.As(err, &clientError) {
 			clientError.Message = current.redactor.clean(clientError.Message)
 			return clientError
@@ -252,7 +233,7 @@ func (current *server) connect(ctx context.Context) error {
 	}
 	if current.frozen != nil && !sameTools(current.frozen, discovered) {
 		_ = current.closeSession(ctx)
-		return &Error{
+		return &runtimeapi.CodedError{
 			Code:    "mcp_toolset_changed",
 			Message: fmt.Sprintf("MCP server %q tool definitions changed after reconnect", current.config.Name),
 		}
@@ -304,13 +285,13 @@ func (current *server) call(
 	ctx context.Context,
 	name string,
 	arguments json.RawMessage,
-) (Result, error) {
+) (runtimeapi.ToolResult, error) {
 	current.mu.Lock()
 	defer current.mu.Unlock()
 
 	if current.stale {
 		if err := current.closeSession(ctx); err != nil {
-			return Result{
+			return runtimeapi.ToolResult{
 				IsError:   true,
 				ErrorCode: "mcp_reconnect_failed",
 				Content:   fmt.Sprintf("MCP server %q could not close its stale session", current.config.Name),
@@ -318,7 +299,7 @@ func (current *server) call(
 		}
 		if err := current.connect(ctx); err != nil {
 			current.stale = true
-			return Result{
+			return runtimeapi.ToolResult{
 				IsError:   true,
 				ErrorCode: "mcp_reconnect_failed",
 				Content: current.safeMessage(
@@ -337,10 +318,10 @@ func (current *server) call(
 	if err != nil {
 		current.stale = true
 		if ctx.Err() != nil {
-			return Result{}, ctx.Err()
+			return runtimeapi.ToolResult{}, ctx.Err()
 		}
 		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
-			return Result{
+			return runtimeapi.ToolResult{
 				IsError:   true,
 				ErrorCode: "mcp_timeout",
 				Content:   fmt.Sprintf("MCP tool %q timed out", name),
@@ -350,7 +331,7 @@ func (current *server) call(
 		if errors.Is(err, mcp.ErrConnectionClosed) {
 			code = "mcp_transport_error"
 		}
-		return Result{
+		return runtimeapi.ToolResult{
 			IsError:   true,
 			ErrorCode: code,
 			Content: current.safeMessage(
@@ -361,13 +342,13 @@ func (current *server) call(
 
 	content, truncated, normalizeErr := normalizeResult(response, current.redactor)
 	if normalizeErr != nil {
-		return Result{
+		return runtimeapi.ToolResult{
 			IsError:   true,
 			ErrorCode: normalizeErr.Code,
 			Content:   normalizeErr.Message,
 		}, nil
 	}
-	return Result{
+	return runtimeapi.ToolResult{
 		Content:   content,
 		IsError:   response.IsError,
 		ErrorCode: errorCode(response.IsError),

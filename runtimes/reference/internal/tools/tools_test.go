@@ -34,7 +34,7 @@ func TestRegistryRejectsUnknownConfiguredTool(t *testing.T) {
 		context.Background(),
 		tools.Config{Allowed: []string{"not-built-in"}},
 	)
-	var toolError *tools.Error
+	var toolError *runtimeapi.CodedError
 	if !errors.As(err, &toolError) || toolError.Code != "unknown_tool" {
 		t.Fatalf("unexpected error %v", err)
 	}
@@ -149,7 +149,7 @@ func TestRegistryRejectsMCPBuiltInNameCollision(t *testing.T) {
 			Name: "remote", Transport: "http", Endpoint: httpServer.URL,
 		}}},
 	})
-	var toolError *tools.Error
+	var toolError *runtimeapi.CodedError
 	if !errors.As(err, &toolError) || toolError.Code != "tool_name_collision" {
 		t.Fatalf("unexpected collision error: %v", err)
 	}

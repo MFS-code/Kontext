@@ -139,15 +139,15 @@ func kubernetesReadInputSchema() json.RawMessage {
 func (tool *kubernetesTool) Execute(
 	ctx context.Context,
 	rawArguments []byte,
-) (outcome, error) {
+) (runtimeapi.ToolResult, error) {
 	var arguments kubernetesReadArguments
 	if err := decodeArguments(rawArguments, &arguments); err != nil {
-		return outcome{}, err
+		return runtimeapi.ToolResult{}, err
 	}
 	resourceName := strings.ToLower(strings.TrimSpace(arguments.Resource))
 	resource, allowed := kubernetesResources[resourceName]
 	if !allowed {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "kubernetes_resource_denied",
 			Message: fmt.Sprintf("Kubernetes resource %q is not allowlisted", arguments.Resource),
 		}
@@ -157,13 +157,13 @@ func (tool *kubernetesTool) Execute(
 	case "get":
 		name := strings.TrimSpace(arguments.Name)
 		if name == "" {
-			return outcome{}, &Error{
+			return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 				Code:    "invalid_tool_arguments",
 				Message: "name is required for Kubernetes get",
 			}
 		}
 		if len(name) > 253 || !kubernetesNamePattern.MatchString(name) {
-			return outcome{}, &Error{
+			return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 				Code:    "invalid_tool_arguments",
 				Message: "name must be a valid Kubernetes DNS subdomain",
 			}
@@ -171,13 +171,13 @@ func (tool *kubernetesTool) Execute(
 		arguments.Name = name
 	case "list":
 		if strings.TrimSpace(arguments.Name) != "" {
-			return outcome{}, &Error{
+			return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 				Code:    "invalid_tool_arguments",
 				Message: "name must be omitted for Kubernetes list",
 			}
 		}
 	default:
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "kubernetes_operation_denied",
 			Message: "operation must be get or list",
 		}
@@ -185,7 +185,7 @@ func (tool *kubernetesTool) Execute(
 
 	config, err := tool.resolveConfig()
 	if err != nil {
-		return outcome{}, err
+		return runtimeapi.ToolResult{}, err
 	}
 	requestPath := path.Join(
 		resource.apiPrefix,
@@ -199,7 +199,7 @@ func (tool *kubernetesTool) Execute(
 	endpoint := strings.TrimRight(config.BaseURL, "/") + requestPath
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "kubernetes_request_failed",
 			Message: fmt.Sprintf("create Kubernetes request: %v", err),
 		}
@@ -215,9 +215,9 @@ func (tool *kubernetesTool) Execute(
 	response, err := config.Client.Do(request)
 	if err != nil {
 		if ctx.Err() != nil {
-			return outcome{}, ctx.Err()
+			return runtimeapi.ToolResult{}, ctx.Err()
 		}
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "kubernetes_request_failed",
 			Message: fmt.Sprintf("Kubernetes API request failed: %v", err),
 		}
@@ -225,7 +225,7 @@ func (tool *kubernetesTool) Execute(
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, tool.maxBytes+1))
 	if err != nil {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "kubernetes_response_failed",
 			Message: fmt.Sprintf("read Kubernetes API response: %v", err),
 		}
@@ -246,7 +246,7 @@ func (tool *kubernetesTool) Execute(
 		if message == "" {
 			message = fmt.Sprintf("Kubernetes API returned HTTP %d", response.StatusCode)
 		}
-		return outcome{
+		return runtimeapi.ToolResult{
 			Content:   message,
 			IsError:   true,
 			ErrorCode: code,
@@ -254,12 +254,12 @@ func (tool *kubernetesTool) Execute(
 		}, nil
 	}
 	if !truncated && !json.Valid(body) {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "kubernetes_invalid_response",
 			Message: "Kubernetes API returned invalid JSON",
 		}
 	}
-	return outcome{
+	return runtimeapi.ToolResult{
 		Content:   string(body),
 		Truncated: truncated,
 	}, nil
@@ -283,7 +283,7 @@ func resolveKubernetesConfig(config KubernetesConfig) (KubernetesConfig, error) 
 	if config.Namespace == "" {
 		namespace, err := os.ReadFile(serviceAccountNSPath)
 		if err != nil {
-			return KubernetesConfig{}, &Error{
+			return KubernetesConfig{}, &runtimeapi.CodedError{
 				Code:    "kubernetes_unavailable",
 				Message: fmt.Sprintf("read current namespace: %v", err),
 			}
@@ -293,7 +293,7 @@ func resolveKubernetesConfig(config KubernetesConfig) (KubernetesConfig, error) 
 	if config.Token == "" {
 		token, err := os.ReadFile(serviceAccountTokenPath)
 		if err != nil {
-			return KubernetesConfig{}, &Error{
+			return KubernetesConfig{}, &runtimeapi.CodedError{
 				Code:    "kubernetes_unavailable",
 				Message: fmt.Sprintf("read service-account token: %v", err),
 			}
@@ -307,7 +307,7 @@ func resolveKubernetesConfig(config KubernetesConfig) (KubernetesConfig, error) 
 			port = strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_PORT"))
 		}
 		if host == "" || port == "" {
-			return KubernetesConfig{}, &Error{
+			return KubernetesConfig{}, &runtimeapi.CodedError{
 				Code:    "kubernetes_unavailable",
 				Message: "Kubernetes service host and port are unavailable",
 			}
@@ -322,7 +322,7 @@ func resolveKubernetesConfig(config KubernetesConfig) (KubernetesConfig, error) 
 		}
 	}
 	if config.Namespace == "" || config.Token == "" {
-		return KubernetesConfig{}, &Error{
+		return KubernetesConfig{}, &runtimeapi.CodedError{
 			Code:    "kubernetes_unavailable",
 			Message: "Kubernetes namespace and service-account token are required",
 		}
@@ -333,14 +333,14 @@ func resolveKubernetesConfig(config KubernetesConfig) (KubernetesConfig, error) 
 func newKubernetesClient() (*http.Client, error) {
 	certificate, err := os.ReadFile(serviceAccountCAPath)
 	if err != nil {
-		return nil, &Error{
+		return nil, &runtimeapi.CodedError{
 			Code:    "kubernetes_unavailable",
 			Message: fmt.Sprintf("read Kubernetes CA certificate: %v", err),
 		}
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(certificate) {
-		return nil, &Error{
+		return nil, &runtimeapi.CodedError{
 			Code:    "kubernetes_unavailable",
 			Message: "Kubernetes CA certificate is invalid",
 		}

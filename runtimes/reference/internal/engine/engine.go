@@ -13,7 +13,6 @@ import (
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/events"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/provider"
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
-	"github.com/MFS-code/Kontext/runtimes/reference/internal/tools"
 )
 
 // Emitter publishes best-effort observability events. The result envelope is
@@ -101,7 +100,7 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 	execution.toolExecutor = toolExecutor
 	if err != nil {
 		code := "invalid_tool_configuration"
-		var toolError *tools.Error
+		var toolError *runtimeapi.CodedError
 		if errors.As(err, &toolError) && toolError.Code != "" {
 			code = toolError.Code
 		}

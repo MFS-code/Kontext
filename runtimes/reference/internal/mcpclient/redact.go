@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/MFS-code/Kontext/internal/tooloutput"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 const (
@@ -86,12 +87,12 @@ func (current *server) safeMessage(value string) string {
 	return current.redactor.clean(value)
 }
 
-func (current *server) safeError(code string, prefix string, err error) *Error {
+func (current *server) safeError(code string, prefix string, err error) *runtimeapi.CodedError {
 	message := prefix
 	if err != nil {
 		message += ": " + err.Error()
 	}
-	return &Error{Code: code, Message: current.safeMessage(message)}
+	return &runtimeapi.CodedError{Code: code, Message: current.safeMessage(message)}
 }
 
 type redactingLineWriter struct {
