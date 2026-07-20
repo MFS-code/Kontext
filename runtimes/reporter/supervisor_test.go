@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"os"
@@ -19,7 +18,6 @@ func TestRunChildForwardsStreamsConcurrently(t *testing.T) {
 	var stderr bytes.Buffer
 	capture := newCapture(CaptureFormatLastLine, defaultCaptureBytes)
 	result, err := runChild(
-		context.Background(),
 		[]string{"sh", "-c", `printf 'out-1\n'; printf 'err-1\n' >&2; printf 'out-2\n'; printf 'err-2\n' >&2`},
 		&stdout,
 		&stderr,
@@ -63,7 +61,6 @@ func TestRunChildForwardsTerminationSignals(t *testing.T) {
 			responseChannel := make(chan response, 1)
 			go func() {
 				result, err := runChild(
-					context.Background(),
 					[]string{"sh", "-c", "printf 'READY\\n'; exec sleep 30"},
 					stdout,
 					&bytes.Buffer{},
@@ -98,7 +95,6 @@ func TestRunChildForwardsTerminationSignals(t *testing.T) {
 func TestRunChildCleansUpRemainingProcessGroup(t *testing.T) {
 	var stdout bytes.Buffer
 	result, err := runChild(
-		context.Background(),
 		[]string{"sh", "-c", "sleep 30 & echo $!; exit 0"},
 		&stdout,
 		&bytes.Buffer{},

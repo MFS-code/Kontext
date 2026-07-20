@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,14 +16,13 @@ const (
 )
 
 func runReporter(
-	ctx context.Context,
 	config Config,
 	stdout io.Writer,
 	stderr io.Writer,
 	signals <-chan os.Signal,
 ) int {
 	capture := newCapture(config.Format, config.MaxCaptureBytes)
-	child, err := runChild(ctx, config.Command, stdout, stderr, capture, signals)
+	child, err := runChild(config.Command, stdout, stderr, capture, signals)
 	if err != nil {
 		exitCode := reporterFailureExitCode
 		errorCode := "reporter_internal"
@@ -50,8 +48,7 @@ func runReporter(
 
 func envelopeFromCapture(format CaptureFormat, captured CapturedResult, childExitCode int) resultv1alpha1.Envelope {
 	var envelope resultv1alpha1.Envelope
-	switch format {
-	case CaptureFormatLastLine:
+	if format == CaptureFormatLastLine {
 		envelope = resultv1alpha1.Envelope{
 			APIVersion: resultv1alpha1.APIVersion,
 			Outcome:    resultv1alpha1.OutcomeSucceeded,
@@ -69,10 +66,8 @@ func envelopeFromCapture(format CaptureFormat, captured CapturedResult, childExi
 				Value:     value,
 			}
 		}
-	case CaptureFormatKontextEnvelope:
+	} else {
 		envelope = envelopeFromPrefixedCandidate(captured)
-	default:
-		envelope = failureEnvelope("result_format_invalid", fmt.Sprintf("unsupported result format %q", format))
 	}
 
 	if childExitCode != 0 && envelope.Outcome != resultv1alpha1.OutcomeFailed {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -153,7 +152,7 @@ func TestRunReporterPreservesLogsAndChildExit(t *testing.T) {
 		Command:         []string{"sh", "-c", `printf 'log one\nfinal answer\n'; printf 'warning\n' >&2; exit 7`},
 	}
 
-	exitCode := runReporter(context.Background(), config, &stdout, &stderr, nil)
+	exitCode := runReporter(config, &stdout, &stderr, nil)
 	if exitCode != 7 {
 		t.Fatalf("expected child exit 7, got %d", exitCode)
 	}
@@ -186,7 +185,7 @@ func TestRunReporterDistinguishesReporterFailures(t *testing.T) {
 			MaxCaptureBytes: defaultCaptureBytes,
 			Command:         []string{"/definitely/missing/agent"},
 		}
-		if exitCode := runReporter(context.Background(), config, &bytes.Buffer{}, &stderr, nil); exitCode != childStartExitCode {
+		if exitCode := runReporter(config, &bytes.Buffer{}, &stderr, nil); exitCode != childStartExitCode {
 			t.Fatalf("expected child-start exit %d, got %d", childStartExitCode, exitCode)
 		}
 		envelope := readTestEnvelope(t, path)
@@ -203,7 +202,7 @@ func TestRunReporterDistinguishesReporterFailures(t *testing.T) {
 			MaxCaptureBytes: defaultCaptureBytes,
 			Command:         []string{"sh", "-c", "printf output"},
 		}
-		if exitCode := runReporter(context.Background(), config, failingWriter{}, &bytes.Buffer{}, nil); exitCode != reporterFailureExitCode {
+		if exitCode := runReporter(config, failingWriter{}, &bytes.Buffer{}, nil); exitCode != reporterFailureExitCode {
 			t.Fatalf("expected reporter exit %d, got %d", reporterFailureExitCode, exitCode)
 		}
 		envelope := readTestEnvelope(t, path)
