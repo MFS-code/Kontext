@@ -178,7 +178,7 @@ type Grade struct {
 
 type JudgeResult struct {
 	Configured bool    `json:"configured"`
-	Pass       bool    `json:"pass,omitempty"`
+	Pass       bool    `json:"pass"`
 	Score      float64 `json:"score,omitempty"`
 	Rationale  string  `json:"rationale,omitempty"`
 	Error      string  `json:"error,omitempty"`

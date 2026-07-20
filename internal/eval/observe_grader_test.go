@@ -62,9 +62,8 @@ func TestParseLogsFailsRelevantMalformedAndIncompleteEvents(t *testing.T) {
 	}
 }
 
-func TestMalformedRelevantEventFallbackHandlesWhitespaceAndEscapedSlashes(t *testing.T) {
-	line := "{\t\"apiVersion\"\t:\t\"kontext.dev\\/event\\/v1alpha1\",\t" +
-		"\"type\"\t:\t\"tool\",\t\"data\":"
+func TestMalformedEventWithAPIVersionMarkerFailsCollection(t *testing.T) {
+	line := `{"apiVersion": "kontext.dev/event/v1alpha1","type":"tool","data":`
 	parsed := ParseLogs(
 		[]byte(line+"\n"),
 		false,
@@ -73,6 +72,73 @@ func TestMalformedRelevantEventFallbackHandlesWhitespaceAndEscapedSlashes(t *tes
 	)
 	if len(parsed.Errors) == 0 {
 		t.Fatalf("malformed escaped event frame was ignored: %#v", parsed)
+	}
+}
+
+func TestParseLogsValidatesAndSummarizesTypedEventData(t *testing.T) {
+	lines := []string{
+		`{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:00Z","type":"lifecycle","data":{"phase":"started","extension":true}}`,
+		`{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:01Z","type":"output","data":{"mediaType":"application/json","value":{"ok":true}}}`,
+		`{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:02Z","type":"usage","data":{"turn":1,"usage":{"tokens":3}}}`,
+		`{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:03Z","type":"tool","data":{"name":"shell","count":1,"isError":false,"truncated":false}}`,
+		`{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:04Z","type":"error","data":{"code":"denied","message":"no"}}`,
+	}
+	relevant := map[eventv1alpha1.Type]struct{}{
+		eventv1alpha1.TypeLifecycle: {},
+		eventv1alpha1.TypeOutput:    {},
+		eventv1alpha1.TypeUsage:     {},
+		eventv1alpha1.TypeTool:      {},
+		eventv1alpha1.TypeError:     {},
+	}
+	parsed := ParseLogs(
+		[]byte(strings.Join(lines, "\n")+"\n"),
+		false,
+		relevant,
+		relevant,
+	)
+	if len(parsed.Errors) != 0 {
+		t.Fatalf("typed event data was rejected: %v", parsed.Errors)
+	}
+	for eventType := range relevant {
+		if parsed.Events.Counts[eventType] != 1 {
+			t.Fatalf("%s count = %d, want 1", eventType, parsed.Events.Counts[eventType])
+		}
+	}
+	if len(parsed.Events.Metadata) != len(lines) ||
+		len(parsed.Events.Lifecycle) != 1 ||
+		len(parsed.Events.Tools) != 1 ||
+		len(parsed.Events.Errors) != 1 {
+		t.Fatalf("typed summaries were incomplete: %#v", parsed.Events)
+	}
+}
+
+func TestParseLogsRejectsMalformedTypedAndTopLevelEvents(t *testing.T) {
+	tests := map[string]string{
+		"strict top-level envelope": `{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:00Z","type":"tool","extra":true,"data":{"name":"shell","count":1,"isError":false,"truncated":false}}`,
+		"lifecycle data":            `{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:00Z","type":"lifecycle","data":{"phase":""}}`,
+		"output data":               `{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:00Z","type":"output","data":{"mediaType":"text/plain"}}`,
+		"usage data":                `{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:00Z","type":"usage","data":{"turn":0,"usage":{}}}`,
+		"tool data":                 `{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:00Z","type":"tool","data":{"name":"shell","count":1,"truncated":false}}`,
+		"error data":                `{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:00Z","type":"error","data":{"code":"denied"}}`,
+	}
+	for name, line := range tests {
+		t.Run(name, func(t *testing.T) {
+			parsed := ParseLogs(
+				[]byte(line+"\n"),
+				false,
+				map[eventv1alpha1.Type]struct{}{
+					eventv1alpha1.TypeLifecycle: {},
+					eventv1alpha1.TypeOutput:    {},
+					eventv1alpha1.TypeUsage:     {},
+					eventv1alpha1.TypeTool:      {},
+					eventv1alpha1.TypeError:     {},
+				},
+				nil,
+			)
+			if len(parsed.Errors) != 1 {
+				t.Fatalf("malformed event did not fail clearly: %#v", parsed)
+			}
+		})
 	}
 }
 
@@ -147,6 +213,97 @@ func TestGradeRecordCoversDeterministicGradersAndOptionalMetrics(t *testing.T) {
 	}
 }
 
+func TestGraderDispatchSpecsCoverEveryGraderType(t *testing.T) {
+	exact := "result"
+	present := true
+	turns := int32(1)
+	toolCalls := int32(1)
+	exitCode := int32(0)
+	graders := []Grader{
+		{Type: GraderTerminalPhase, Phase: kontextv1alpha1.AgentRunPhaseSucceeded},
+		{Type: GraderStatusResult, StatusResult: &StringMatch{Exact: &exact}},
+		{Type: GraderStructuredOutput, StructuredOutput: &StructuredOutputExpectation{Present: &present}},
+		{Type: GraderUsageFields, UsageFields: []string{"tokens"}},
+		{Type: GraderEnvelopeError, ErrorCode: "denied"},
+		{Type: GraderEnvelopeOutcome, Outcome: resultv1alpha1.OutcomeSucceeded},
+		{Type: GraderExecutionModel, Model: "model"},
+		{Type: GraderEnvelopeTurns, Turns: &turns},
+		{Type: GraderEnvelopeTools, ToolCalls: &toolCalls},
+		{Type: GraderEventCount, Event: &EventCountExpectation{
+			Type: eventv1alpha1.TypeLifecycle, Count: 1,
+		}},
+		{Type: GraderToolEvents, Tool: &ToolExpectation{Name: "shell", Count: 1}},
+		{Type: GraderDuration, MaxDuration: Duration{Duration: time.Second}},
+		{Type: GraderPodExitCode, ExitCode: &exitCode},
+	}
+	if len(graderSpecs) != len(graders) {
+		t.Fatalf("grader dispatch has %d specs, want %d", len(graderSpecs), len(graders))
+	}
+	for _, grader := range graders {
+		t.Run(string(grader.Type), func(t *testing.T) {
+			spec, err := graderSpecFor(grader.Type)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := spec.validate(grader); err != nil {
+				t.Fatalf("valid grader was rejected: %v", err)
+			}
+			requirements, err := requirementsForGraders([]Grader{grader})
+			if err != nil {
+				t.Fatalf("requirements dispatch failed: %v", err)
+			}
+			switch grader.Type {
+			case GraderTerminalPhase, GraderDuration:
+				if requirements.pod || requirements.logs || requirements.envelope ||
+					requirements.statusResult || requirements.statusOutput || requirements.statusUsage {
+					t.Fatalf("status-only grader requested artifacts: %#v", requirements)
+				}
+			case GraderStatusResult:
+				if !requirements.statusResult {
+					t.Fatal("status result was not requested")
+				}
+			case GraderStructuredOutput:
+				if !requirements.statusOutput {
+					t.Fatal("status output was not requested")
+				}
+			case GraderUsageFields:
+				if !requirements.statusUsage {
+					t.Fatal("status usage was not requested")
+				}
+			case GraderEnvelopeError, GraderEnvelopeOutcome, GraderExecutionModel,
+				GraderEnvelopeTurns, GraderEnvelopeTools:
+				if !requirements.pod || !requirements.envelope ||
+					len(requirements.envelopeProjectors) != 1 {
+					t.Fatalf("envelope artifacts were incomplete: %#v", requirements)
+				}
+			case GraderEventCount:
+				if !requirements.pod || !requirements.logs ||
+					len(requirements.eventTypes) != 1 {
+					t.Fatalf("event artifacts were incomplete: %#v", requirements)
+				}
+			case GraderToolEvents:
+				if !requirements.pod || !requirements.logs ||
+					len(requirements.eventDetailTypes) != 1 {
+					t.Fatalf("tool event artifacts were incomplete: %#v", requirements)
+				}
+			case GraderPodExitCode:
+				if !requirements.pod || !requirements.exitCode {
+					t.Fatalf("Pod exit artifacts were incomplete: %#v", requirements)
+				}
+			default:
+				t.Fatalf("test is missing grader type %q", grader.Type)
+			}
+			_ = spec.grade(&Record{
+				Events: EventSummary{Counts: map[eventv1alpha1.Type]int{}},
+			}, grader)
+		})
+	}
+	if _, err := requirementsForGraders([]Grader{{Type: GraderType("future")}}); err == nil ||
+		!strings.Contains(err.Error(), "unsupported grader type") {
+		t.Fatalf("unsupported requirements dispatch did not fail clearly: %v", err)
+	}
+}
+
 func TestStatusResultMatchModes(t *testing.T) {
 	contains := "needle"
 	notContains := "secret"
@@ -160,12 +317,12 @@ func TestStatusResultMatchModes(t *testing.T) {
 	}
 }
 
-func TestGradeRecordRejectsUnvalidatedGraders(t *testing.T) {
+func TestGradeRecordRejectsUnsupportedGraderType(t *testing.T) {
 	record := Record{}
-	GradeRecord(&record, []Grader{{Type: GraderEnvelopeTurns}})
+	GradeRecord(&record, []Grader{{Type: GraderType("future")}})
 	if len(record.Grades) != 1 ||
 		record.Grades[0].Pass ||
-		!strings.Contains(record.Grades[0].Message, "invalid grader") {
-		t.Fatalf("unvalidated grader was not rejected safely: %#v", record.Grades)
+		!strings.Contains(record.Grades[0].Message, "unsupported grader type") {
+		t.Fatalf("unsupported grader was not rejected clearly: %#v", record.Grades)
 	}
 }

@@ -83,6 +83,23 @@ func TestCommandJudgeBoundsAndResponseValidation(t *testing.T) {
 	}
 }
 
+func TestJudgeResultSerializesFalsePassAndZeroScore(t *testing.T) {
+	encoded, err := json.Marshal(JudgeResult{
+		Configured: true,
+		Pass:       false,
+		Score:      0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"pass":false`)) {
+		t.Fatalf("false judge pass was omitted: %s", encoded)
+	}
+	if bytes.Contains(encoded, []byte(`"score"`)) {
+		t.Fatalf("zero optional score should remain omitted: %s", encoded)
+	}
+}
+
 func TestLimitedWriterReportsOutputLimit(t *testing.T) {
 	var output bytes.Buffer
 	writer := &limitedWriter{Writer: &output, Remaining: 3}

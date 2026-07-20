@@ -6,18 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/url"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
@@ -306,10 +302,12 @@ func TestEnvelopeGradersUseTerminationMessageWithoutLogs(t *testing.T) {
 		{Type: GraderEnvelopeTurns, Turns: &turns},
 		{Type: GraderEnvelopeTools, ToolCalls: &tools},
 	}}
+	requirements := mustArtifactRequirements(t, item.Graders)
 	finished := (Runner{Logs: logs}).finishRecord(
 		context.Background(),
 		&record,
 		item,
+		requirements,
 		nil,
 		pod,
 		false,
@@ -348,10 +346,12 @@ func TestEventGradersFailTransportAndTruncationErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			record := Record{StartedAt: time.Unix(0, 0)}
 			judge := &orderingJudge{t: t}
+			requirements := mustArtifactRequirements(t, item.Graders)
 			finished := (Runner{Logs: logs, Options: RunnerOptions{Judge: judge}}).finishRecord(
 				context.Background(),
 				&record,
 				item,
+				requirements,
 				nil,
 				pod,
 				false,
@@ -388,10 +388,12 @@ func TestCleanupUsesFreshContextAfterCancellation(t *testing.T) {
 	item := Case{Graders: []Grader{{
 		Type: GraderTerminalPhase, Phase: kontextv1alpha1.AgentRunPhaseSucceeded,
 	}}}
+	requirements := mustArtifactRequirements(t, item.Graders)
 	finished := (Runner{Client: cluster}).finishRecord(
 		ctx,
 		&record,
 		item,
+		requirements,
 		run,
 		nil,
 		true,
@@ -457,195 +459,6 @@ func TestKubernetesLogFetcherSetsServerBoundsAndReportsIncompleteTail(t *testing
 	}
 }
 
-func TestRunnerRetriesTransientAgentRunAndPodGets(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	_ = kontextv1alpha1.AddToScheme(scheme)
-	base := fake.NewClientBuilder().WithScheme(scheme).Build()
-	terminal := &terminalClient{Client: base}
-	cluster := &sequencedGetClient{
-		Client: terminal,
-		agentErrors: []error{
-			&url.Error{Op: "GET", URL: "https://cluster", Err: io.ErrUnexpectedEOF},
-			syscall.ECONNRESET,
-			apierrors.NewServiceUnavailable("try again"),
-		},
-		podErrors: []error{apierrors.NewTooManyRequests("slow down", 0)},
-	}
-	timeout := Duration{Duration: time.Second}
-	suite := EvalSuite{
-		Metadata: Metadata{Name: "retry"},
-		Spec: SuiteSpec{
-			Defaults: SuiteDefaults{Namespace: "evals", Timeout: &timeout},
-			Cases: []Case{{
-				ID: "transient", Timeout: &timeout,
-				AgentRun: kontextv1alpha1.AgentRunSpec{
-					Goal: "goal", Model: "model", Runtime: kontextv1alpha1.RuntimeSpec{Image: "runtime"},
-				},
-				Graders: []Grader{{
-					Type: GraderEnvelopeOutcome, Outcome: resultv1alpha1.OutcomeSucceeded,
-				}},
-			}},
-		},
-	}
-	records := (Runner{
-		Client: cluster,
-		Options: RunnerOptions{
-			PollInterval: time.Millisecond,
-			InvocationID: "retry",
-		},
-	}).RunSuite(context.Background(), suite)
-	if len(records) != 1 || !records[0].Pass {
-		t.Fatalf("transient reads did not recover: %#v", records)
-	}
-	if cluster.agentGets < 4 || cluster.podGets < 2 || terminal.deletes != 1 {
-		t.Fatalf(
-			"transient reads were not retried before cleanup: agent=%d pod=%d deletes=%d",
-			cluster.agentGets,
-			cluster.podGets,
-			terminal.deletes,
-		)
-	}
-}
-
-func TestRunnerFailsPermanentGetImmediately(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	_ = kontextv1alpha1.AddToScheme(scheme)
-	base := fake.NewClientBuilder().WithScheme(scheme).Build()
-	terminal := &terminalClient{Client: base}
-	cluster := &sequencedGetClient{
-		Client:      terminal,
-		agentErrors: []error{apierrors.NewBadRequest("invalid read")},
-	}
-	timeout := Duration{Duration: time.Second}
-	suite := EvalSuite{
-		Metadata: Metadata{Name: "permanent"},
-		Spec: SuiteSpec{
-			Defaults: SuiteDefaults{Namespace: "evals", Timeout: &timeout},
-			Cases: []Case{{
-				ID: "permanent", Timeout: &timeout,
-				AgentRun: kontextv1alpha1.AgentRunSpec{
-					Goal: "goal", Model: "model", Runtime: kontextv1alpha1.RuntimeSpec{Image: "runtime"},
-				},
-				Graders: []Grader{{
-					Type: GraderTerminalPhase, Phase: kontextv1alpha1.AgentRunPhaseSucceeded,
-				}},
-			}},
-		},
-	}
-	records := (Runner{
-		Client: cluster,
-		Options: RunnerOptions{
-			PollInterval: time.Millisecond,
-			InvocationID: "permanent",
-		},
-	}).RunSuite(context.Background(), suite)
-	if len(records) != 1 || records[0].Pass || cluster.agentGets != 1 {
-		t.Fatalf("permanent read was not failed immediately: records=%#v gets=%d", records, cluster.agentGets)
-	}
-}
-
-func TestTransientGetErrorClassification(t *testing.T) {
-	resource := schema.GroupResource{Group: "kontext.dev", Resource: "agentruns"}
-	for name, err := range map[string]error{
-		"timeout":             apierrors.NewTimeoutError("timeout", 1),
-		"server timeout":      apierrors.NewServerTimeout(resource, "get", 1),
-		"too many requests":   apierrors.NewTooManyRequests("limited", 1),
-		"service unavailable": apierrors.NewServiceUnavailable("down"),
-		"internal":            apierrors.NewInternalError(errors.New("temporary")),
-		"url timeout": &url.Error{
-			Op: "GET", URL: "https://cluster", Err: io.ErrUnexpectedEOF,
-		},
-		"connection reset":   syscall.ECONNRESET,
-		"connection refused": syscall.ECONNREFUSED,
-	} {
-		t.Run(name, func(t *testing.T) {
-			if !transientGetError(err) {
-				t.Fatalf("error was not classified transient: %v", err)
-			}
-		})
-	}
-	if transientGetError(apierrors.NewBadRequest("permanent")) {
-		t.Fatal("permanent error was classified transient")
-	}
-	if transientGetError(apierrors.NewUnauthorized("permanent")) {
-		t.Fatal("unauthorized error was classified transient")
-	}
-}
-
-func TestCaseTimeoutCoversCreateWaitPodLogsAndJudge(t *testing.T) {
-	timeout := 40 * time.Millisecond
-	tests := map[string]func(*testing.T) (client.Client, LogFetcher, Judge, []Grader){
-		"create": func(t *testing.T) (client.Client, LogFetcher, Judge, []Grader) {
-			return &blockingCreateClient{Client: newFakeEvalClient(t)}, nil, nil, []Grader{{
-				Type: GraderTerminalPhase, Phase: kontextv1alpha1.AgentRunPhaseSucceeded,
-			}}
-		},
-		"wait": func(t *testing.T) (client.Client, LogFetcher, Judge, []Grader) {
-			return newFakeEvalClient(t), nil, nil, []Grader{{
-				Type: GraderTerminalPhase, Phase: kontextv1alpha1.AgentRunPhaseSucceeded,
-			}}
-		},
-		"pod": func(t *testing.T) (client.Client, LogFetcher, Judge, []Grader) {
-			terminal := &terminalClient{Client: newFakeEvalClient(t)}
-			return &blockingPodGetClient{Client: terminal}, nil, nil, []Grader{{
-				Type: GraderEnvelopeOutcome, Outcome: resultv1alpha1.OutcomeSucceeded,
-			}}
-		},
-		"logs": func(t *testing.T) (client.Client, LogFetcher, Judge, []Grader) {
-			return &terminalClient{Client: newFakeEvalClient(t)}, blockingLogs{}, nil, []Grader{{
-				Type: GraderEventCount,
-				Event: &EventCountExpectation{
-					Type: eventv1alpha1.TypeTool, Count: 0,
-				},
-			}}
-		},
-		"judge": func(t *testing.T) (client.Client, LogFetcher, Judge, []Grader) {
-			return &terminalClient{Client: newFakeEvalClient(t)}, nil, blockingJudge{}, []Grader{{
-				Type: GraderTerminalPhase, Phase: kontextv1alpha1.AgentRunPhaseSucceeded,
-			}}
-		},
-	}
-	for name, setup := range tests {
-		t.Run(name, func(t *testing.T) {
-			cluster, logs, judge, graders := setup(t)
-			duration := Duration{Duration: timeout}
-			suite := EvalSuite{
-				Metadata: Metadata{Name: "timeout"},
-				Spec: SuiteSpec{
-					Defaults: SuiteDefaults{Namespace: "evals", Timeout: &duration},
-					Cases: []Case{{
-						ID: "case", Timeout: &duration,
-						AgentRun: kontextv1alpha1.AgentRunSpec{
-							Goal: "goal", Model: "model",
-							Runtime: kontextv1alpha1.RuntimeSpec{Image: "runtime"},
-						},
-						Graders: graders,
-					}},
-				},
-			}
-			startedAt := time.Now()
-			records := (Runner{
-				Client: cluster,
-				Logs:   logs,
-				Options: RunnerOptions{
-					PollInterval: time.Millisecond,
-					InvocationID: name,
-					Judge:        judge,
-				},
-			}).RunSuite(context.Background(), suite)
-			if elapsed := time.Since(startedAt); elapsed > time.Second {
-				t.Fatalf("case timeout did not bound %s stage: %s", name, elapsed)
-			}
-			if len(records) != 1 || records[0].Pass ||
-				!containsCollectionError(records[0].CollectionErrors, context.DeadlineExceeded.Error()) {
-				t.Fatalf("%s stage did not fail on case timeout: %#v", name, records)
-			}
-		})
-	}
-}
-
 func TestFinishRecordAllowsStatusOnlyResultWithoutPodArtifacts(t *testing.T) {
 	timeout := Duration{Duration: time.Second}
 	item := Case{
@@ -661,11 +474,13 @@ func TestFinishRecordAllowsStatusOnlyResultWithoutPodArtifacts(t *testing.T) {
 		TerminalPhase: kontextv1alpha1.AgentRunPhaseBudgetExceeded,
 	}
 	now := func() time.Time { return time.Unix(1, 0) }
+	requirements := mustArtifactRequirements(t, item.Graders)
 
 	finished := (Runner{}).finishRecord(
 		context.Background(),
 		&record,
 		item,
+		requirements,
 		nil,
 		nil,
 		false,
@@ -695,7 +510,7 @@ func TestFinishRecordFailsWhenGraderRequiredArtifactIsMissing(t *testing.T) {
 	}
 	for name, grader := range cases {
 		t.Run(name, func(t *testing.T) {
-			requirements := requirementsForGraders([]Grader{grader})
+			requirements := mustArtifactRequirements(t, []Grader{grader})
 			if !requirements.pod {
 				t.Fatal("artifact grader did not require a Pod")
 			}
@@ -712,6 +527,7 @@ func TestFinishRecordFailsWhenGraderRequiredArtifactIsMissing(t *testing.T) {
 				context.Background(),
 				&record,
 				item,
+				requirements,
 				nil,
 				nil,
 				false,
@@ -722,324 +538,4 @@ func TestFinishRecordFailsWhenGraderRequiredArtifactIsMissing(t *testing.T) {
 			}
 		})
 	}
-}
-
-type terminalClient struct {
-	client.Client
-	deletes int
-	podGets int
-	phase   kontextv1alpha1.AgentRunPhase
-	message string
-}
-
-func (cluster *terminalClient) Create(ctx context.Context, object client.Object, options ...client.CreateOption) error {
-	if err := cluster.Client.Create(ctx, object, options...); err != nil {
-		return err
-	}
-	run, ok := object.(*kontextv1alpha1.AgentRun)
-	if !ok {
-		return nil
-	}
-	exitCode := int32(0)
-	pod := &corev1.Pod{}
-	pod.Namespace = run.Namespace
-	pod.Name = "pod-" + run.Name
-	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-		Name: "runtime",
-		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
-			ExitCode: exitCode,
-		}},
-	}}
-	return cluster.Client.Create(ctx, pod)
-}
-
-func (cluster *terminalClient) Get(ctx context.Context, key types.NamespacedName, object client.Object, options ...client.GetOption) error {
-	if err := cluster.Client.Get(ctx, key, object, options...); err != nil {
-		return err
-	}
-	if run, ok := object.(*kontextv1alpha1.AgentRun); ok {
-		phase := cluster.phase
-		if phase == "" {
-			phase = kontextv1alpha1.AgentRunPhaseSucceeded
-		}
-		run.Status.Phase = phase
-		run.Status.Message = cluster.message
-		if run.Status.Message == "" {
-			run.Status.Message = "successful status message"
-		}
-		run.Status.PodName = "pod-" + run.Name
-		run.Status.Result = "sensitive model output"
-		value := int64(7)
-		run.Status.Usage = &kontextv1alpha1.UsageStatus{Tokens: &value}
-		run.Status.Output = &kontextv1alpha1.OutputStatus{
-			MediaType: "text/plain",
-			Value:     runtime.RawExtension{Raw: []byte(`"sensitive model output"`)},
-		}
-	}
-	if pod, ok := object.(*corev1.Pod); ok {
-		cluster.podGets++
-		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
-			Name: "runtime",
-			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
-				ExitCode: 0,
-				Message:  successfulEnvelopeMessage(),
-			}},
-		}}
-	}
-	return nil
-}
-
-func (cluster *terminalClient) Delete(ctx context.Context, object client.Object, options ...client.DeleteOption) error {
-	cluster.deletes++
-	return cluster.Client.Delete(ctx, object, options...)
-}
-
-type createFailClient struct {
-	client.Client
-	deletes int
-}
-
-func (cluster *createFailClient) Create(context.Context, client.Object, ...client.CreateOption) error {
-	return apierrors.NewForbidden(
-		schema.GroupResource{Group: "kontext.dev", Resource: "agentruns"},
-		"case",
-		errors.New("forbidden"),
-	)
-}
-
-func (cluster *createFailClient) Delete(context.Context, client.Object, ...client.DeleteOption) error {
-	cluster.deletes++
-	return nil
-}
-
-type staticLogs struct {
-	data      []byte
-	err       error
-	truncated bool
-	calls     int
-}
-
-func (logs *staticLogs) Fetch(context.Context, string, string, string) (LogCollection, error) {
-	logs.calls++
-	return LogCollection{
-		Data:      append([]byte(nil), logs.data...),
-		Truncated: logs.truncated,
-	}, logs.err
-}
-
-type orderingJudge struct {
-	t      *testing.T
-	called bool
-}
-
-func (judge *orderingJudge) Evaluate(_ context.Context, observation JudgeObservation) (JudgeResult, error) {
-	judge.called = true
-	if len(observation.Grades) == 0 {
-		judge.t.Fatal("judge ran before deterministic graders")
-	}
-	return JudgeResult{Configured: true, Pass: true, Score: 1, Rationale: "ok"}, nil
-}
-
-func successfulLogs(t *testing.T) []byte {
-	t.Helper()
-	var logs bytes.Buffer
-	logs.WriteString(`{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-19T00:00:00Z","type":"lifecycle","data":{"phase":"started"}}` + "\n")
-	return logs.Bytes()
-}
-
-func successfulEnvelopeMessage() string {
-	output, _ := json.Marshal("private output")
-	extension, _ := json.Marshal("secret-extension")
-	turns := int32(2)
-	tools := int32(1)
-	envelope := resultv1alpha1.Envelope{
-		APIVersion: resultv1alpha1.APIVersion,
-		Outcome:    resultv1alpha1.OutcomeSucceeded,
-		Output: &resultv1alpha1.Output{
-			MediaType: "text/plain",
-			Value:     output,
-		},
-		Execution: &resultv1alpha1.Execution{
-			Provider:  "private-provider",
-			Model:     "model",
-			RequestID: "request-secret",
-			Turns:     &turns,
-			ToolCalls: &tools,
-		},
-		Artifacts: []resultv1alpha1.Artifact{{
-			Name: "artifact-secret", URI: "memory://artifact",
-		}},
-		Extensions: map[string]json.RawMessage{
-			"example.com/private": extension,
-		},
-	}
-	encoded, err := json.Marshal(envelope)
-	if err != nil {
-		panic(err)
-	}
-	return string(encoded)
-}
-
-func int32Pointer(value int32) *int32 {
-	return &value
-}
-
-type cleanupContextClient struct {
-	client.Client
-	deletes          int
-	deleteContextErr error
-	hadDeadline      bool
-}
-
-func (cluster *cleanupContextClient) Delete(
-	ctx context.Context,
-	object client.Object,
-	options ...client.DeleteOption,
-) error {
-	cluster.deletes++
-	cluster.deleteContextErr = ctx.Err()
-	_, cluster.hadDeadline = ctx.Deadline()
-	return cluster.Client.Delete(ctx, object, options...)
-}
-
-type sequencedGetClient struct {
-	client.Client
-	agentErrors []error
-	podErrors   []error
-	agentGets   int
-	podGets     int
-}
-
-func (cluster *sequencedGetClient) Get(
-	ctx context.Context,
-	key types.NamespacedName,
-	object client.Object,
-	options ...client.GetOption,
-) error {
-	switch object.(type) {
-	case *kontextv1alpha1.AgentRun:
-		cluster.agentGets++
-		if len(cluster.agentErrors) > 0 {
-			err := cluster.agentErrors[0]
-			cluster.agentErrors = cluster.agentErrors[1:]
-			return err
-		}
-	case *corev1.Pod:
-		cluster.podGets++
-		if len(cluster.podErrors) > 0 {
-			err := cluster.podErrors[0]
-			cluster.podErrors = cluster.podErrors[1:]
-			return err
-		}
-	}
-	return cluster.Client.Get(ctx, key, object, options...)
-}
-
-func newFakeEvalClient(t *testing.T) client.Client {
-	t.Helper()
-	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	if err := kontextv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	return fake.NewClientBuilder().WithScheme(scheme).Build()
-}
-
-type blockingCreateClient struct {
-	client.Client
-}
-
-func (cluster *blockingCreateClient) Create(
-	ctx context.Context,
-	_ client.Object,
-	_ ...client.CreateOption,
-) error {
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-type blockingPodGetClient struct {
-	client.Client
-}
-
-func (cluster *blockingPodGetClient) Get(
-	ctx context.Context,
-	key types.NamespacedName,
-	object client.Object,
-	options ...client.GetOption,
-) error {
-	if _, ok := object.(*corev1.Pod); ok {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	return cluster.Client.Get(ctx, key, object, options...)
-}
-
-type blockingLogs struct{}
-
-func (blockingLogs) Fetch(
-	ctx context.Context,
-	_, _, _ string,
-) (LogCollection, error) {
-	<-ctx.Done()
-	return LogCollection{}, ctx.Err()
-}
-
-type blockingJudge struct{}
-
-func (blockingJudge) Evaluate(
-	ctx context.Context,
-	_ JudgeObservation,
-) (JudgeResult, error) {
-	<-ctx.Done()
-	return JudgeResult{}, ctx.Err()
-}
-
-type ambiguousCreateClient struct {
-	client.Client
-	unowned            bool
-	probeNotFoundCount int
-	deletes            int
-}
-
-func (cluster *ambiguousCreateClient) Create(
-	ctx context.Context,
-	object client.Object,
-	_ ...client.CreateOption,
-) error {
-	run := object.(*kontextv1alpha1.AgentRun).DeepCopy()
-	if cluster.unowned {
-		run.Labels = map[string]string{"owner": "user"}
-	}
-	if err := cluster.Client.Create(ctx, run); err != nil {
-		return err
-	}
-	return apierrors.NewTimeoutError("create response lost", 0)
-}
-
-func (cluster *ambiguousCreateClient) Get(
-	ctx context.Context,
-	key types.NamespacedName,
-	object client.Object,
-	options ...client.GetOption,
-) error {
-	if _, ok := object.(*kontextv1alpha1.AgentRun); ok && cluster.probeNotFoundCount > 0 {
-		cluster.probeNotFoundCount--
-		return apierrors.NewNotFound(
-			schema.GroupResource{Group: "kontext.dev", Resource: "agentruns"},
-			key.Name,
-		)
-	}
-	return cluster.Client.Get(ctx, key, object, options...)
-}
-
-func (cluster *ambiguousCreateClient) Delete(
-	ctx context.Context,
-	object client.Object,
-	options ...client.DeleteOption,
-) error {
-	cluster.deletes++
-	return cluster.Client.Delete(ctx, object, options...)
 }

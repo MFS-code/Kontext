@@ -16,7 +16,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	clientretry "k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
@@ -107,13 +109,7 @@ type Runner struct {
 }
 
 func (runner Runner) RunSuite(ctx context.Context, suite EvalSuite) []Record {
-	if runner.Options.InvocationID == "" {
-		now := runner.Options.Now
-		if now == nil {
-			now = time.Now
-		}
-		runner.Options.InvocationID = invocationID(now())
-	}
+	runner.Options = normalizeRunnerOptions(runner.Options, suite.Spec.Defaults)
 	records := make([]Record, 0, len(suite.Spec.Cases))
 	for _, item := range suite.Spec.Cases {
 		records = append(records, runner.runCase(ctx, suite, item))
@@ -121,19 +117,26 @@ func (runner Runner) RunSuite(ctx context.Context, suite EvalSuite) []Record {
 	return records
 }
 
+func normalizeRunnerOptions(options RunnerOptions, defaults SuiteDefaults) RunnerOptions {
+	if options.Now == nil {
+		options.Now = time.Now
+	}
+	if options.InvocationID == "" {
+		options.InvocationID = invocationID(options.Now())
+	}
+	if options.Namespace == "" {
+		options.Namespace = defaults.Namespace
+	}
+	if options.PollInterval <= 0 {
+		options.PollInterval = 500 * time.Millisecond
+	}
+	return options
+}
+
 func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Record {
 	now := runner.Options.Now
-	if now == nil {
-		now = time.Now
-	}
 	invocation := runner.Options.InvocationID
-	if invocation == "" {
-		invocation = invocationID(now())
-	}
 	namespace := runner.Options.Namespace
-	if namespace == "" {
-		namespace = suite.Spec.Defaults.Namespace
-	}
 	name := NameForCase(suite.Metadata.Name, item.ID, invocation)
 	record := Record{
 		APIVersion:  APIVersion,
@@ -150,13 +153,27 @@ func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Re
 		labelEvalCase:   labelValue(item.ID),
 		labelInvocation: labelValue(invocation),
 	}
+	requirements, requirementsErr := requirementsForGraders(item.Graders)
+	if requirementsErr != nil {
+		record.CollectionErrors = append(record.CollectionErrors, requirementsErr.Error())
+		return runner.finishRecord(
+			ctx,
+			&record,
+			item,
+			requirements,
+			nil,
+			nil,
+			false,
+			now,
+		)
+	}
 	run := newAgentRun(name, namespace, item.AgentRun, ownershipLabels)
 	caseCtx, cancel := context.WithTimeout(ctx, item.Timeout.Duration)
 	defer cancel()
 	created := false
 	if err := runner.Client.Create(caseCtx, run); err != nil {
 		record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("create AgentRun: %v", err))
-		if !runner.Options.KeepRuns && ambiguousCreateError(err) {
+		if !runner.Options.KeepRuns && classifyKubernetesError(err).ambiguousWrite {
 			record.CollectionErrors = append(
 				record.CollectionErrors,
 				runner.cleanupAmbiguousCreate(caseCtx, types.NamespacedName{
@@ -170,7 +187,7 @@ func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Re
 				"AgentRun name collision was left untouched",
 			)
 		}
-		return runner.finishRecord(caseCtx, &record, item, nil, nil, created, now)
+		return runner.finishRecord(caseCtx, &record, item, requirements, nil, nil, created, now)
 	}
 	created = true
 
@@ -186,7 +203,6 @@ func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Re
 	}
 	record.TerminalPhase = terminalRun.Status.Phase
 	record.Run.PodName = terminalRun.Status.PodName
-	requirements := requirementsForGraders(item.Graders)
 	if requirements.statusResult {
 		record.StatusResult = terminalRun.Status.Result
 	}
@@ -202,37 +218,33 @@ func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Re
 
 	var pod *corev1.Pod
 	if !requirements.pod {
-		return runner.finishRecord(caseCtx, &record, item, terminalRun, nil, created, now)
+		return runner.finishRecord(caseCtx, &record, item, requirements, terminalRun, nil, created, now)
 	}
 	if terminalRun.Status.PodName == "" {
-		if requirements.pod {
-			record.CollectionErrors = append(record.CollectionErrors, "required runtime Pod name was not recorded")
-		}
+		record.CollectionErrors = append(record.CollectionErrors, "required runtime Pod name was not recorded")
 	} else {
 		pod = &corev1.Pod{}
 		if err := runner.getWithRetry(caseCtx, types.NamespacedName{
 			Namespace: namespace,
 			Name:      terminalRun.Status.PodName,
 		}, pod); err != nil {
-			if requirements.pod {
-				record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("get required runtime Pod: %v", err))
-			}
+			record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("get required runtime Pod: %v", err))
 			pod = nil
 		}
 	}
-	return runner.finishRecord(caseCtx, &record, item, terminalRun, pod, created, now)
+	return runner.finishRecord(caseCtx, &record, item, requirements, terminalRun, pod, created, now)
 }
 
 func (runner Runner) finishRecord(
 	ctx context.Context,
 	record *Record,
 	item Case,
+	requirements artifactRequirements,
 	run *kontextv1alpha1.AgentRun,
 	pod *corev1.Pod,
 	created bool,
 	now func() time.Time,
 ) Record {
-	requirements := requirementsForGraders(item.Graders)
 	if requirements.exitCode {
 		record.PodExitCode = podExitCode(pod)
 		if pod != nil && record.PodExitCode == nil {
@@ -317,72 +329,34 @@ func (runner Runner) finishRecord(
 	return *record
 }
 
+type envelopeProjector func(resultv1alpha1.Envelope, *EnvelopeObservation)
+
 type artifactRequirements struct {
-	pod              bool
-	logs             bool
-	envelope         bool
-	exitCode         bool
-	statusResult     bool
-	statusOutput     bool
-	statusUsage      bool
-	eventTypes       map[eventv1alpha1.Type]struct{}
-	eventDetailTypes map[eventv1alpha1.Type]struct{}
-	envelopeOutcome  bool
-	envelopeError    bool
-	envelopeModel    bool
-	envelopeTurns    bool
-	envelopeTools    bool
+	pod                bool
+	logs               bool
+	envelope           bool
+	exitCode           bool
+	statusResult       bool
+	statusOutput       bool
+	statusUsage        bool
+	eventTypes         map[eventv1alpha1.Type]struct{}
+	eventDetailTypes   map[eventv1alpha1.Type]struct{}
+	envelopeProjectors []envelopeProjector
 }
 
-func requirementsForGraders(graders []Grader) artifactRequirements {
+func requirementsForGraders(graders []Grader) (artifactRequirements, error) {
 	requirements := artifactRequirements{
 		eventTypes:       make(map[eventv1alpha1.Type]struct{}),
 		eventDetailTypes: make(map[eventv1alpha1.Type]struct{}),
 	}
 	for _, grader := range graders {
-		switch grader.Type {
-		case GraderEnvelopeError:
-			requirements.envelope = true
-			requirements.envelopeError = true
-			requirements.pod = true
-		case GraderEnvelopeOutcome:
-			requirements.envelope = true
-			requirements.envelopeOutcome = true
-			requirements.pod = true
-		case GraderExecutionModel:
-			requirements.envelope = true
-			requirements.envelopeModel = true
-			requirements.pod = true
-		case GraderEnvelopeTurns:
-			requirements.envelope = true
-			requirements.envelopeTurns = true
-			requirements.pod = true
-		case GraderEnvelopeTools:
-			requirements.envelope = true
-			requirements.envelopeTools = true
-			requirements.pod = true
-		case GraderEventCount:
-			requirements.logs = true
-			requirements.pod = true
-			requirements.eventTypes[grader.Event.Type] = struct{}{}
-		case GraderToolEvents:
-			requirements.logs = true
-			requirements.pod = true
-			requirements.eventTypes[eventv1alpha1.TypeTool] = struct{}{}
-			requirements.eventDetailTypes[eventv1alpha1.TypeTool] = struct{}{}
-		case GraderPodExitCode:
-			requirements.pod = true
-			requirements.exitCode = true
-		case GraderStatusResult:
-			requirements.statusResult = true
-		case GraderStructuredOutput:
-			requirements.statusOutput = true
-		case GraderUsageFields:
-			requirements.statusUsage = true
-		case GraderTerminalPhase, GraderDuration:
+		spec, err := graderSpecFor(grader.Type)
+		if err != nil {
+			return artifactRequirements{}, fmt.Errorf("resolve grader requirements: %w", err)
 		}
+		spec.requirements(grader, &requirements)
 	}
-	return requirements
+	return requirements, nil
 }
 
 func projectEnvelope(
@@ -390,28 +364,48 @@ func projectEnvelope(
 	requirements artifactRequirements,
 ) *EnvelopeObservation {
 	observation := &EnvelopeObservation{}
-	if requirements.envelopeOutcome {
-		observation.Outcome = envelope.Outcome
-	}
-	if requirements.envelopeError && envelope.Error != nil {
-		observation.Error = &EnvelopeErrorObservation{Code: boundedString(envelope.Error.Code, 4096)}
-	}
-	if requirements.envelopeModel || requirements.envelopeTurns || requirements.envelopeTools {
-		execution := &EnvelopeExecutionObservation{}
-		if envelope.Execution != nil {
-			if requirements.envelopeModel {
-				execution.Model = boundedString(envelope.Execution.Model, 4096)
-			}
-			if requirements.envelopeTurns {
-				execution.Turns = cloneInt32(envelope.Execution.Turns)
-			}
-			if requirements.envelopeTools {
-				execution.ToolCalls = cloneInt32(envelope.Execution.ToolCalls)
-			}
-		}
-		observation.Execution = execution
+	for _, projector := range requirements.envelopeProjectors {
+		projector(envelope, observation)
 	}
 	return observation
+}
+
+func projectEnvelopeOutcome(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
+	observation.Outcome = envelope.Outcome
+}
+
+func projectEnvelopeError(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
+	if envelope.Error != nil {
+		observation.Error = &EnvelopeErrorObservation{Code: boundedString(envelope.Error.Code, 4096)}
+	}
+}
+
+func projectEnvelopeModel(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
+	execution := ensureEnvelopeExecution(observation)
+	if envelope.Execution != nil {
+		execution.Model = boundedString(envelope.Execution.Model, 4096)
+	}
+}
+
+func projectEnvelopeTurns(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
+	execution := ensureEnvelopeExecution(observation)
+	if envelope.Execution != nil {
+		execution.Turns = cloneInt32(envelope.Execution.Turns)
+	}
+}
+
+func projectEnvelopeTools(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
+	execution := ensureEnvelopeExecution(observation)
+	if envelope.Execution != nil {
+		execution.ToolCalls = cloneInt32(envelope.Execution.ToolCalls)
+	}
+}
+
+func ensureEnvelopeExecution(observation *EnvelopeObservation) *EnvelopeExecutionObservation {
+	if observation.Execution == nil {
+		observation.Execution = &EnvelopeExecutionObservation{}
+	}
+	return observation.Execution
 }
 
 func cloneInt32(value *int32) *int32 {
@@ -431,15 +425,43 @@ func containsCollectionError(errors []string, fragment string) bool {
 	return false
 }
 
-func ambiguousCreateError(err error) bool {
-	return !apierrors.IsAlreadyExists(err) &&
-		!apierrors.IsBadRequest(err) &&
-		!apierrors.IsInvalid(err) &&
-		!apierrors.IsForbidden(err) &&
-		!apierrors.IsUnauthorized(err) &&
-		!apierrors.IsMethodNotSupported(err) &&
-		!apierrors.IsNotAcceptable(err) &&
-		!apierrors.IsUnsupportedMediaType(err)
+type kubernetesErrorClassification struct {
+	retryableRead  bool
+	ambiguousWrite bool
+}
+
+func classifyKubernetesError(err error) kubernetesErrorClassification {
+	if apierrors.IsAlreadyExists(err) ||
+		apierrors.IsBadRequest(err) ||
+		apierrors.IsInvalid(err) ||
+		apierrors.IsForbidden(err) ||
+		apierrors.IsUnauthorized(err) ||
+		apierrors.IsMethodNotSupported(err) ||
+		apierrors.IsNotAcceptable(err) ||
+		apierrors.IsUnsupportedMediaType(err) {
+		return kubernetesErrorClassification{}
+	}
+	if apierrors.IsTimeout(err) ||
+		apierrors.IsServerTimeout(err) ||
+		apierrors.IsTooManyRequests(err) ||
+		apierrors.IsServiceUnavailable(err) ||
+		apierrors.IsInternalError(err) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ECONNABORTED) ||
+		errors.Is(err, syscall.ETIMEDOUT) {
+		return kubernetesErrorClassification{retryableRead: true, ambiguousWrite: true}
+	}
+	var urlError *url.Error
+	if errors.As(err, &urlError) {
+		return kubernetesErrorClassification{retryableRead: true, ambiguousWrite: true}
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) {
+		return kubernetesErrorClassification{retryableRead: true, ambiguousWrite: true}
+	}
+	return kubernetesErrorClassification{ambiguousWrite: true}
 }
 
 func (runner Runner) cleanupAmbiguousCreate(
@@ -449,34 +471,49 @@ func (runner Runner) cleanupAmbiguousCreate(
 ) []string {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 300*time.Millisecond)
 	defer cancel()
-	backoff := 25 * time.Millisecond
 	var lastErr error
-	for {
+	deleteAttempted := false
+	err := clientretry.OnError(wait.Backoff{
+		Duration: 25 * time.Millisecond,
+		Factor:   2,
+		Steps:    8,
+		Cap:      200 * time.Millisecond,
+	}, func(err error) bool {
+		return ctx.Err() == nil &&
+			(apierrors.IsNotFound(err) || classifyKubernetesError(err).retryableRead)
+	}, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		observed := &kontextv1alpha1.AgentRun{}
 		err := runner.Client.Get(ctx, key, observed)
+		if apierrors.IsNotFound(err) && deleteAttempted {
+			return nil
+		}
 		if err == nil {
 			if !hasExactEvaluatorOwnership(observed.Labels, expectedLabels) {
-				return []string{"ambiguous AgentRun exists without exact evaluator ownership; left untouched"}
+				return errors.New("ambiguous AgentRun exists without exact evaluator ownership; left untouched")
 			}
+			deleteAttempted = true
 			if err := runner.Client.Delete(ctx, observed); err != nil && !apierrors.IsNotFound(err) {
-				return []string{fmt.Sprintf("cleanup ambiguous AgentRun: %v", err)}
+				return fmt.Errorf("cleanup ambiguous AgentRun: %w", err)
 			}
 			return nil
 		}
 		lastErr = err
-		if !apierrors.IsNotFound(err) && !transientGetError(err) {
-			return []string{fmt.Sprintf("probe ambiguous AgentRun: %v", err)}
-		}
-		if err := waitBackoff(ctx, backoff); err != nil {
-			return []string{fmt.Sprintf("probe ambiguous AgentRun after create error: %v (last read: %v)", err, lastErr)}
-		}
-		if backoff < 200*time.Millisecond {
-			backoff *= 2
-			if backoff > 200*time.Millisecond {
-				backoff = 200 * time.Millisecond
-			}
-		}
+		return err
+	})
+	if err == nil {
+		return nil
 	}
+	if ctx.Err() != nil {
+		return []string{fmt.Sprintf(
+			"probe ambiguous AgentRun after create error: %v (last read: %v)",
+			ctx.Err(),
+			lastErr,
+		)}
+	}
+	return []string{err.Error()}
 }
 
 func hasExactEvaluatorOwnership(actual, expected map[string]string) bool {
@@ -563,62 +600,19 @@ func (runner Runner) getWithRetry(
 	key types.NamespacedName,
 	object client.Object,
 ) error {
-	backoff := 25 * time.Millisecond
-	for {
-		err := runner.Client.Get(ctx, key, object)
-		if err == nil || !transientGetError(err) {
+	return clientretry.OnError(wait.Backoff{
+		Duration: 25 * time.Millisecond,
+		Factor:   2,
+		Steps:    10_000,
+		Cap:      500 * time.Millisecond,
+	}, func(err error) bool {
+		return ctx.Err() == nil && classifyKubernetesError(err).retryableRead
+	}, func() error {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := waitBackoff(ctx, backoff); err != nil {
-			return err
-		}
-		if backoff < 500*time.Millisecond {
-			backoff *= 2
-			if backoff > 500*time.Millisecond {
-				backoff = 500 * time.Millisecond
-			}
-		}
-	}
-}
-
-func transientGetError(err error) bool {
-	if apierrors.IsForbidden(err) ||
-		apierrors.IsUnauthorized(err) ||
-		apierrors.IsInvalid(err) ||
-		apierrors.IsBadRequest(err) {
-		return false
-	}
-	if apierrors.IsTimeout(err) ||
-		apierrors.IsServerTimeout(err) ||
-		apierrors.IsTooManyRequests(err) ||
-		apierrors.IsServiceUnavailable(err) ||
-		apierrors.IsInternalError(err) {
-		return true
-	}
-	if errors.Is(err, io.ErrUnexpectedEOF) ||
-		errors.Is(err, syscall.ECONNRESET) ||
-		errors.Is(err, syscall.ECONNREFUSED) ||
-		errors.Is(err, syscall.ECONNABORTED) ||
-		errors.Is(err, syscall.ETIMEDOUT) {
-		return true
-	}
-	var urlError *url.Error
-	if errors.As(err, &urlError) {
-		return true
-	}
-	var networkError net.Error
-	return errors.As(err, &networkError)
-}
-
-func waitBackoff(ctx context.Context, duration time.Duration) error {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+		return runner.Client.Get(ctx, key, object)
+	})
 }
 
 func (runner Runner) waitForTerminal(
@@ -626,9 +620,6 @@ func (runner Runner) waitForTerminal(
 	key types.NamespacedName,
 ) (*kontextv1alpha1.AgentRun, error) {
 	interval := runner.Options.PollInterval
-	if interval <= 0 {
-		interval = 500 * time.Millisecond
-	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	var latest *kontextv1alpha1.AgentRun
