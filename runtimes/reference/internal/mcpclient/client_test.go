@@ -19,6 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 func TestHTTPDiscoveryExecutionAuthBoundingAndClose(t *testing.T) {
@@ -757,7 +758,7 @@ func TestDiscoveryLimitsAndToolNames(t *testing.T) {
 			_, err := New(context.Background(), config.MCPConfig{
 				Servers: []config.MCPServer{{Name: "limits", Transport: "http", Endpoint: httpServer.URL}},
 			}, nil)
-			var clientError *Error
+			var clientError *runtimeapi.CodedError
 			if !errors.As(err, &clientError) || clientError.Code != test.code {
 				t.Fatalf("expected %s, got %v", test.code, err)
 			}

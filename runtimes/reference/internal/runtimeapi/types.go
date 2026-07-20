@@ -91,6 +91,18 @@ type CompletionResponse struct {
 	RequestID  string
 }
 
+type CodedError struct {
+	Code    string
+	Message string
+}
+
+func (err *CodedError) Error() string {
+	if err.Code == "" {
+		return err.Message
+	}
+	return fmt.Sprintf("%s: %s", err.Code, err.Message)
+}
+
 type ProviderError struct {
 	Code       string
 	Message    string
