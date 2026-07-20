@@ -1,0 +1,9 @@
+docs-site/node_modules
+docs-site/dist
+website/.vercel
+.vercel
+.env*
+**/.venv
+**/node_modules
+**/cover.out
+.git
