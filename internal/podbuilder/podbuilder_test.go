@@ -9,6 +9,7 @@ import (
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
+	"github.com/MFS-code/Kontext/internal/testsupport"
 )
 
 func TestBuildPodInjectsKontextEnv(t *testing.T) {
@@ -22,12 +23,12 @@ func TestBuildPodInjectsKontextEnv(t *testing.T) {
 				Image: "kontext-echo:dev",
 			},
 			Env: []kontextv1alpha1.EnvVar{
-				{Name: "KONTEXT_ZONE_ID", Value: envValue("agent:leaf:0001")},
+				{Name: "KONTEXT_CONTEXT_ID", Value: envValue("context:review:0001")},
 			},
 		},
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if pod.Name != "run-review-task" {
 		t.Fatalf("unexpected pod name: %s", pod.Name)
 	}
@@ -36,7 +37,7 @@ func TestBuildPodInjectsKontextEnv(t *testing.T) {
 	}
 
 	env := envMap(pod)
-	for _, key := range []string{"KONTEXT_RUN_NAME", "KONTEXT_GOAL", "KONTEXT_MODEL", "KONTEXT_ZONE_ID"} {
+	for _, key := range []string{"KONTEXT_RUN_NAME", "KONTEXT_GOAL", "KONTEXT_MODEL", "KONTEXT_CONTEXT_ID"} {
 		if env[key] == "" {
 			t.Fatalf("expected env %s to be set", key)
 		}
@@ -87,7 +88,7 @@ func TestBuildPodInjectsGenericSecretBackedEnv(t *testing.T) {
 			}},
 		},
 	}
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	var found *corev1.EnvVar
 	for index := range pod.Spec.Containers[0].Env {
 		if pod.Spec.Containers[0].Env[index].Name == "MCP_AUTH_TOKEN" {
@@ -138,7 +139,7 @@ func TestBuildPodMountsKnowledgeConfigMap(t *testing.T) {
 		},
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if len(pod.Spec.Volumes) != 1 {
 		t.Fatalf("expected one knowledge volume, got %d", len(pod.Spec.Volumes))
 	}
@@ -158,7 +159,7 @@ func TestBuildPodLeavesRuntimePermissionsUntouched(t *testing.T) {
 		},
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if pod.Spec.SecurityContext != nil {
 		t.Fatalf("expected no pod security context, got %+v", pod.Spec.SecurityContext)
 	}
@@ -200,7 +201,7 @@ func TestBuildPodAppliesExplicitRuntimeSecurityContext(t *testing.T) {
 			},
 		},
 	}
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	securityContext := pod.Spec.Containers[0].SecurityContext
 	if securityContext == nil ||
 		securityContext.RunAsNonRoot == nil ||
@@ -226,7 +227,7 @@ func TestBuildPodSetsRequestedServiceAccount(t *testing.T) {
 		},
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if pod.Spec.ServiceAccountName != "agent-sa" {
 		t.Fatalf("expected service account agent-sa, got %s", pod.Spec.ServiceAccountName)
 	}
@@ -266,7 +267,7 @@ func TestBuildPodInjectsProviderCredentials(t *testing.T) {
 					Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
 				},
 			}
-			pod := podbuilder.BuildPod(run)
+			pod := testsupport.BuildPod(run)
 			var found *corev1.EnvVar
 			for i := range pod.Spec.Containers[0].Env {
 				if pod.Spec.Containers[0].Env[i].Name == tc.envName {
@@ -300,7 +301,7 @@ func TestBuildPodInjectsAllBedrockCredentials(t *testing.T) {
 			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
 		},
 	}
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 
 	expected := map[string]string{
 		"AWS_ACCESS_KEY_ID":     "AWS_ACCESS_KEY_ID",
@@ -357,7 +358,7 @@ func TestBuildPodPopulatesBudgetEnv(t *testing.T) {
 			},
 		},
 	}
-	env := envMap(podbuilder.BuildPod(run))
+	env := envMap(testsupport.BuildPod(run))
 	if env["KONTEXT_BUDGET_TOKENS"] != "1000" {
 		t.Fatalf("unexpected tokens budget: %q", env["KONTEXT_BUDGET_TOKENS"])
 	}
@@ -379,7 +380,7 @@ func TestBuildPodEmptyBudgetEnvWhenUnset(t *testing.T) {
 			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
 		},
 	}
-	env := envMap(podbuilder.BuildPod(run))
+	env := envMap(testsupport.BuildPod(run))
 	for _, key := range []string{"KONTEXT_BUDGET_TOKENS", "KONTEXT_BUDGET_WALLCLOCK", "KONTEXT_BUDGET_DOLLARS"} {
 		if env[key] != "" {
 			t.Fatalf("expected %s to be empty, got %q", key, env[key])
@@ -397,7 +398,7 @@ func TestBuildPodDefaultsAgentNameToRunName(t *testing.T) {
 			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
 		},
 	}
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if envMap(pod)["KONTEXT_AGENT_NAME"] != "standalone-run" {
 		t.Fatalf("expected agent name to default to run name")
 	}
@@ -417,7 +418,7 @@ func TestBuildPodUsesAgentRefName(t *testing.T) {
 			AgentRef: &kontextv1alpha1.AgentRef{Name: "echo-service"},
 		},
 	}
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if envMap(pod)["KONTEXT_AGENT_NAME"] != "echo-service" {
 		t.Fatalf("expected agent name from AgentRef")
 	}
@@ -441,7 +442,7 @@ func TestBuildPodAppliesRuntimeCommandArgsAndServiceAccount(t *testing.T) {
 			},
 		},
 	}
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if pod.Spec.ServiceAccountName != "kontext-agent" {
 		t.Fatalf("expected service account, got %q", pod.Spec.ServiceAccountName)
 	}
@@ -554,7 +555,7 @@ func TestBuildPodRequiresConfiguredBuilderForResultCapture(t *testing.T) {
 			t.Fatalf("expected BuildPod to reject result capture without operator config")
 		}
 	}()
-	podbuilder.BuildPod(stdoutCaptureRun(kontextv1alpha1.ResultFormatLastLine))
+	testsupport.BuildPod(stdoutCaptureRun(kontextv1alpha1.ResultFormatLastLine))
 }
 
 func TestBuildPodRejectsInvalidReporterConfiguration(t *testing.T) {

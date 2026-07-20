@@ -3,6 +3,7 @@ package podbuilder
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -11,7 +12,6 @@ import (
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/runtimepolicy"
-	"github.com/MFS-code/Kontext/internal/util"
 )
 
 const (
@@ -31,20 +31,6 @@ var invalidNameChars = regexp.MustCompile(`[^a-z0-9-]+`)
 
 type Config struct {
 	ReporterImage string
-}
-
-// BuildPod constructs a Pod without optional operator-managed integrations.
-// Tests and native-runtime callers may use this helper; result capture requires
-// BuildPodWithConfig so the trusted reporter image is explicit.
-func BuildPod(run *kontextv1alpha1.AgentRun) *corev1.Pod {
-	if run.Spec.Runtime.Result != nil {
-		panic("BuildPod: runtime.result requires BuildPodWithConfig")
-	}
-	pod, err := BuildPodWithConfig(run, Config{})
-	if err != nil {
-		panic(fmt.Sprintf("BuildPod: %v", err))
-	}
-	return pod
 }
 
 // BuildPodWithConfig constructs a Pod with operator-managed runtime integrations.
@@ -84,10 +70,10 @@ func BuildPodWithConfig(run *kontextv1alpha1.AgentRun, config Config) (*corev1.P
 		},
 	}
 	if len(run.Spec.Runtime.Command) > 0 {
-		container.Command = util.CloneSlice(run.Spec.Runtime.Command)
+		container.Command = slices.Clone(run.Spec.Runtime.Command)
 	}
 	if len(run.Spec.Runtime.Args) > 0 {
-		container.Args = util.CloneSlice(run.Spec.Runtime.Args)
+		container.Args = slices.Clone(run.Spec.Runtime.Args)
 	}
 
 	var initContainers []corev1.Container
@@ -182,7 +168,7 @@ func injectReporter(
 	if err != nil {
 		return container, nil, volumes, err
 	}
-	childCommand := append(util.CloneSlice(run.Spec.Runtime.Command), run.Spec.Runtime.Args...)
+	childCommand := append(slices.Clone(run.Spec.Runtime.Command), run.Spec.Runtime.Args...)
 	container.Command = append(
 		[]string{ReporterBinaryPath, "--format", format, "--"},
 		childCommand...,
@@ -251,9 +237,9 @@ func buildEnv(run *kontextv1alpha1.AgentRun) ([]corev1.EnvVar, error) {
 		{Name: "KONTEXT_PROVIDER", Value: provider},
 		{Name: "KONTEXT_MODEL", Value: run.Spec.Model},
 		{Name: "KONTEXT_TOOLS", Value: tools},
-		{Name: "KONTEXT_BUDGET_TOKENS", Value: budgetField(budget, "tokens")},
-		{Name: "KONTEXT_BUDGET_WALLCLOCK", Value: budgetField(budget, "wallclock")},
-		{Name: "KONTEXT_BUDGET_DOLLARS", Value: budgetField(budget, "dollars")},
+		{Name: "KONTEXT_BUDGET_TOKENS", Value: budgetTokens(budget)},
+		{Name: "KONTEXT_BUDGET_WALLCLOCK", Value: budgetWallclock(budget)},
+		{Name: "KONTEXT_BUDGET_DOLLARS", Value: budgetDollars(budget)},
 	}
 	reserved := make(map[string]struct{}, len(env))
 	for _, item := range env {
@@ -337,25 +323,25 @@ func agentName(run *kontextv1alpha1.AgentRun) string {
 	return run.Name
 }
 
-func budgetField(budget *kontextv1alpha1.BudgetSpec, field string) string {
+func budgetTokens(budget *kontextv1alpha1.BudgetSpec) string {
+	if budget == nil || budget.Tokens == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", *budget.Tokens)
+}
+
+func budgetWallclock(budget *kontextv1alpha1.BudgetSpec) string {
 	if budget == nil {
 		return ""
 	}
-	switch field {
-	case "tokens":
-		if budget.Tokens != nil {
-			return fmt.Sprintf("%d", *budget.Tokens)
-		}
-	case "wallclock":
-		return budget.Wallclock
-	case "dollars":
-		if budget.Dollars != nil {
-			return fmt.Sprintf("%g", *budget.Dollars)
-		}
-	default:
+	return budget.Wallclock
+}
+
+func budgetDollars(budget *kontextv1alpha1.BudgetSpec) string {
+	if budget == nil || budget.Dollars == nil {
 		return ""
 	}
-	return ""
+	return fmt.Sprintf("%g", *budget.Dollars)
 }
 
 // PodNameForRun returns a deterministic Pod name for an AgentRun.

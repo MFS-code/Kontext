@@ -18,7 +18,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
-	"github.com/MFS-code/Kontext/internal/podbuilder"
+	"github.com/MFS-code/Kontext/internal/testsupport"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/mcpclient"
 )
@@ -46,7 +46,7 @@ func TestSecretBackedPodEnvAuthenticatesHTTPMCPWithoutLeaking(t *testing.T) {
 			}},
 		},
 	}
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	var podEnvName string
 	for _, env := range pod.Spec.Containers[0].Env {
 		if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil &&
