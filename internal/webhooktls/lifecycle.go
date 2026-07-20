@@ -122,6 +122,9 @@ func (l *Lifecycle) Ensure(ctx context.Context) error {
 			nextParsed, err := parse(next, l.dnsNames(), l.opts.Clock())
 			if err != nil {
 				if err := l.clearNext(ctx, secret); err != nil {
+					if apierrors.IsConflict(err) {
+						continue
+					}
 					return err
 				}
 				continue
