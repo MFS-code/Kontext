@@ -17,10 +17,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MFS-code/Kontext/internal/tooloutput"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/MFS-code/Kontext/internal/procgroup"
+	"github.com/MFS-code/Kontext/internal/tooloutput"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
@@ -38,7 +39,6 @@ const (
 	maxStderrLineBytes          = 64 << 10
 	httpCloseRequestTimeout     = 2 * time.Second
 	processTerminationGrace     = 500 * time.Millisecond
-	processGroupPollInterval    = 10 * time.Millisecond
 	fallbackDescriptionPrefix   = "MCP tool"
 )
 
@@ -426,60 +426,29 @@ func (current *server) closeSession(ctx context.Context) error {
 	select {
 	case sessionErr = <-done:
 	case <-ctx.Done():
-		_ = killMCPProcessGroup(command.command.Process.Pid)
+		current.terminateCommand(ctx, command)
 		return ctx.Err()
 	}
 
-	timer := time.NewTimer(processTerminationGrace)
-	defer timer.Stop()
-	select {
-	case waitErr := <-command.done:
-		_ = signalMCPProcessGroup(command.command.Process.Pid)
-		waitForMCPProcessGroup(ctx, command.command.Process.Pid, processTerminationGrace)
-		_ = killMCPProcessGroup(command.command.Process.Pid)
-		return errors.Join(normalizeCloseError(sessionErr), normalizeCloseError(waitErr))
-	case <-timer.C:
-		_ = signalMCPProcessGroup(command.command.Process.Pid)
-	case <-ctx.Done():
-		_ = killMCPProcessGroup(command.command.Process.Pid)
-		return ctx.Err()
-	}
-
-	timer.Reset(processTerminationGrace)
-	select {
-	case waitErr := <-command.done:
-		_ = killMCPProcessGroup(command.command.Process.Pid)
-		return errors.Join(normalizeCloseError(sessionErr), normalizeCloseError(waitErr))
-	case <-timer.C:
-		_ = killMCPProcessGroup(command.command.Process.Pid)
-	case <-ctx.Done():
-		_ = killMCPProcessGroup(command.command.Process.Pid)
-		return ctx.Err()
-	}
-
-	select {
-	case waitErr := <-command.done:
-		return errors.Join(normalizeCloseError(sessionErr), normalizeCloseError(waitErr))
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	terminationErr := procgroup.Terminate(
+		ctx,
+		command.command.Process.Pid,
+		command.done,
+		processTerminationGrace,
+	)
+	return errors.Join(normalizeCloseError(sessionErr), terminationErr)
 }
 
 func (current *server) terminateCommand(ctx context.Context, command *managedCommand) {
 	if command == nil || command.command == nil || command.command.Process == nil {
 		return
 	}
-	processGroupID := command.command.Process.Pid
-	_ = signalMCPProcessGroup(processGroupID)
-	timer := time.NewTimer(processTerminationGrace)
-	defer timer.Stop()
-	select {
-	case <-command.done:
-		waitForMCPProcessGroup(ctx, processGroupID, processTerminationGrace)
-	case <-timer.C:
-	case <-ctx.Done():
-	}
-	_ = killMCPProcessGroup(processGroupID)
+	_ = procgroup.Terminate(
+		ctx,
+		command.command.Process.Pid,
+		command.done,
+		processTerminationGrace,
+	)
 }
 
 func discoverTools(
@@ -1043,23 +1012,4 @@ func normalizeCloseError(err error) error {
 		return nil
 	}
 	return err
-}
-
-func waitForMCPProcessGroup(ctx context.Context, processGroupID int, limit time.Duration) {
-	timer := time.NewTimer(limit)
-	defer timer.Stop()
-	ticker := time.NewTicker(processGroupPollInterval)
-	defer ticker.Stop()
-	for {
-		if !mcpProcessGroupExists(processGroupID) {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			return
-		case <-ticker.C:
-		}
-	}
 }

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MFS-code/Kontext/internal/procgroup"
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
@@ -117,7 +118,7 @@ func (tool *shellTool) Execute(
 	command.Env = environment
 	command.Stdout = io.MultiWriter(stdoutStream, stdoutCapture)
 	command.Stderr = io.MultiWriter(stderrStream, stderrCapture)
-	prepareToolProcess(command)
+	procgroup.Prepare(command)
 	if err := command.Start(); err != nil {
 		return outcome{}, &Error{
 			Code:    "shell_start_failed",
@@ -133,21 +134,15 @@ func (tool *shellTool) Execute(
 	select {
 	case waitErr = <-done:
 	case <-ctx.Done():
-		_ = signalToolProcessGroup(command.Process.Pid)
-		timer := time.NewTimer(shellTerminationGrace)
-		select {
-		case waitErr = <-done:
-			if !timer.Stop() {
-				<-timer.C
-			}
-		case <-timer.C:
-			_ = killToolProcessGroup(command.Process.Pid)
-			waitErr = <-done
-		}
-		_ = killToolProcessGroup(command.Process.Pid)
+		_ = procgroup.Terminate(
+			context.Background(),
+			command.Process.Pid,
+			done,
+			shellTerminationGrace,
+		)
 		return outcome{}, ctx.Err()
 	}
-	_ = killToolProcessGroup(command.Process.Pid)
+	_ = procgroup.Kill(command.Process.Pid)
 
 	exitCode := 0
 	if waitErr != nil {

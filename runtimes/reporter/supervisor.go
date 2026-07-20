@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+
+	"github.com/MFS-code/Kontext/internal/procgroup"
 )
 
 type ChildStartError struct {
@@ -45,7 +47,7 @@ func runChild(
 	stdoutForwarder := newStreamForwarder(stdout, capture)
 	stderrForwarder := newStreamForwarder(stderr, nil)
 	cmd := exec.Command(command[0], command[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	procgroup.Prepare(cmd)
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return ChildResult{}, &ChildStartError{Err: fmt.Errorf("open child stdout: %w", err)}
@@ -221,7 +223,7 @@ func forwardSignals(
 				recorder.Set(fmt.Errorf("forward signal %v: %w", signal, err))
 			}
 		case <-contextDone:
-			if err := syscall.Kill(-processGroupID, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+			if err := procgroup.Signal(processGroupID, syscall.SIGTERM); err != nil {
 				recorder.Set(fmt.Errorf("forward context cancellation: %w", err))
 			}
 			contextDone = nil
@@ -230,18 +232,11 @@ func forwardSignals(
 }
 
 func forwardSignal(processGroupID int, signal os.Signal) error {
-	unixSignal, ok := signal.(syscall.Signal)
-	if !ok {
-		return fmt.Errorf("unsupported signal type %T", signal)
-	}
-	if err := syscall.Kill(-processGroupID, unixSignal); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return err
-	}
-	return nil
+	return procgroup.Signal(processGroupID, signal)
 }
 
 func cleanupProcessGroup(processGroupID int) error {
-	if err := syscall.Kill(-processGroupID, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := procgroup.Kill(processGroupID); err != nil {
 		return fmt.Errorf("clean up child process group: %w", err)
 	}
 	return nil
