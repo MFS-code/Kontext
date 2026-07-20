@@ -16,6 +16,7 @@ import (
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
+	"github.com/MFS-code/Kontext/internal/testsupport"
 )
 
 func TestAgentRunReconcilerCreatesPod(t *testing.T) {
@@ -327,7 +328,7 @@ func TestAgentRunReconcilerDeletesLegacyPodWithInvalidWallclock(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -391,7 +392,7 @@ func TestAgentRunReconcilerObservesSucceededPod(t *testing.T) {
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -463,7 +464,7 @@ func TestAgentRunReconcilerObservesRunningPodWithinWallclockBudget(t *testing.T)
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -528,7 +529,7 @@ func TestAgentRunReconcilerEnforcesWallclockBudget(t *testing.T) {
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -590,7 +591,7 @@ func TestAgentRunReconcilerKeepsWallclockBudgetExceededAuthoritative(t *testing.
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -701,7 +702,7 @@ func TestAgentRunReconcilerPreservesRuntimeCancellationBeforeWallclockEnforcemen
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := podbuilder.BuildPod(run)
+	pod := testsupport.BuildPod(run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}

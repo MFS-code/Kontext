@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -84,7 +83,7 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 	}
 
 	if run.Status.PodName != "" {
-		return r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+		return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 			next.Phase = kontextv1alpha1.AgentRunPhaseFailed
 			next.PodName = podName
 			next.Message = "Pod lost before run completed."
@@ -101,7 +100,7 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 		ReporterImage: r.ReporterImage,
 	})
 	if err != nil {
-		return r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+		return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 			next.Phase = kontextv1alpha1.AgentRunPhaseFailed
 			next.Message = fmt.Sprintf("Agent run configuration is invalid: %v.", err)
 			next.CompletionTime = nowPtr()
@@ -119,7 +118,7 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 		return ctrl.Result{}, err
 	}
 
-	return r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+	return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 		next.Phase = kontextv1alpha1.AgentRunPhasePending
 		next.PodName = podName
 		next.Message = "Agent run pod requested."
@@ -134,7 +133,7 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontextv1alpha1.AgentRun, pod *corev1.Pod, podName string) (ctrl.Result, error) {
 	observation := status.ObservePod(pod)
 
-	_, err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+	err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 		next.Phase = observation.Phase
 		next.PodName = podName
 		next.Message = observation.Message
@@ -146,7 +145,7 @@ func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontex
 			next.Usage = observation.Usage
 		}
 		if next.StartTime == nil && observation.Phase == kontextv1alpha1.AgentRunPhaseRunning {
-			next.StartTime = runtimeContainerStartedAt(pod)
+			next.StartTime = observation.StartedAt
 			if next.StartTime == nil {
 				next.StartTime = nowPtr()
 			}
@@ -198,7 +197,7 @@ func (r *AgentRunReconciler) failInvalidWallclock(
 		}
 	}
 
-	return r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+	return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 		next.Phase = kontextv1alpha1.AgentRunPhaseFailed
 		if podExists {
 			next.PodName = pod.Name
@@ -236,7 +235,7 @@ func (r *AgentRunReconciler) enforceWallclock(
 		return ctrl.Result{}, false, nil
 	}
 
-	startedAt := runtimeContainerStartedAt(pod)
+	startedAt := status.ObservePod(pod).StartedAt
 	if startedAt == nil {
 		startedAt = run.Status.StartTime
 	}
@@ -250,7 +249,7 @@ func (r *AgentRunReconciler) enforceWallclock(
 		return ctrl.Result{RequeueAfter: remaining + time.Second}, false, nil
 	}
 
-	_, err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+	err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
 		next.Phase = kontextv1alpha1.AgentRunPhaseBudgetExceeded
 		next.PodName = pod.Name
 		next.Message = fmt.Sprintf("Wallclock budget exceeded after %s.", *limit)
@@ -272,25 +271,13 @@ func (r *AgentRunReconciler) enforceWallclock(
 	return ctrl.Result{}, true, nil
 }
 
-func runtimeContainerStartedAt(pod *corev1.Pod) *metav1.Time {
-	for index := range pod.Status.ContainerStatuses {
-		containerStatus := &pod.Status.ContainerStatuses[index]
-		if containerStatus.Name == podbuilder.RuntimeContainerName &&
-			containerStatus.State.Running != nil {
-			startedAt := containerStatus.State.Running.StartedAt
-			return &startedAt
-		}
-	}
-	return nil
-}
-
-func (r *AgentRunReconciler) patchRunStatus(ctx context.Context, run *kontextv1alpha1.AgentRun, mutate func(*kontextv1alpha1.AgentRunStatus)) (ctrl.Result, error) {
+func (r *AgentRunReconciler) patchRunStatus(ctx context.Context, run *kontextv1alpha1.AgentRun, mutate func(*kontextv1alpha1.AgentRunStatus)) error {
 	if err := patchStatus(ctx, r.Client, run, func() {
 		mutate(&run.Status)
 	}); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
