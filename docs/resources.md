@@ -17,9 +17,9 @@ model, budgets, and related fields.
 - **Service** — always-on. The controller keeps one live child `AgentRun` and
   re-casts it with backoff after exit or failure. In-memory conversation is not
   restored across recasts.
-- **Task** — reserved reusable template. The schema is available, but the
-  controller reports `UnsupportedMode`. Create a standalone `AgentRun` for
-  one-shot work.
+- **Task** — reusable one-shot template. Creating the Agent does not execute
+  it. A user explicitly triggers work by creating a named `AgentRun` that
+  references it. Task controller status reconciliation remains reserved.
 - **Scheduled** — reserved for cron-style minting. The schema is available,
   but the controller reports `UnsupportedMode` and does not schedule runs.
 
@@ -31,6 +31,40 @@ fields when available.
 
 You can create an `AgentRun` standalone, without an owning `Agent`. That path
 is the fastest way to prove install health with the echo runtime.
+
+### Task invocations
+
+A Task Agent configures exactly one static `goal` or parameterized
+`goalTemplate`. A sparse invocation contains only `agentRef` and optional
+string `parameters`:
+
+```yaml
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: summarize-frontend
+spec:
+  agentRef:
+    name: summarizer
+  parameters:
+    area: frontend
+```
+
+Templates use strict `${area}` placeholders. `$${area}` produces the literal
+text `${area}`. Missing and unused parameters are rejected, and static goals
+accept no parameters. Runtime, provider, model, tools, budget, identity,
+references, environment, and the concrete goal are locked to the Agent
+template. Use a standalone run or another Agent definition when those fields
+must differ.
+
+The pure resolution contract is present in this release, but sparse CREATE
+admission is not registered yet. Until that follow-up lands, use fully resolved
+or standalone runs for end-to-end execution.
+
+Task runs are user-named and can execute concurrently. For Task status,
+`lastRunName` means the newest retained owned run by creation time, while
+`runsCreated` is the number of currently retained owned runs. It is not a
+lifetime counter.
 
 ## Status and logs
 

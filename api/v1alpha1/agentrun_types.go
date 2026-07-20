@@ -15,20 +15,26 @@ const (
 
 // AgentRef links an AgentRun to its owning Agent.
 type AgentRef struct {
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 }
 
 // AgentRunSpec defines the desired state of AgentRun.
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="AgentRun spec is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.agentRef) || !has(self.parameters)",message="parameters require agentRef"
+// +kubebuilder:validation:XValidation:rule="(has(self.goal) && has(self.model) && has(self.runtime)) || (has(self.agentRef) && !has(self.goal) && !has(self.provider) && !has(self.model) && !has(self.tools) && !has(self.budget) && !has(self.secretRef) && !has(self.knowledgeConfigMapRef) && !has(self.serviceAccountName) && !has(self.runtime) && !has(self.env))",message="AgentRun must be a complete execution spec or a sparse invocation containing only agentRef and parameters"
 type AgentRunSpec struct {
 	AgentRef *AgentRef `json:"agentRef,omitempty"`
 
+	// Parameters are retained with a resolved Task snapshot for auditability.
+	Parameters map[string]string `json:"parameters,omitempty"`
+
 	// +kubebuilder:validation:MinLength=1
-	Goal string `json:"goal"`
+	Goal string `json:"goal,omitempty"`
 
 	Provider string `json:"provider,omitempty"`
 	// +kubebuilder:validation:MinLength=1
-	Model string   `json:"model"`
+	Model string   `json:"model,omitempty"`
 	Tools []string `json:"tools,omitempty"`
 
 	Budget *BudgetSpec `json:"budget,omitempty"`
@@ -39,7 +45,7 @@ type AgentRunSpec struct {
 
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 
-	Runtime RuntimeSpec `json:"runtime"`
+	Runtime RuntimeSpec `json:"runtime,omitempty,omitzero"`
 
 	Env []EnvVar `json:"env,omitempty"`
 }

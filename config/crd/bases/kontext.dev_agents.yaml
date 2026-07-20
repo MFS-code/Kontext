@@ -113,8 +113,10 @@ spec:
                     rule: has(self.value) != has(self.valueFrom)
                 type: array
               goal:
+                minLength: 1
                 type: string
               goalTemplate:
+                minLength: 1
                 type: string
               knowledgeConfigMapRef:
                 description: ConfigMapRef references a Kubernetes ConfigMap mounted
@@ -247,6 +249,15 @@ spec:
             - model
             - runtime
             type: object
+            x-kubernetes-validations:
+            - message: Task agents require exactly one of goal or goalTemplate; Service
+                and Scheduled agents require goal and forbid goalTemplate
+              rule: 'self.mode == ''Task'' ? has(self.goal) != has(self.goalTemplate)
+                : has(self.goal) && !has(self.goalTemplate)'
+            - message: schedule is only valid for Scheduled agents
+              rule: self.mode == 'Scheduled' || !has(self.schedule)
+            - message: backoff is only valid for Service agents
+              rule: self.mode == 'Service' || !has(self.backoff)
           status:
             description: AgentStatus defines the observed state of Agent.
             properties:

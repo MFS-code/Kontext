@@ -15,12 +15,17 @@ const (
 )
 
 // AgentSpec defines the desired state of Agent.
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Task' ? has(self.goal) != has(self.goalTemplate) : has(self.goal) && !has(self.goalTemplate)",message="Task agents require exactly one of goal or goalTemplate; Service and Scheduled agents require goal and forbid goalTemplate"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Scheduled' || !has(self.schedule)",message="schedule is only valid for Scheduled agents"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Service' || !has(self.backoff)",message="backoff is only valid for Service agents"
 type AgentSpec struct {
 	Mode AgentMode `json:"mode"`
 
 	Runtime RuntimeSpec `json:"runtime"`
 
-	Goal         string `json:"goal,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	Goal string `json:"goal,omitempty"`
+	// +kubebuilder:validation:MinLength=1
 	GoalTemplate string `json:"goalTemplate,omitempty"`
 
 	Provider string `json:"provider,omitempty"`
