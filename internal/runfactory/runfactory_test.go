@@ -84,7 +84,7 @@ func TestNewForAgentBuildsCompleteIndependentSnapshot(t *testing.T) {
 							},
 						},
 					},
-					Schedule: "ignored schedule",
+					Schedule: &kontextv1alpha1.ScheduleSpec{Expression: "0 * * * *"},
 					Backoff:  &kontextv1alpha1.BackoffSpec{InitialSeconds: 3, MaxSeconds: 30},
 				},
 			},

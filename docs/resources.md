@@ -20,8 +20,11 @@ model, budgets, and related fields.
 - **Task** — reserved reusable template. The schema is available, but the
   controller reports `UnsupportedMode`. Create a standalone `AgentRun` for
   one-shot work.
-- **Scheduled** — reserved for cron-style minting. The schema is available,
-  but the controller reports `UnsupportedMode` and does not schedule runs.
+- **Scheduled** — cron-style one-shot execution. The controller evaluates a
+  standard five-field expression in the configured IANA time zone and mints at
+  most the latest eligible slot. `Forbid` is the default overlap policy;
+  `Allow`, suspension, starting deadlines, and bounded success/failure history
+  are supported.
 
 ## AgentRun
 
@@ -31,6 +34,12 @@ fields when available.
 
 You can create an `AgentRun` standalone, without an owning `Agent`. That path
 is the fastest way to prove install health with the echo runtime.
+
+Scheduled child names are derived from their cron slot, so retries and leader
+changes converge on the same object. Schedule edits and resume operations
+anchor at the current time and wait for a future slot instead of backfilling.
+`status.lastScheduleTime` and `status.nextScheduleTime` expose scheduler
+progress; `currentRunName`, `restarts`, and backoff apply only to Service mode.
 
 ## Status and logs
 

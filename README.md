@@ -26,7 +26,7 @@ Kontext adds two custom resources under `kontext.dev/v1alpha1`, deliberately mir
 |---|---|---|
 | `Agent` (mode `Service`) | `Deployment` | Always-on. The controller keeps one live `AgentRun` and re-casts it with backoff when it exits. |
 | `Agent` (mode `Task`) | reusable template | Schema available; the controller reports `UnsupportedMode`. Create a standalone `AgentRun` for one-shot work. |
-| `Agent` (mode `Scheduled`) | `CronJob` | Schema available; the controller reports `UnsupportedMode` and does not schedule runs. |
+| `Agent` (mode `Scheduled`) | `CronJob` | Mints one-shot `AgentRun`s from a standard five-field cron schedule with deadlines, concurrency policy, suspension, and bounded history. |
 | `AgentRun` | `Job` / `Pod` | One bounded execution. Owns exactly one Pod, holds the immutable spec snapshot, the final `.status.result`, and usage. |
 
 An `AgentRun` can also be created standalone, without any owning `Agent` — useful for ad-hoc dispatch and demos.
@@ -103,6 +103,17 @@ Delete the Pod and watch the controller mint a replacement run:
 kubectl delete pod -l kontext.dev/agent=echo-service
 kubectl get agentruns -w
 ```
+
+### Run a scheduled agent
+
+```bash
+./scripts/apply-example.sh deploy/examples/v1alpha1/echo-scheduled-agent.yaml
+kubectl get agent echo-scheduled -w
+kubectl get agentruns -l kontext.dev/agent=echo-scheduled
+```
+
+The example uses a standard five-field expression and an explicit IANA time
+zone. Scheduled runs have slot-derived names and one-shot Pod semantics.
 
 ## Runtime images
 
@@ -266,10 +277,10 @@ scripts/                   kind install + e2e
 
 The current public release is `v0.1.0-alpha.1`. Its GitHub release contains
 the digest-pinned install manifest and versioned multi-architecture images.
-`v1alpha1` is alpha on purpose: the API shape is allowed to evolve. `Service`
-mode and standalone `AgentRun`s are implemented and covered by envtest and
-kind e2e; `Task` and `Scheduled` modes exist in the schema but are not
-reconciled.
+`v1alpha1` is alpha on purpose: the API shape is allowed to evolve. `Service`,
+`Scheduled`, and standalone `AgentRun` paths are implemented and covered by
+envtest and kind e2e. `Task` remains a reserved reusable template; create a
+standalone `AgentRun` for one-shot work.
 
 ## License
 

@@ -232,6 +232,9 @@ jobs:
       - name: Run keyless kind end-to-end scenarios
         run: ./scripts/e2e-kind.sh
 
+      - name: Run Scheduled mode kind scenario
+        run: ./scripts/e2e-kind-scheduled.sh
+
       - name: Run keyless evaluation acceptance
         run: ./scripts/eval-kind.sh
 

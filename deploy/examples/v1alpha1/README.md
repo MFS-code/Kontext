@@ -59,3 +59,12 @@ instructions; it is not production retrieval or RAG.
 The Pod remains `Running`; deleting it causes the Service controller to mint a
 fresh `AgentRun` with backoff. `scripts/eval-kind.sh` checks both the omitted
 deadline and recast behavior.
+
+## Scheduled mode
+
+`echo-scheduled-agent.yaml` runs the echo workload once per standard five-field
+cron slot. It demonstrates an explicit IANA time zone and all scheduling policy
+fields. The controller defaults omitted policies to `Etc/UTC`, `Forbid`, a
+60-second starting deadline, active scheduling, and success/failure history
+limits of 3/1. The focused kind scenario waits for one real tick and exercises
+`Forbid` separately without depending on a minute boundary.

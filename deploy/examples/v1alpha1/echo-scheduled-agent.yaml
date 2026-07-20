@@ -1,0 +1,20 @@
+apiVersion: kontext.dev/v1alpha1
+kind: Agent
+metadata:
+  name: echo-scheduled
+spec:
+  mode: Scheduled
+  goal: Emit one deterministic echo result for this scheduled slot.
+  provider: echo
+  model: echo-model
+  runtime:
+    image: ghcr.io/mfs-code/kontext-echo:RELEASE_TAG
+    command: ["/entrypoint.sh"]
+  schedule:
+    expression: "* * * * *"
+    timeZone: America/New_York
+    concurrencyPolicy: Forbid
+    startingDeadlineSeconds: 60
+    suspend: false
+    successfulRunsHistoryLimit: 3
+    failedRunsHistoryLimit: 1

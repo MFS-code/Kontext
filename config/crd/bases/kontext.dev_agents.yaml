@@ -226,7 +226,52 @@ spec:
                   rule: '!has(self.result) || (has(self.command) && size(self.command)
                     > 0 && size(self.command[0]) > 0)'
               schedule:
-                type: string
+                description: ScheduleSpec controls Scheduled-mode run creation.
+                properties:
+                  concurrencyPolicy:
+                    default: Forbid
+                    description: |-
+                      ConcurrencyPolicy controls whether a due slot may overlap an active run.
+                      Replace is intentionally deferred.
+                    enum:
+                    - Allow
+                    - Forbid
+                    type: string
+                  expression:
+                    description: Expression is a standard five-field cron expression.
+                    minLength: 1
+                    pattern: ^(\S+\s+){4}\S+$
+                    type: string
+                  failedRunsHistoryLimit:
+                    default: 1
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  startingDeadlineSeconds:
+                    default: 60
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  successfulRunsHistoryLimit:
+                    default: 3
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  suspend:
+                    default: false
+                    type: boolean
+                  timeZone:
+                    default: Etc/UTC
+                    type: string
+                required:
+                - expression
+                type: object
+                x-kubernetes-validations:
+                - message: time zones must be configured with schedule.timeZone, not
+                    inside schedule.expression
+                  rule: '!self.expression.startsWith(''TZ='') && !self.expression.startsWith(''CRON_TZ='')
+                    && !self.expression.contains('' TZ='') && !self.expression.contains(''
+                    CRON_TZ='')'
               secretRef:
                 description: SecretRef references a Kubernetes Secret with provider
                   credentials.
@@ -247,6 +292,15 @@ spec:
             - model
             - runtime
             type: object
+            x-kubernetes-validations:
+            - message: schedule and a concrete goal are required only in Scheduled
+                mode
+              rule: 'self.mode == ''Scheduled'' ? has(self.schedule) && self.goal.size()
+                > 0 : !has(self.schedule)'
+            - message: Service mode requires a concrete goal
+              rule: 'self.mode == ''Service'' ? self.goal.size() > 0 : true'
+            - message: backoff is supported only in Service mode
+              rule: 'self.mode == ''Service'' ? true : !has(self.backoff)'
           status:
             description: AgentStatus defines the observed state of Agent.
             properties:
@@ -309,6 +363,12 @@ spec:
               currentRunName:
                 type: string
               lastRunName:
+                type: string
+              lastScheduleTime:
+                format: date-time
+                type: string
+              nextScheduleTime:
+                format: date-time
                 type: string
               observedGeneration:
                 format: int64

@@ -70,6 +70,11 @@ kubectl logs -n "${NAMESPACE}" -l control-plane=controller-manager --all-contain
   echo "# agents"
   kubectl get agents -A -o wide || true
   echo
+  echo "# scheduled agents"
+  kubectl get agents -A \
+    -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SUSPEND:.spec.schedule.suspend,LAST:.status.lastScheduleTime,NEXT:.status.nextScheduleTime,RUN:.status.lastRunName' \
+    2>/dev/null || true
+  echo
   echo "# agentruns"
   kubectl get agentruns -A -o wide || true
   echo

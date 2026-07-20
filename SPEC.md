@@ -27,7 +27,7 @@ API group/version: `kontext.dev/v1alpha1` (alpha on purpose — the shape is all
 | ------------------------ | ------------------------ | -------------------------------------------------------------------------------------- |
 | `Agent` mode `Service`   | `Deployment`             | Always-on. Controller keeps one live `AgentRun`; re-casts on exit/failure.             |
 | `Agent` mode `Task`      | reusable template        | Reserved in the schema. The controller reports `UnsupportedMode`; create a standalone `AgentRun` for one-shot work. |
-| `Agent` mode `Scheduled` | `CronJob`                | Reserved in the schema. The controller reports `UnsupportedMode` and does not schedule runs. |
+| `Agent` mode `Scheduled` | `CronJob`                | Mints one-shot `AgentRun`s from standard five-field cron slots. |
 | `AgentRun`               | `Pod` / `Job`            | The single execution unit. Owns one Pod. Holds `status.result`, usage, immutable spec. |
 
 
@@ -44,7 +44,7 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 
 | Field                | Type                                  | Req | Notes                                                          |
 | -------------------- | ------------------------------------- | --- | -------------------------------------------------------------- |
-| `mode`               | enum `Task` | `Service` | `Scheduled` | yes | Discriminator. `Scheduled` reserved.                           |
+| `mode`               | enum `Task` | `Service` | `Scheduled` | yes | Discriminator.                                                  |
 | `runtime.image`      | string                                | yes | Container image implementing the runtime contract.             |
 | `runtime.command`    | []string                              | no  | Override entrypoint.                                           |
 | `runtime.args`       | []string                              | no  |                                                                |
@@ -62,7 +62,7 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `knowledgeConfigMapRef.name` | string                       | no  | Static ConfigMap context mounted read-only at `/kontext/knowledge`. |
 | `serviceAccountName` | string                                | no  | Per-agent identity.                                            |
 | `env`                | []EnvVar                              | no  | Extra literal or Secret-backed env passed to the Pod.          |
-| `schedule`           | string (cron)                         | no  | Only for `Scheduled`.                                          |
+| `schedule`           | `ScheduleSpec`                        | no* | Required and allowed only for `Scheduled`.                     |
 | `backoff`            | object                                | no  | Re-cast backoff policy for `Service`. Controller-defaulted.    |
 
 
@@ -78,7 +78,35 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `lastRunName`        | string      | `Task`/`Scheduled`: most recent run. |
 | `runsCreated`        | int         | Counter.                             |
 | `restarts`           | int         | `Service`: re-cast count.            |
+| `lastScheduleTime`   | timestamp   | `Scheduled`: latest slot that minted a run. |
+| `nextScheduleTime`   | timestamp   | `Scheduled`: next slot the controller will evaluate. |
 | `observedGeneration` | int         |                                      |
+
+### `ScheduleSpec`
+
+`Scheduled` requires a concrete `spec.goal`. Its schedule fields are:
+
+| Field | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `expression` | string | required | Standard five-field minute/hour/day-of-month/month/day-of-week cron. Descriptors and seconds are rejected. |
+| `timeZone` | IANA name | `Etc/UTC` | The expression cannot embed `TZ` or `CRON_TZ`. |
+| `concurrencyPolicy` | `Allow` or `Forbid` | `Forbid` | `Forbid` treats Pending and Running owned runs as active. `Replace` is not supported. |
+| `startingDeadlineSeconds` | non-negative int | `60` | A late slot is eligible only within this duration. |
+| `suspend` | bool | `false` | Prevents new runs. Resuming waits for the next future slot. |
+| `successfulRunsHistoryLimit` | non-negative int | `3` | Completed successful children retained. |
+| `failedRunsHistoryLimit` | non-negative int | `1` | Completed failed or budget-exceeded children retained. |
+
+After controller downtime, only the latest due slot is considered. It is
+created when still inside the starting deadline; older slots are skipped and
+never burst-backfilled. A skipped `Forbid` overlap is not queued. Any Agent
+generation change resets the scheduling anchor to the current time and waits
+for the next future slot.
+
+Run names are derived from the scheduled slot, not reconciliation wall-clock
+time. Creation is idempotent across retries and leader changes. Completed
+history is pruned independently by outcome, active runs are never pruned, and
+Agent ownership gives all children normal Kubernetes deletion cascading.
+`currentRunName`, `restarts`, and Service backoff remain Service-only.
 
 
 ---
