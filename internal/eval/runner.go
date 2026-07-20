@@ -2,8 +2,6 @@ package eval
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -11,33 +9,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 )
-
-const (
-	labelManagedBy  = "app.kubernetes.io/managed-by"
-	labelEvalSuite  = "kontext.dev/eval-suite"
-	labelEvalCase   = "kontext.dev/eval-case"
-	labelInvocation = "kontext.dev/eval-invocation"
-)
-
-type RunnerOptions struct {
-	Namespace    string
-	KeepRuns     bool
-	PollInterval time.Duration
-	Judge        Judge
-	Now          func() time.Time
-	InvocationID string
-}
-
-type Runner struct {
-	Client  client.Client
-	Logs    LogFetcher
-	Options RunnerOptions
-}
 
 func (runner Runner) RunSuite(ctx context.Context, suite EvalSuite) []Record {
 	runner.Options = normalizeRunnerOptions(runner.Options, suite.Spec.Defaults)
@@ -46,22 +21,6 @@ func (runner Runner) RunSuite(ctx context.Context, suite EvalSuite) []Record {
 		records = append(records, runner.runCase(ctx, suite, item))
 	}
 	return records
-}
-
-func normalizeRunnerOptions(options RunnerOptions, defaults SuiteDefaults) RunnerOptions {
-	if options.Now == nil {
-		options.Now = time.Now
-	}
-	if options.InvocationID == "" {
-		options.InvocationID = invocationID(options.Now())
-	}
-	if options.Namespace == "" {
-		options.Namespace = defaults.Namespace
-	}
-	if options.PollInterval <= 0 {
-		options.PollInterval = 500 * time.Millisecond
-	}
-	return options
 }
 
 func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Record {
@@ -327,20 +286,4 @@ func terminalPhase(phase kontextv1alpha1.AgentRunPhase) bool {
 	default:
 		return false
 	}
-}
-
-func invocationID(now time.Time) string {
-	random := make([]byte, 3)
-	if _, err := rand.Read(random); err != nil {
-		return fmt.Sprintf("%x", now.UnixNano())
-	}
-	return fmt.Sprintf("%x-%s", now.Unix(), hex.EncodeToString(random))
-}
-
-func labelValue(value string) string {
-	value = NameForCase(value, "", "")
-	if len(value) > 63 {
-		value = value[:63]
-	}
-	return value
 }
