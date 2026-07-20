@@ -20,21 +20,10 @@ import (
 )
 
 type kubernetesErrorClassification struct {
-	retryableRead  bool
-	ambiguousWrite bool
+	retryableRead bool
 }
 
 func classifyKubernetesError(err error) kubernetesErrorClassification {
-	if apierrors.IsAlreadyExists(err) ||
-		apierrors.IsBadRequest(err) ||
-		apierrors.IsInvalid(err) ||
-		apierrors.IsForbidden(err) ||
-		apierrors.IsUnauthorized(err) ||
-		apierrors.IsMethodNotSupported(err) ||
-		apierrors.IsNotAcceptable(err) ||
-		apierrors.IsUnsupportedMediaType(err) {
-		return kubernetesErrorClassification{}
-	}
 	if apierrors.IsTimeout(err) ||
 		apierrors.IsServerTimeout(err) ||
 		apierrors.IsTooManyRequests(err) ||
@@ -45,69 +34,39 @@ func classifyKubernetesError(err error) kubernetesErrorClassification {
 		errors.Is(err, syscall.ECONNREFUSED) ||
 		errors.Is(err, syscall.ECONNABORTED) ||
 		errors.Is(err, syscall.ETIMEDOUT) {
-		return kubernetesErrorClassification{retryableRead: true, ambiguousWrite: true}
+		return kubernetesErrorClassification{retryableRead: true}
 	}
 	var urlError *url.Error
 	if errors.As(err, &urlError) {
-		return kubernetesErrorClassification{retryableRead: true, ambiguousWrite: true}
+		return kubernetesErrorClassification{retryableRead: true}
 	}
 	var networkError net.Error
 	if errors.As(err, &networkError) {
-		return kubernetesErrorClassification{retryableRead: true, ambiguousWrite: true}
+		return kubernetesErrorClassification{retryableRead: true}
 	}
-	return kubernetesErrorClassification{ambiguousWrite: true}
+	return kubernetesErrorClassification{}
 }
 
-func (runner Runner) cleanupAmbiguousCreate(
+func (runner Runner) cleanupCreateFailure(
 	parent context.Context,
 	key types.NamespacedName,
 	expectedLabels map[string]string,
 ) []string {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 300*time.Millisecond)
 	defer cancel()
-	var lastErr error
-	deleteAttempted := false
-	err := clientretry.OnError(wait.Backoff{
-		Duration: 25 * time.Millisecond,
-		Factor:   2,
-		Steps:    8,
-		Cap:      200 * time.Millisecond,
-	}, func(err error) bool {
-		return ctx.Err() == nil &&
-			(apierrors.IsNotFound(err) || classifyKubernetesError(err).retryableRead)
-	}, func() error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		observed := &kontextv1alpha1.AgentRun{}
-		err := runner.Client.Get(ctx, key, observed)
-		if apierrors.IsNotFound(err) && deleteAttempted {
-			return nil
-		}
-		if err == nil {
-			if !hasExactEvaluatorOwnership(observed.Labels, expectedLabels) {
-				return errors.New("ambiguous AgentRun exists without exact evaluator ownership; left untouched")
-			}
-			deleteAttempted = true
-			if err := runner.Client.Delete(ctx, observed); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("cleanup ambiguous AgentRun: %w", err)
-			}
-			return nil
-		}
-		lastErr = err
-		return err
-	})
-	if err == nil {
+	observed := &kontextv1alpha1.AgentRun{}
+	if err := runner.Client.Get(ctx, key, observed); apierrors.IsNotFound(err) {
 		return nil
+	} else if err != nil {
+		return []string{fmt.Sprintf("probe AgentRun after create error: %v", err)}
 	}
-	if ctx.Err() != nil {
-		return []string{fmt.Sprintf(
-			"probe ambiguous AgentRun after create error: %v (last read: %v)",
-			ctx.Err(),
-			lastErr,
-		)}
+	if !hasExactEvaluatorOwnership(observed.Labels, expectedLabels) {
+		return []string{"AgentRun exists without exact evaluator ownership; left untouched"}
 	}
-	return []string{err.Error()}
+	if err := runner.Client.Delete(ctx, observed); err != nil && !apierrors.IsNotFound(err) {
+		return []string{fmt.Sprintf("cleanup AgentRun after create error: %v", err)}
+	}
+	return nil
 }
 
 func hasExactEvaluatorOwnership(actual, expected map[string]string) bool {

@@ -19,7 +19,7 @@ type LogCollection struct {
 
 const MaxLogTailLines int64 = MaxEventCount + 1
 
-type PodLogStreamer func(
+type podLogStreamer func(
 	context.Context,
 	string,
 	string,
@@ -27,8 +27,20 @@ type PodLogStreamer func(
 ) (io.ReadCloser, error)
 
 type KubernetesLogFetcher struct {
-	Client kubernetes.Interface
-	Stream PodLogStreamer
+	stream podLogStreamer
+}
+
+func NewKubernetesLogFetcher(client kubernetes.Interface) KubernetesLogFetcher {
+	return KubernetesLogFetcher{
+		stream: func(
+			ctx context.Context,
+			namespace string,
+			podName string,
+			options *corev1.PodLogOptions,
+		) (io.ReadCloser, error) {
+			return client.CoreV1().Pods(namespace).GetLogs(podName, options).Stream(ctx)
+		},
+	}
 }
 
 func (fetcher KubernetesLogFetcher) Fetch(
@@ -42,18 +54,7 @@ func (fetcher KubernetesLogFetcher) Fetch(
 		TailLines:  &tailLines,
 		LimitBytes: &limitBytes,
 	}
-	streamLogs := fetcher.Stream
-	if streamLogs == nil {
-		streamLogs = func(
-			ctx context.Context,
-			namespace string,
-			podName string,
-			options *corev1.PodLogOptions,
-		) (io.ReadCloser, error) {
-			return fetcher.Client.CoreV1().Pods(namespace).GetLogs(podName, options).Stream(ctx)
-		}
-	}
-	stream, err := streamLogs(ctx, namespace, podName, options)
+	stream, err := fetcher.stream(ctx, namespace, podName, options)
 	if err != nil {
 		return LogCollection{}, err
 	}

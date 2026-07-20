@@ -124,18 +124,18 @@ func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Re
 	created := false
 	if err := runner.Client.Create(caseCtx, run); err != nil {
 		record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("create AgentRun: %v", err))
-		if !runner.Options.KeepRuns && classifyKubernetesError(err).ambiguousWrite {
-			record.CollectionErrors = append(
-				record.CollectionErrors,
-				runner.cleanupAmbiguousCreate(caseCtx, types.NamespacedName{
-					Namespace: namespace,
-					Name:      name,
-				}, ownershipLabels)...,
-			)
-		} else if apierrors.IsAlreadyExists(err) {
+		if apierrors.IsAlreadyExists(err) {
 			record.CollectionErrors = append(
 				record.CollectionErrors,
 				"AgentRun name collision was left untouched",
+			)
+		} else if !runner.Options.KeepRuns {
+			record.CollectionErrors = append(
+				record.CollectionErrors,
+				runner.cleanupCreateFailure(caseCtx, types.NamespacedName{
+					Namespace: namespace,
+					Name:      name,
+				}, ownershipLabels)...,
 			)
 		}
 		return runner.finishRecord(caseCtx, &record, item, requirements, nil, nil, created, now)
@@ -196,6 +196,16 @@ func (runner Runner) finishRecord(
 	created bool,
 	now func() time.Time,
 ) Record {
+	collectionCtx := ctx
+	cancelCollection := func() {}
+	if ctx.Err() != nil {
+		collectionCtx, cancelCollection = context.WithTimeout(
+			context.WithoutCancel(ctx),
+			5*time.Second,
+		)
+	}
+	defer cancelCollection()
+
 	if requirements.exitCode {
 		record.PodExitCode = podExitCode(pod)
 		if pod != nil && record.PodExitCode == nil {
@@ -228,7 +238,7 @@ func (runner Runner) finishRecord(
 			record.CollectionErrors = append(record.CollectionErrors, "required runtime log fetcher is not configured")
 		}
 		if requirements.logs && runner.Logs != nil {
-			logs, err := runner.Logs.Fetch(ctx, pod.Namespace, pod.Name, "runtime")
+			logs, err := runner.Logs.Fetch(collectionCtx, pod.Namespace, pod.Name, "runtime")
 			if err != nil {
 				record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("fetch required runtime logs: %v", err))
 			} else {
@@ -247,8 +257,8 @@ func (runner Runner) finishRecord(
 	record.DurationMillis = record.CompletedAt.Sub(record.StartedAt).Milliseconds()
 	GradeRecord(record, item.Graders)
 
-	if runner.Options.Judge != nil {
-		judgeResult, err := runner.Options.Judge.Evaluate(ctx, observationFor(*record))
+	if created && runner.Options.Judge != nil {
+		judgeResult, err := runner.Options.Judge.Evaluate(collectionCtx, observationFor(*record))
 		if err != nil {
 			record.Judge = &JudgeResult{Configured: true, Error: boundedMessage(err.Error())}
 		} else {

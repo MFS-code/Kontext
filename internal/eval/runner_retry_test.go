@@ -115,22 +115,20 @@ func TestKubernetesErrorClassification(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			classification := classifyKubernetesError(err)
-			if !classification.retryableRead || !classification.ambiguousWrite {
+			if !classification.retryableRead {
 				t.Fatalf("error was not classified transient: %v", err)
 			}
 		})
 	}
-	if classification := classifyKubernetesError(apierrors.NewBadRequest("permanent")); classification.retryableRead ||
-		classification.ambiguousWrite {
+	if classification := classifyKubernetesError(apierrors.NewBadRequest("permanent")); classification.retryableRead {
 		t.Fatal("permanent error was classified transient")
 	}
-	if classification := classifyKubernetesError(apierrors.NewUnauthorized("permanent")); classification.retryableRead ||
-		classification.ambiguousWrite {
+	if classification := classifyKubernetesError(apierrors.NewUnauthorized("permanent")); classification.retryableRead {
 		t.Fatal("unauthorized error was classified transient")
 	}
 	unknown := classifyKubernetesError(errors.New("write result unknown"))
-	if unknown.retryableRead || !unknown.ambiguousWrite {
-		t.Fatalf("unknown error classification was unsafe: %#v", unknown)
+	if unknown.retryableRead {
+		t.Fatalf("unknown error classification was retryable: %#v", unknown)
 	}
 }
 

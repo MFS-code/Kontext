@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	MaxJudgeInputBytes  = 64 << 10
-	MaxJudgeOutputBytes = 16 << 10
-	MaxJudgeRationale   = 4096
+	MaxJudgeInputBytes        = 64 << 10
+	MaxJudgeOutputBytes       = 16 << 10
+	MaxJudgeStatusOutputBytes = 16 << 10
+	MaxJudgeRationale         = 4096
 )
 
 var errJudgeOutputLimit = errors.New("judge output exceeded configured limit")
@@ -119,7 +120,7 @@ func observationFor(record Record) JudgeObservation {
 		Grades:        record.Grades,
 		EventCounts:   make(map[string]int, len(record.Events.Counts)),
 	}
-	if observation.StatusOutput != nil && len(observation.StatusOutput.Value) > 16<<10 {
+	if observation.StatusOutput != nil && len(observation.StatusOutput.Value) > MaxJudgeStatusOutputBytes {
 		observation.StatusOutput = &StatusOutput{
 			MediaType: observation.StatusOutput.MediaType,
 			Value:     json.RawMessage(`null`),
