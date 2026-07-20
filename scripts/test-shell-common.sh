@@ -48,19 +48,27 @@ chmod +x "${tmp_dir}/kubectl"
 KUBECTL_ARGS_FILE="${tmp_dir}/kubectl.args" \
   KUBECTL_PHASE=Succeeded \
   PATH="${tmp_dir}:${PATH}" \
-  wait_for_run_phase test-run Succeeded test-namespace 1 1
+  wait_for_run_phase test-run Succeeded test-namespace 5 1
 [[ "$(<"${tmp_dir}/kubectl.args")" == \
   "get agentrun test-run -n test-namespace -o jsonpath={.status.phase}" ]] ||
-  fail "wait_for_run_phase did not pass the requested namespace"
+  fail "wait_for_run_phase rejected a valid timeout or namespace"
 if KUBECTL_ARGS_FILE="${tmp_dir}/kubectl.args" \
   KUBECTL_PHASE=Failed \
   PATH="${tmp_dir}:${PATH}" \
   wait_for_run_phase test-run Succeeded test-namespace 1 1 2>/dev/null; then
   fail "wait_for_run_phase accepted an unexpected terminal phase"
 fi
-if wait_for_run_phase test-run Succeeded test-namespace invalid 1 2>/dev/null; then
-  fail "wait_for_run_phase accepted an invalid timeout"
-fi
+for invalid_timeout in 0 -1 1.5 malformed; do
+  if timeout_error="$(
+    wait_for_run_phase \
+      test-run Succeeded test-namespace "${invalid_timeout}" 1 2>&1
+  )"; then
+    fail "wait_for_run_phase accepted invalid timeout: ${invalid_timeout}"
+  fi
+  [[ "${timeout_error}" == \
+    *"wait timeout must be a positive whole number of seconds: ${invalid_timeout}"* ]] ||
+    fail "wait_for_run_phase gave an unclear error for timeout: ${invalid_timeout}"
+done
 
 overlay="${tmp_dir}/overlay"
 mkdir "${overlay}"

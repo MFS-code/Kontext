@@ -272,11 +272,6 @@ render_run_manifest | kubectl apply -f - >/dev/null
 failure_stage="wait_for_terminal_phase"
 echo "==> waiting for AgentRun success"
 if ! wait_for_run_phase "${run_name}" Succeeded "${namespace}" 150 2; then
-  phase="$(
-    kubectl get agentrun "${run_name}" \
-      --namespace "${namespace}" \
-      -o jsonpath='{.status.phase}' 2>/dev/null || true
-  )"
   exit 1
 fi
 phase="Succeeded"

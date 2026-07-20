@@ -45,9 +45,12 @@ wait_for_run_phase() {
   local elapsed=0
   local phase=""
 
-  if [[ ! "${timeout_seconds}" =~ ^[0-9]+$ ||
-    ! "${poll_seconds}" =~ ^[1-9][0-9]*$ ]]; then
-    echo "AgentRun wait timeout and poll interval must be whole seconds" >&2
+  if [[ ! "${timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "AgentRun wait timeout must be a positive whole number of seconds: ${timeout_seconds}" >&2
+    return 2
+  fi
+  if [[ ! "${poll_seconds}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "AgentRun poll interval must be a positive whole number of seconds: ${poll_seconds}" >&2
     return 2
   fi
 
