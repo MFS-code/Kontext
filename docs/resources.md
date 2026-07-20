@@ -17,10 +17,11 @@ model, budgets, and related fields.
 - **Service** — always-on. The controller keeps one live child `AgentRun` and
   re-casts it with backoff after exit or failure. In-memory conversation is not
   restored across recasts.
-- **Task** — reusable template intended to mint an `AgentRun` per invocation.
-  Schema is present; controller support is planned.
-- **Scheduled** — reserved for cron-style minting. Schema is present; not
-  reconciled yet.
+- **Task** — reserved reusable template. The schema is available, but the
+  controller reports `UnsupportedMode`. Create a standalone `AgentRun` for
+  one-shot work.
+- **Scheduled** — reserved for cron-style minting. The schema is available,
+  but the controller reports `UnsupportedMode` and does not schedule runs.
 
 ## AgentRun
 

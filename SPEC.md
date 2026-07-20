@@ -4,9 +4,11 @@ description: Agent, AgentRun, and runtime-image contract for kontext.dev/v1alpha
 sidebarTitle: API spec
 ---
 
-# Kontext API Spec (DRAFT — v1alpha1)
+# Kontext API specification (`v1alpha1`)
 
-> Status: draft for review. This contract keeps Kontext a **general** agent runtime. Features that require application-specific vocabulary or behavior belong in the consumer's runtime image, not the control plane.
+> This is the published `v1alpha1` API and runtime-image contract. Kontext
+> remains a general agent runtime. Application-specific vocabulary and behavior
+> belong in the consumer's runtime image, not the control plane.
 
 Kontext exposes two custom resources and one runtime-image contract.
 
@@ -24,8 +26,8 @@ API group/version: `kontext.dev/v1alpha1` (alpha on purpose — the shape is all
 | Kontext                  | Core Kubernetes analogue | Behavior                                                                               |
 | ------------------------ | ------------------------ | -------------------------------------------------------------------------------------- |
 | `Agent` mode `Service`   | `Deployment`             | Always-on. Controller keeps one live `AgentRun`; re-casts on exit/failure.             |
-| `Agent` mode `Task`      | reusable template        | Does not run on its own. Each invocation mints an `AgentRun`.                          |
-| `Agent` mode `Scheduled` | `CronJob`                | Mints an `AgentRun` on a cron schedule. *(Reserved; build later.)*                     |
+| `Agent` mode `Task`      | reusable template        | Reserved in the schema. The controller reports `UnsupportedMode`; create a standalone `AgentRun` for one-shot work. |
+| `Agent` mode `Scheduled` | `CronJob`                | Reserved in the schema. The controller reports `UnsupportedMode` and does not schedule runs. |
 | `AgentRun`               | `Pod` / `Job`            | The single execution unit. Owns one Pod. Holds `status.result`, usage, immutable spec. |
 
 
@@ -426,14 +428,4 @@ security boundary.
 ## Anti-overfit firewall (read before adding a field)
 
 Kontext's vocabulary is fixed: `Agent`, `AgentRun`, runtime image, mode, budget, secret, tools, status, result. It must not gain domain-specific fields or workflow semantics for any one consumer. Consumers encode their semantics inside runtime images and orchestrate by creating generic `Agent`/`AgentRun` objects.
-
----
-
-## Open questions (resolve as real examples appear)
-
-1. Does `Service` mode ever need >1 concurrent `AgentRun` (replicas), or is single-run-per-Agent enough for the MVP?
-2. Where do tool *permissions* get enforced — admission/CEL on the CRD, or trusted to the runtime image at first?
-3. Is `BudgetExceeded` a distinct phase or a `Failed` with a reason condition?
-4. Do we need a `goalTemplate` + parameters object now, or defer templating until a concrete consumer needs it?
-5. Standalone `AgentRun` UX: encouraged primitive, or always create via an `Agent`?
 

@@ -1,29 +1,18 @@
 # Website and docs deployment
 
-Marketing site: static files in this directory → **Vercel** → `kontext.run`  
-Documentation: [`docs-site/`](../docs-site/) (renders `docs/*.md` + `SPEC.md`) →
-**Vercel** → `docs.kontext.run`
+Both public sites are live on Vercel:
 
-Publish the marketing site only after `v0.1.0-alpha.1` (or the current alpha tag)
-exists as a GitHub release with `install.yaml`. The page already warns that a
-published release is required.
+- [kontext.run](https://kontext.run) serves the static marketing site from
+  this directory.
+- [docs.kontext.run](https://docs.kontext.run) serves [`docs-site/`](../docs-site/),
+  which renders `docs/*.md` and `SPEC.md`.
 
-## Vercel marketing (`kontext.run`)
+## Production configuration
 
-1. Import the `MFS-code/Kontext` repository in the Vercel dashboard.
-2. Set **Root Directory** to `website`.
-3. Framework preset: **Other** (no build command). Output is the `website/`
-   folder as-is. `vercel.json` lives next to `index.html`.
-4. Assign the production domain `kontext.run` (and `www` redirect if you want it).
-
-## Vercel docs (`docs.kontext.run`)
-
-1. Create a second Vercel project from the same repository (or use the existing
-   team).
-2. Root Directory: `docs-site`
-3. Build command: `npm run build` · Output: `dist` · Node 20 or 22
-4. Assign `docs.kontext.run`
-5. DNS: CNAME `docs` → the Vercel DNS target shown for that project
+| Site | Root directory | Build | Output |
+|---|---|---|---|
+| `kontext.run` | `website` | none | static files in `website/` |
+| `docs.kontext.run` | `docs-site` | `npm run build` on Node 22 | `dist` |
 
 Local:
 
@@ -36,7 +25,7 @@ mise exec node@22 -- npm run dev
 Navigation still comes from root [`docs-nav.json`](../docs-nav.json). Markdown stays the
 source of truth under `docs/` and `SPEC.md`.
 
-## DNS checklist
+## Production routing
 
 | Host | Target | Purpose |
 |---|---|---|

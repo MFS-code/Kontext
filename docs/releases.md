@@ -6,7 +6,8 @@ sidebarTitle: Releases
 
 # Release and image versioning
 
-Kontext releases use SemVer-compatible git tags:
+The current public release is `v0.1.0-alpha.1`. Kontext releases use
+SemVer-compatible git tags:
 
 ```text
 vMAJOR.MINOR.PATCH
@@ -14,8 +15,7 @@ vMAJOR.MINOR.PATCH-PRERELEASE
 ```
 
 Build metadata suffixes (`+...`) are not supported because they are not valid
-OCI tag characters. The first public alpha can therefore use a tag such as
-`v0.1.0-alpha.1`.
+OCI tag characters.
 
 ## Published images
 
@@ -80,7 +80,7 @@ Apply the new release manifest over the existing installation and wait for the
 controller rollout:
 
 ```bash
-NEW_VERSION=v0.1.0-alpha.2
+NEW_VERSION="<target-release-tag>"
 kubectl apply -f \
   "https://github.com/MFS-code/Kontext/releases/download/${NEW_VERSION}/install.yaml"
 kubectl rollout status deployment/controller-manager \
@@ -131,7 +131,7 @@ Release CI verifies both the retention procedure and complete removal.
 The git tag, GitHub release, and image tags identify one version of the Kontext
 distribution. They do not change the Kubernetes API group/version: current
 releases serve `kontext.dev/v1alpha1`, and maintained runtimes emit the
-versioned event and result contracts documented in [`SPEC.md`](../SPEC.md).
+versioned event and result contracts documented in the [API specification](/SPEC).
 
 `v1alpha1` is intentionally unstable. A new Kontext alpha release may make
 breaking CRD, runtime-contract, or status-shape changes while retaining the

@@ -11,13 +11,6 @@ echo `AgentRun`. You need kubectl and permission to create CRDs, cluster-scoped
 RBAC, a Namespace, and a Deployment. You do not need Docker, kind, or a
 repository clone.
 
-<Note>
-  The install URL only works after a matching GitHub release exists. Check
-  [Releases](https://github.com/MFS-code/Kontext/releases) before running the
-  commands below. Until the first alpha tag is published, use the kind-based
-  developer path in the repository README.
-</Note>
-
 ## Install
 
 ```bash
