@@ -12,6 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/MFS-code/Kontext/internal/procgroup"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
 )
 
@@ -32,7 +33,7 @@ func startCommandTransport(
 	command := exec.Command(serverConfig.Command, serverConfig.Args...)
 	command.Env = sortedEnvironment(serverConfig.Env)
 	command.Stderr = newRedactingLineWriter(stderr, redactor)
-	prepareMCPProcess(command)
+	procgroup.Prepare(command)
 
 	stdout, err := command.StdoutPipe()
 	if err != nil {

@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/MFS-code/Kontext/internal/procgroup"
 )
 
 const (
@@ -60,7 +62,7 @@ func (judge CommandJudge) Evaluate(ctx context.Context, observation JudgeObserva
 	commandCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	command := exec.CommandContext(commandCtx, "/bin/sh", "-c", judge.Command)
-	hardenJudgeCommand(command)
+	procgroup.Prepare(command)
 	command.Stdin = bytes.NewReader(input)
 	command.Env = safeCommandEnvironment()
 	var stdout bytes.Buffer
@@ -68,7 +70,9 @@ func (judge CommandJudge) Evaluate(ctx context.Context, observation JudgeObserva
 	var stderr bytes.Buffer
 	command.Stderr = &limitedWriter{Writer: &stderr, Remaining: MaxJudgeOutputBytes}
 	runErr := command.Run()
-	terminateJudgeCommand(command)
+	if command.Process != nil {
+		_ = procgroup.Kill(command.Process.Pid)
+	}
 	if runErr != nil {
 		return JudgeResult{}, fmt.Errorf("judge command: %w: %s", runErr, boundedMessage(stderr.String()))
 	}
