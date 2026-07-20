@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +97,186 @@ func TestAgentReconcilerMintsServiceRun(t *testing.T) {
 	if run.Spec.Env[0].ValueFrom.SecretKeyRef.Name != "mcp-auth" ||
 		run.Spec.Env[0].ValueFrom.SecretKeyRef.Key != "token" {
 		t.Fatalf("child run Secret ref drifted with Agent update: %#v", run.Spec.Env)
+	}
+}
+
+func TestAgentReconcilerServiceRunMatchesLegacyBuildOutput(t *testing.T) {
+	ctx := context.Background()
+	agent := &kontextv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "legacy-output-owner",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentSpec{
+			Mode:     kontextv1alpha1.AgentModeService,
+			Goal:     "serve requests",
+			Provider: " OpenAI ",
+			Model:    "opaque-model",
+			Tools:    []string{"shell", "read_knowledge"},
+			Budget: &kontextv1alpha1.BudgetSpec{
+				Tokens:    testPtr(int32(2048)),
+				Wallclock: "10m",
+				Dollars:   testPtr(1.25),
+			},
+			SecretRef:             &kontextv1alpha1.SecretRef{Name: "provider-secret"},
+			KnowledgeConfigMapRef: &kontextv1alpha1.ConfigMapRef{Name: "knowledge"},
+			ServiceAccountName:    "runtime-identity",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:   "example/runtime:v1",
+				Command: []string{"/runtime"},
+				Args:    []string{"serve", "--json"},
+				Result: &kontextv1alpha1.RuntimeResultSpec{
+					Source: kontextv1alpha1.ResultSourceStdout,
+					Format: kontextv1alpha1.ResultFormatKontextEnvelope,
+				},
+				SecurityContext: &kontextv1alpha1.RuntimeSecurityContext{
+					AllowPrivilegeEscalation: testPtr(false),
+					ReadOnlyRootFilesystem:   testPtr(true),
+					RunAsNonRoot:             testPtr(true),
+					Capabilities: &kontextv1alpha1.RuntimeCapabilities{
+						Drop: []string{"ALL"},
+					},
+					SeccompProfile: &kontextv1alpha1.RuntimeSeccompProfile{
+						Type: "RuntimeDefault",
+					},
+				},
+			},
+			Env: []kontextv1alpha1.EnvVar{
+				{Name: "LITERAL", Value: testPtr("value")},
+				{
+					Name: "SECRET",
+					ValueFrom: &kontextv1alpha1.EnvVarSource{
+						SecretKeyRef: kontextv1alpha1.SecretKeySelector{
+							Name: "runtime-secret",
+							Key:  "token",
+						},
+					},
+				},
+			},
+			Backoff: &kontextv1alpha1.BackoffSpec{
+				InitialSeconds: 7,
+				MaxSeconds:     70,
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	reconcileAgent(ctx, t, types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace})
+
+	var run kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, types.NamespacedName{
+		Name:      "legacy-output-owner-1",
+		Namespace: agent.Namespace,
+	}, &run); err != nil {
+		t.Fatalf("get service run: %v", err)
+	}
+	wantSpec := kontextv1alpha1.AgentRunSpec{
+		AgentRef: &kontextv1alpha1.AgentRef{Name: agent.Name},
+		Goal:     "serve requests",
+		Provider: "openai",
+		Model:    "opaque-model",
+		Tools:    []string{"shell", "read_knowledge"},
+		Budget: &kontextv1alpha1.BudgetSpec{
+			Tokens:    testPtr(int32(2048)),
+			Wallclock: "10m",
+			Dollars:   testPtr(1.25),
+		},
+		SecretRef:             &kontextv1alpha1.SecretRef{Name: "provider-secret"},
+		KnowledgeConfigMapRef: &kontextv1alpha1.ConfigMapRef{Name: "knowledge"},
+		ServiceAccountName:    "runtime-identity",
+		Runtime: kontextv1alpha1.RuntimeSpec{
+			Image:   "example/runtime:v1",
+			Command: []string{"/runtime"},
+			Args:    []string{"serve", "--json"},
+			Result: &kontextv1alpha1.RuntimeResultSpec{
+				Source: kontextv1alpha1.ResultSourceStdout,
+				Format: kontextv1alpha1.ResultFormatKontextEnvelope,
+			},
+			SecurityContext: &kontextv1alpha1.RuntimeSecurityContext{
+				AllowPrivilegeEscalation: testPtr(false),
+				ReadOnlyRootFilesystem:   testPtr(true),
+				RunAsNonRoot:             testPtr(true),
+				Capabilities: &kontextv1alpha1.RuntimeCapabilities{
+					Drop: []string{"ALL"},
+				},
+				SeccompProfile: &kontextv1alpha1.RuntimeSeccompProfile{
+					Type: "RuntimeDefault",
+				},
+			},
+		},
+		Env: []kontextv1alpha1.EnvVar{
+			{Name: "LITERAL", Value: testPtr("value")},
+			{
+				Name: "SECRET",
+				ValueFrom: &kontextv1alpha1.EnvVarSource{
+					SecretKeyRef: kontextv1alpha1.SecretKeySelector{
+						Name: "runtime-secret",
+						Key:  "token",
+					},
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(run.Spec, wantSpec) {
+		t.Fatalf("service AgentRun spec changed:\ngot:  %#v\nwant: %#v", run.Spec, wantSpec)
+	}
+	wantLabels := map[string]string{podbuilder.LabelAgentName: agent.Name}
+	if !reflect.DeepEqual(run.Labels, wantLabels) {
+		t.Fatalf("service AgentRun labels changed: got %v want %v", run.Labels, wantLabels)
+	}
+	controllerRef := true
+	blockOwnerDeletion := true
+	wantOwners := []metav1.OwnerReference{{
+		APIVersion:         kontextv1alpha1.GroupVersion.String(),
+		Kind:               "Agent",
+		Name:               agent.Name,
+		UID:                agent.UID,
+		Controller:         &controllerRef,
+		BlockOwnerDeletion: &blockOwnerDeletion,
+	}}
+	if !reflect.DeepEqual(run.OwnerReferences, wantOwners) {
+		t.Fatalf("service AgentRun ownership changed: got %#v want %#v", run.OwnerReferences, wantOwners)
+	}
+
+	var updated kontextv1alpha1.Agent
+	if err := k8sClient.Get(ctx, types.NamespacedName{
+		Name:      agent.Name,
+		Namespace: agent.Namespace,
+	}, &updated); err != nil {
+		t.Fatalf("get updated agent: %v", err)
+	}
+	gotStatus := updated.Status
+	for i := range gotStatus.Conditions {
+		if gotStatus.Conditions[i].LastTransitionTime.IsZero() {
+			t.Fatalf("condition transition time was not recorded: %#v", gotStatus.Conditions[i])
+		}
+		gotStatus.Conditions[i].LastTransitionTime = metav1.Time{}
+	}
+	wantStatus := kontextv1alpha1.AgentStatus{
+		Conditions: []metav1.Condition{
+			{
+				Type:               conditions.Ready,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: updated.Generation,
+				Reason:             "Recasting",
+				Message:            "Minted service run legacy-output-owner-1.",
+			},
+			{
+				Type:               conditions.Progressing,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: updated.Generation,
+				Reason:             "Recasting",
+				Message:            "Service run is being created.",
+			},
+		},
+		CurrentRunName:     "legacy-output-owner-1",
+		RunsCreated:        1,
+		ObservedGeneration: updated.Generation,
+	}
+	if !reflect.DeepEqual(gotStatus, wantStatus) {
+		t.Fatalf("service Agent status changed:\ngot:  %#v\nwant: %#v", gotStatus, wantStatus)
 	}
 }
 
@@ -790,4 +971,8 @@ func (c *staleAgentRunListClient) List(
 	runs.Items = filtered
 	c.omitName = types.NamespacedName{}
 	return nil
+}
+
+func testPtr[T any](value T) *T {
+	return &value
 }

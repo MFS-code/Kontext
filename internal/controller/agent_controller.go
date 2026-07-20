@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -13,13 +12,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/conditions"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
-	"github.com/MFS-code/Kontext/internal/runtimepolicy"
+	"github.com/MFS-code/Kontext/internal/runfactory"
 	"github.com/MFS-code/Kontext/internal/status"
 )
 
@@ -104,8 +102,8 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 	}
 	nextSuffix := runs.maxSuffix + 1
 	runName := fmt.Sprintf("%s-%d", agent.Name, nextSuffix)
-	run := r.buildServiceRun(agent, runName)
-	if err := controllerutil.SetControllerReference(agent, run, r.Scheme); err != nil {
+	run, err := runfactory.NewForAgent(agent, runName, agent.Spec.Goal, r.Scheme)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -247,41 +245,6 @@ func (runs observedServiceRuns) status(generation int64) kontextv1alpha1.AgentSt
 		next.LastRunName = runs.previous.Name
 	}
 	return next
-}
-
-func (r *AgentReconciler) buildServiceRun(agent *kontextv1alpha1.Agent, runName string) *kontextv1alpha1.AgentRun {
-	provider := runtimepolicy.NormalizeProvider(agent.Spec.Provider)
-	agentSpec := agent.Spec.DeepCopy()
-
-	run := &kontextv1alpha1.AgentRun{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      runName,
-			Namespace: agent.Namespace,
-			Labels: map[string]string{
-				podbuilder.LabelAgentName: agent.Name,
-			},
-		},
-		Spec: kontextv1alpha1.AgentRunSpec{
-			AgentRef: &kontextv1alpha1.AgentRef{Name: agent.Name},
-			Goal:     agent.Spec.Goal,
-			Provider: provider,
-			Model:    agent.Spec.Model,
-			Tools:    slices.Clone(agent.Spec.Tools),
-			Budget:   agent.Spec.Budget,
-			Runtime:  *agent.Spec.Runtime.DeepCopy(),
-			Env:      agentSpec.Env,
-		},
-	}
-	if agent.Spec.SecretRef != nil {
-		run.Spec.SecretRef = &kontextv1alpha1.SecretRef{Name: agent.Spec.SecretRef.Name}
-	}
-	if agent.Spec.KnowledgeConfigMapRef != nil {
-		run.Spec.KnowledgeConfigMapRef = &kontextv1alpha1.ConfigMapRef{Name: agent.Spec.KnowledgeConfigMapRef.Name}
-	}
-	if agent.Spec.ServiceAccountName != "" {
-		run.Spec.ServiceAccountName = agent.Spec.ServiceAccountName
-	}
-	return run
 }
 
 func (r *AgentReconciler) backoffDelay(agent kontextv1alpha1.Agent, restarts int32) time.Duration {
