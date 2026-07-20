@@ -117,23 +117,32 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		},
 	}
 	records := runner.RunSuite(ctx, suite)
+	assertions := EvaluateSuiteAssertions(suite.Spec.Assertions, records)
 	completedAt := time.Now().UTC()
-	summary := BuildSummary(suite.Metadata.Name, startedAt, completedAt, records, recordPath)
+	summary := BuildSummary(
+		suite.Metadata.Name,
+		startedAt,
+		completedAt,
+		records,
+		assertions,
+		recordPath,
+	)
 	if err := WriteOutputs(recordPath, summaryPath, records, summary); err != nil {
 		fmt.Fprintf(stderr, "write evaluation outputs: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(
 		stdout,
-		"suite=%s total=%d passed=%d failed=%d records=%s summary=%s\n",
+		"suite=%s total=%d passed=%d failed=%d assertionFailures=%d records=%s summary=%s\n",
 		summary.Suite,
 		summary.Total,
 		summary.Passed,
 		summary.Failed,
+		summary.AssertionFailures,
 		recordPath,
 		summaryPath,
 	)
-	if !RecordsPass(records, len(suite.Spec.Cases)) {
+	if !summary.Pass {
 		return 1
 	}
 	return 0

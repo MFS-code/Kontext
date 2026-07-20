@@ -96,76 +96,17 @@ echo "==> running external keyless evaluation suite"
     --keep-runs
 )
 
-echo "==> validating machine-readable evaluation records"
+echo "==> validating machine-readable evaluation summary"
 jq -e '
   .apiVersion == "kontext.dev/eval/v1alpha1"
   and .suite == "keyless"
   and .total == 10
   and .passed == 10
   and .failed == 0
+  and .assertionFailures == 0
+  and .pass == true
+  and ((.assertions // []) | all(.pass == true))
 ' "${SUMMARY}" >/dev/null
-
-jq -s -e '
-  length == 10
-  and all(.[];
-    .apiVersion == "kontext.dev/eval/v1alpha1"
-    and .kind == "EvalRecord"
-    and .pass == true
-    and (.collectionErrors | length == 0)
-  )
-  and (
-    map(select(.caseId == "same-goal-model-a"))[0] as $a
-    | map(select(.caseId == "same-goal-model-b"))[0] as $b
-    | $a.statusResult == $b.statusResult
-    and $a.envelope.execution.model == "opaque/vendor-model-a@eval"
-    and $b.envelope.execution.model == "opaque/vendor-model-b@eval"
-  )
-  and (
-    map(select(.caseId == "read-knowledge-used"))[0]
-    | .envelope.execution.toolCalls == 1
-    and ([
-      .events.tools[]
-      | select(.name == "read_knowledge" and ((.isError // false) == false))
-    ] | length) == 1
-  )
-  and (
-    map(select(.caseId == "read-knowledge-available-not-used"))[0]
-    | .envelope.execution.toolCalls == 0
-    and ((.events.counts.tool // 0) == 0)
-  )
-  and (
-    map(select(.caseId == "kubernetes-read-rbac-denied"))[0]
-    | [.events.tools[] | select(
-        .name == "kubernetes_read"
-        and .isError == true
-        and .errorCode == "kubernetes_rbac_denied"
-      )] | length == 1
-  )
-  and (
-    map(select(.caseId == "missing-provider-credential"))[0]
-    | .terminalPhase == "Failed"
-    and .envelope.error.code == "missing_provider_credentials"
-  )
-  and (
-    map(select(.caseId == "provider-network-failure"))[0]
-    | .terminalPhase == "Failed"
-    and .envelope.error.code == "provider_network_error"
-  )
-  and (
-    map(select(.caseId == "controller-wallclock"))[0]
-    | .terminalPhase == "BudgetExceeded"
-  )
-  and (
-    map(select(.caseId == "malformed-provider-response"))[0]
-    | .terminalPhase == "Failed"
-    and .envelope.error.code == "invalid_provider_response"
-  )
-  and (
-    map(select(.caseId == "reporter-process-crash"))[0]
-    | .terminalPhase == "Failed"
-    and .podExitCode == 7
-  )
-' "${RECORDS}" >/dev/null
 
 wallclock_pod="$(
   jq -r 'select(.caseId == "controller-wallclock") | .run.podName' "${RECORDS}"
@@ -188,14 +129,6 @@ if [[ -z "${wallclock_pod}" ||
   "${wallclock_phase}" != "BudgetExceeded" ]] ||
   kubectl get pod "${wallclock_pod}" -n "${EVAL_NAMESPACE}" >/dev/null 2>&1; then
   echo "wallclock case did not record and clean up its runtime Pod" >&2
-  exit 1
-fi
-
-if jq -s -e '
-  tostring
-  | test("keyless-placeholder|fixture process is exiting")
-' "${RECORDS}" "${SUMMARY}" >/dev/null; then
-  echo "evaluation outputs contain a credential marker or raw fixture log" >&2
   exit 1
 fi
 

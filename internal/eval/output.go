@@ -20,13 +20,20 @@ func WriteOutputs(recordPath, summaryPath string, records []Record, summary Summ
 	return nil
 }
 
-func BuildSummary(suite string, startedAt, completedAt time.Time, records []Record, recordPath string) Summary {
+func BuildSummary(
+	suite string,
+	startedAt, completedAt time.Time,
+	records []Record,
+	assertions []SuiteAssertionResult,
+	recordPath string,
+) Summary {
 	summary := Summary{
 		APIVersion:  APIVersion,
 		Suite:       suite,
 		StartedAt:   startedAt,
 		CompletedAt: completedAt,
 		Total:       len(records),
+		Assertions:  assertions,
 		RecordPath:  recordPath,
 	}
 	for _, record := range records {
@@ -36,6 +43,14 @@ func BuildSummary(suite string, startedAt, completedAt time.Time, records []Reco
 			summary.Failed++
 		}
 	}
+	for _, assertion := range assertions {
+		if !assertion.Pass {
+			summary.AssertionFailures++
+		}
+	}
+	summary.Pass = summary.Failed == 0 &&
+		summary.Passed == summary.Total &&
+		summary.AssertionFailures == 0
 	return summary
 }
 

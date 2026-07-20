@@ -113,6 +113,11 @@ func prepareSuite(suite *EvalSuite, runtimeImageOverride string) error {
 			}
 		}
 	}
+	for assertionIndex, assertion := range suite.Spec.Assertions {
+		if err := validateSuiteAssertion(assertion, seen); err != nil {
+			return fmt.Errorf("spec.assertions[%d]: %w", assertionIndex, err)
+		}
+	}
 	return nil
 }
 

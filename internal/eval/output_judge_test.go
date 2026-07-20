@@ -23,8 +23,14 @@ func TestWriteOutputsProducesJSONLAndSummary(t *testing.T) {
 		{APIVersion: APIVersion, Kind: RecordKind, Suite: "s", CaseID: "a", Pass: true},
 		{APIVersion: APIVersion, Kind: RecordKind, Suite: "s", CaseID: "b", Pass: false},
 	}
+	assertions := []SuiteAssertionResult{{
+		Type:    SuiteAssertionFieldsEqual,
+		Fields:  []string{"statusResult"},
+		Pass:    false,
+		Message: "field mismatch",
+	}}
 	now := time.Now().UTC()
-	summary := BuildSummary("s", now, now, records, recordPath)
+	summary := BuildSummary("s", now, now, records, assertions, recordPath)
 	if err := WriteOutputs(recordPath, summaryPath, records, summary); err != nil {
 		t.Fatalf("WriteOutputs: %v", err)
 	}
@@ -43,7 +49,13 @@ func TestWriteOutputsProducesJSONLAndSummary(t *testing.T) {
 	if err := json.Unmarshal(summaryData, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Total != 2 || decoded.Passed != 1 || decoded.Failed != 1 || decoded.RecordPath != recordPath {
+	if decoded.Total != 2 ||
+		decoded.Passed != 1 ||
+		decoded.Failed != 1 ||
+		decoded.AssertionFailures != 1 ||
+		decoded.Pass ||
+		len(decoded.Assertions) != 1 ||
+		decoded.RecordPath != recordPath {
 		t.Fatalf("unexpected summary %#v", decoded)
 	}
 	for _, path := range []string{recordPath, summaryPath} {
@@ -54,6 +66,30 @@ func TestWriteOutputsProducesJSONLAndSummary(t *testing.T) {
 		if permissions := info.Mode().Perm(); permissions != 0o600 {
 			t.Fatalf("%s permissions = %o, want 600", path, permissions)
 		}
+	}
+}
+
+func TestBuildSummaryWithoutAssertionsRemainsPassing(t *testing.T) {
+	now := time.Now().UTC()
+	summary := BuildSummary(
+		"legacy-suite",
+		now,
+		now,
+		[]Record{{CaseID: "case", Pass: true}},
+		nil,
+		"records.jsonl",
+	)
+	if !summary.Pass ||
+		summary.AssertionFailures != 0 ||
+		summary.Assertions != nil {
+		t.Fatalf("suite without assertions changed behavior: %#v", summary)
+	}
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(`"assertions"`)) {
+		t.Fatalf("empty assertions should be omitted: %s", encoded)
 	}
 }
 
