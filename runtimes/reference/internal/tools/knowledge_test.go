@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/tools"
@@ -26,7 +28,7 @@ func TestReadKnowledgeReadsAndBoundsMountedFile(t *testing.T) {
 	registry, err := tools.New(tools.Config{
 		Allowed:          []string{tools.NameReadKnowledge},
 		KnowledgeRoot:    root,
-		MaxCapturedBytes: 9,
+		MaxCapturedBytes: 16,
 	})
 	if err != nil {
 		t.Fatalf("create registry: %v", err)
@@ -39,8 +41,18 @@ func TestReadKnowledgeReadsAndBoundsMountedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if result.Content != "reference" || !result.Truncated || result.IsError {
+	if result.IsError || !result.Truncated ||
+		int64(len(result.Content)) > 16 ||
+		!json.Valid([]byte(result.Content)) {
 		t.Fatalf("unexpected result %#v", result)
+	}
+	var bounded struct {
+		Partial string `json:"partial"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &bounded); err != nil ||
+		bounded.Partial == "" ||
+		!strings.HasPrefix("reference contract", bounded.Partial) {
+		t.Fatalf("unexpected partial envelope content=%q err=%v", result.Content, err)
 	}
 }
 
@@ -48,7 +60,7 @@ func TestReadKnowledgeTruncatesAtUTF8Boundary(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(
 		filepath.Join(root, "unicode.txt"),
-		[]byte("aéb"),
+		[]byte(strings.Repeat("é", 16)),
 		0o600,
 	); err != nil {
 		t.Fatalf("write knowledge: %v", err)
@@ -56,7 +68,7 @@ func TestReadKnowledgeTruncatesAtUTF8Boundary(t *testing.T) {
 	registry, err := tools.New(tools.Config{
 		Allowed:          []string{tools.NameReadKnowledge},
 		KnowledgeRoot:    root,
-		MaxCapturedBytes: 2,
+		MaxCapturedBytes: 20,
 	})
 	if err != nil {
 		t.Fatalf("create registry: %v", err)
@@ -69,8 +81,19 @@ func TestReadKnowledgeTruncatesAtUTF8Boundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if result.IsError || result.Content != "a" || !result.Truncated {
+	if result.IsError || !result.Truncated ||
+		int64(len(result.Content)) > 20 ||
+		!utf8.ValidString(result.Content) ||
+		!json.Valid([]byte(result.Content)) {
 		t.Fatalf("unexpected result %#v", result)
+	}
+	var bounded struct {
+		Partial string `json:"partial"`
+	}
+	if err := json.Unmarshal([]byte(result.Content), &bounded); err != nil ||
+		bounded.Partial == "" ||
+		!utf8.ValidString(bounded.Partial) {
+		t.Fatalf("unexpected UTF-8 partial content=%q err=%v", result.Content, err)
 	}
 }
 

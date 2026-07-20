@@ -40,7 +40,7 @@ Token and dollar budgets are not enforcement controls. Runtimes may report
 those measurements, and Kontext records them in status. Only wallclock is
 authoritatively enforced by the controller.
 
-Kontext does not yet publish a formal Kubernetes version compatibility range.
+Kontext does not publish a formal Kubernetes version compatibility range.
 CI uses Kubernetes 1.32 envtest binaries and disposable kind clusters. Other
 distributions and versions may work, but the alpha does not certify them.
 
@@ -197,7 +197,7 @@ kubectl delete -f <release-install-url> \
 
 The complete path deletes both CRDs and all `Agent` and `AgentRun` resources
 stored under them. Back up those resources first. Read
-[release and image versioning](releases.md) for the exact install URL and alpha
+[release and image versioning](/docs/releases) for the exact install URL and alpha
 upgrade procedure.
 
 ## Troubleshooting
@@ -305,6 +305,7 @@ upgrade procedure. Downgrades are not supported.
 
 Kontext has no availability or response-time SLA during alpha.
 
-For non-sensitive help, read [SUPPORT.md](../SUPPORT.md) and open a GitHub
-issue. Report security problems through the private process in
-[SECURITY.md](../SECURITY.md).
+For non-sensitive help, read
+[SUPPORT.md](https://github.com/MFS-code/Kontext/blob/main/SUPPORT.md) and open
+a GitHub issue. Report security problems through the private process in
+[SECURITY.md](https://github.com/MFS-code/Kontext/blob/main/SECURITY.md).

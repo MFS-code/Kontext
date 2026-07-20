@@ -100,7 +100,7 @@ Missing or incomplete required artifacts fail the case.
 kind cluster, validates the records, checks controller timeout cleanup, and
 separately proves the no-wallclock Service example remains Running and
 recasts. See [`docs/evals.md`](docs/evals.md) for comparison guidance,
-privacy boundaries, and the protected pre-alpha provider acceptance step.
+privacy boundaries, and protected provider acceptance for releases.
 
 ## Optional judge
 

@@ -12,10 +12,8 @@ import (
 )
 
 const (
-	reporterFailureExitCode  = 125
-	childStartExitCode       = 126
-	truncatedOutputMediaType = "application/vnd.kontext.truncated+json"
-	truncatedOutputJSON      = `{"truncated":true}`
+	reporterFailureExitCode = 125
+	childStartExitCode      = 126
 )
 
 func runReporter(
@@ -59,10 +57,7 @@ func envelopeFromCapture(format CaptureFormat, captured CapturedResult, childExi
 			Outcome:    resultv1alpha1.OutcomeSucceeded,
 		}
 		if captured.Truncated {
-			envelope.Output = &resultv1alpha1.Output{
-				MediaType: truncatedOutputMediaType,
-				Value:     json.RawMessage(truncatedOutputJSON),
-			}
+			envelope.Output = resultv1alpha1.TruncatedOutput()
 			envelope.Truncation = &resultv1alpha1.Truncation{
 				OriginalBytes:   captured.OriginalBytes,
 				OutputTruncated: true,

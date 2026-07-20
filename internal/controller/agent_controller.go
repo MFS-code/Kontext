@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +21,6 @@ import (
 	"github.com/MFS-code/Kontext/internal/podbuilder"
 	"github.com/MFS-code/Kontext/internal/runtimepolicy"
 	"github.com/MFS-code/Kontext/internal/status"
-	"github.com/MFS-code/Kontext/internal/util"
 )
 
 const (
@@ -50,9 +50,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	case kontextv1alpha1.AgentModeService:
 		return r.reconcileService(ctx, &agent)
 	case kontextv1alpha1.AgentModeTask, kontextv1alpha1.AgentModeScheduled:
-		return r.setAgentStatus(ctx, &agent, agent.Status, false, conditions.UnsupportedMode(string(agent.Spec.Mode))...)
+		return ctrl.Result{}, r.setAgentStatus(ctx, &agent, agent.Status, conditions.UnsupportedMode(string(agent.Spec.Mode))...)
 	default:
-		return r.setAgentStatus(ctx, &agent, agent.Status, false, conditions.InvalidMode(string(agent.Spec.Mode))...)
+		return ctrl.Result{}, r.setAgentStatus(ctx, &agent, agent.Status, conditions.InvalidMode(string(agent.Spec.Mode))...)
 	}
 }
 
@@ -65,7 +65,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 	}
 
 	if agent.Spec.Goal == "" {
-		return r.setAgentStatus(ctx, agent, runs.status(agent.Generation), false, metav1.Condition{
+		return ctrl.Result{}, r.setAgentStatus(ctx, agent, runs.status(agent.Generation), metav1.Condition{
 			Type:    conditions.Ready,
 			Status:  metav1.ConditionFalse,
 			Reason:  "MissingGoal",
@@ -74,7 +74,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 	}
 
 	if runs.current != nil && !status.IsTerminalPhase(runs.current.Status.Phase) {
-		return r.setAgentStatus(ctx, agent, runs.status(agent.Generation), false, metav1.Condition{
+		return ctrl.Result{}, r.setAgentStatus(ctx, agent, runs.status(agent.Generation), metav1.Condition{
 			Type:    conditions.Ready,
 			Status:  metav1.ConditionTrue,
 			Reason:  "RunActive",
@@ -92,7 +92,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 		delay := r.backoffDelay(*agent, runs.maxSuffix-1)
 		if since := time.Since(runs.current.Status.CompletionTime.Time); since < delay {
 			logger.Info("waiting before service recast", "delay", delay-since, "run", runs.current.Name)
-			if _, err := r.setAgentStatus(ctx, agent, runs.status(agent.Generation), false); err != nil {
+			if err := r.setAgentStatus(ctx, agent, runs.status(agent.Generation)); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{RequeueAfter: delay - since}, nil
@@ -126,7 +126,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 		nextStatus.LastRunName = runs.current.Name
 	}
 
-	return r.setAgentStatus(ctx, agent, nextStatus, true, metav1.Condition{
+	if err := r.setAgentStatus(ctx, agent, nextStatus, metav1.Condition{
 		Type:    conditions.Ready,
 		Status:  metav1.ConditionFalse,
 		Reason:  "Recasting",
@@ -136,7 +136,10 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 		Status:  metav1.ConditionTrue,
 		Reason:  "Recasting",
 		Message: "Service run is being created.",
-	})
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 }
 
 func (r *AgentReconciler) handleServiceRunAlreadyExists(
@@ -263,7 +266,7 @@ func (r *AgentReconciler) buildServiceRun(agent *kontextv1alpha1.Agent, runName 
 			Goal:     agent.Spec.Goal,
 			Provider: provider,
 			Model:    agent.Spec.Model,
-			Tools:    util.CloneSlice(agent.Spec.Tools),
+			Tools:    slices.Clone(agent.Spec.Tools),
 			Budget:   agent.Spec.Budget,
 			Runtime:  *agent.Spec.Runtime.DeepCopy(),
 			Env:      agentSpec.Env,
@@ -318,20 +321,16 @@ func (r *AgentReconciler) setAgentStatus(
 	ctx context.Context,
 	agent *kontextv1alpha1.Agent,
 	next kontextv1alpha1.AgentStatus,
-	requeue bool,
 	updates ...metav1.Condition,
-) (ctrl.Result, error) {
+) error {
 	next.Conditions = agent.Status.Conditions
 	setStatusConditions(&next.Conditions, agent.Generation, updates...)
 	if err := patchStatus(ctx, r.Client, agent, func() {
 		agent.Status = next
 	}); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
-	if requeue {
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // SetupWithManager sets up the Manager.

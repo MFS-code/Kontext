@@ -4,7 +4,9 @@
 # silently change with a mutable remote manifest.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+ROOT_DIR="$(repo_root)"
 CLUSTER_NAME="${KIND_CLUSTER_NAME:-kontext-network-policy}"
 NAMESPACE="kontext-network-policy-e2e"
 DIAG_DIR="${KONTEXT_DIAG_DIR:-${ROOT_DIR}/.ci-diagnostics}"
@@ -17,13 +19,6 @@ WORK_DIR=""
 CLUSTER_CREATED=false
 PREVIOUS_CONTEXT=""
 APPLY_EXAMPLE="${ROOT_DIR}/scripts/apply-example.sh"
-
-need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "missing required command: $1" >&2
-    exit 1
-  fi
-}
 
 cluster_exists() {
   local cluster
@@ -60,298 +55,6 @@ require_ipv4() {
     echo "${name} is not a single IPv4 address: ${value}" >&2
     return 1
   fi
-}
-
-wait_for_run_phase() {
-  local name="$1"
-  local expected="$2"
-  local phase=""
-  for _ in $(seq 1 90); do
-    phase="$(
-      kubectl get agentrun "${name}" -n "${NAMESPACE}" \
-        -o jsonpath='{.status.phase}' 2>/dev/null || true
-    )"
-    if [[ "${phase}" == "${expected}" ]]; then
-      return 0
-    fi
-    case "${phase}" in
-      ""|Pending|Running) ;;
-      *)
-        echo "expected ${name} phase=${expected}, got phase=${phase}" >&2
-        return 1
-        ;;
-    esac
-    sleep 2
-  done
-  echo "timed out waiting for ${name} phase=${expected}; last phase=${phase}" >&2
-  return 1
-}
-
-wait_for_pod_absent() {
-  local name="$1"
-  for _ in $(seq 1 60); do
-    if ! kubectl get pod "${name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
-  echo "timed out waiting for Pod ${name} to be deleted" >&2
-  return 1
-}
-
-wait_for_no_browser_processes() {
-  local details=""
-  for _ in $(seq 1 60); do
-    if details="$(
-      kubectl exec deployment/playwright-mcp -n "${NAMESPACE}" -- \
-        node -e '
-          const fs = require("fs");
-          const active = [];
-          for (const entry of fs.readdirSync("/proc")) {
-            if (!/^[0-9]+$/.test(entry) || Number(entry) === process.pid) continue;
-            try {
-              const command = fs.readFileSync(`/proc/${entry}/cmdline`, "utf8").replace(/\0/g, " ");
-              if (command.includes("/ms-playwright/") && /(chrome|chromium)/i.test(command)) {
-                active.push(`${entry}:${command}`);
-              }
-            } catch {}
-          }
-          if (active.length) {
-            console.error(active.join("\n"));
-            process.exit(1);
-          }
-        ' 2>&1
-    )"; then
-      return 0
-    fi
-    sleep 1
-  done
-  echo "Playwright retained browser processes after bounded cleanup polling:" >&2
-  echo "${details}" >&2
-  return 1
-}
-
-wait_for_browser_processes() {
-  local count=""
-  for _ in $(seq 1 80); do
-    count="$(
-      kubectl exec deployment/playwright-mcp -n "${NAMESPACE}" -- \
-        node -e '
-          const fs = require("fs");
-          let count = 0;
-          for (const entry of fs.readdirSync("/proc")) {
-            if (!/^[0-9]+$/.test(entry) || Number(entry) === process.pid) continue;
-            try {
-              const command = fs.readFileSync(`/proc/${entry}/cmdline`, "utf8").replace(/\0/g, " ");
-              if (command.includes("/ms-playwright/") && /(chrome|chromium)/i.test(command)) count++;
-            } catch {}
-          }
-          process.stdout.write(String(count));
-        ' 2>/dev/null || true
-    )"
-    if [[ "${count}" =~ ^[0-9]+$ && "${count}" -gt 0 ]]; then
-      echo "observed ${count} active Chromium processes before cancellation"
-      return 0
-    fi
-    sleep 0.25
-  done
-  echo "no Chromium process was observed before wallclock cancellation" >&2
-  return 1
-}
-
-wait_for_runtime_log_pattern() {
-  local pod="$1"
-  local pattern="$2"
-  local logs=""
-  for _ in $(seq 1 80); do
-    logs="$(
-      kubectl logs "${pod}" -n "${NAMESPACE}" -c runtime 2>/dev/null || true
-    )"
-    if [[ "${logs}" == *"${pattern}"* ]]; then
-      return 0
-    fi
-    sleep 0.25
-  done
-  echo "${pod} did not reach expected tool state: ${pattern}" >&2
-  return 1
-}
-
-validate_tool_events() {
-  local logfile="$1"
-  local expected_count="$2"
-  local max_each="$3"
-  local max_total="$4"
-  local expected_names="$5"
-  local expected_errors="$6"
-  local minimum_truncations="$7"
-  python3 - "${logfile}" "${expected_count}" "${max_each}" "${max_total}" \
-    "${expected_names}" "${expected_errors}" "${minimum_truncations}" <<'PY'
-import json
-import sys
-
-path, count, max_each, max_total, names, errors, minimum_truncations = sys.argv[1:]
-events = []
-with open(path, encoding="utf-8") as stream:
-    for line in stream:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if event.get("type") == "tool":
-            events.append(event["data"])
-
-expected_count = int(count)
-if len(events) != expected_count:
-    raise SystemExit(f"expected {expected_count} tool events, got {len(events)}: {events!r}")
-expected_names = names.split(",") if names else []
-actual_names = [event.get("name") for event in events]
-if actual_names != expected_names:
-    raise SystemExit(f"expected tool order {expected_names!r}, got {actual_names!r}")
-if any("output" in event for event in events):
-    raise SystemExit("tool event content was emitted without KONTEXT_EMIT_TOOL_OUTPUT")
-byte_counts = [int(event.get("outputBytes", -1)) for event in events]
-if any(value < 0 or value > int(max_each) for value in byte_counts):
-    raise SystemExit(f"tool output byte counts exceed per-result bound: {byte_counts!r}")
-if sum(byte_counts) > int(max_total):
-    raise SystemExit(f"tool output byte counts exceed cumulative bound: {byte_counts!r}")
-error_count = sum(bool(event.get("isError")) for event in events)
-if error_count != int(errors):
-    raise SystemExit(f"expected {errors} tool errors, got {error_count}: {events!r}")
-truncation_count = sum(bool(event.get("truncated")) for event in events)
-if truncation_count < int(minimum_truncations):
-    raise SystemExit(
-        f"expected at least {minimum_truncations} truncated tool results, "
-        f"got {truncation_count}: {events!r}"
-    )
-PY
-}
-
-assert_strict_pod_isolation() {
-  local pod="$1"
-  local container="$2"
-  local mode="$3"
-  local pod_file="${WORK_DIR}/${mode}-pod.json"
-  local process_names=""
-  local service_account=""
-  local token_automount=""
-
-  kubectl get pod "${pod}" -n "${NAMESPACE}" -o json >"${pod_file}"
-  python3 - "${pod_file}" "${container}" "${mode}" <<'PY'
-import json
-import sys
-
-path, container_name, mode = sys.argv[1:]
-with open(path, encoding="utf-8") as stream:
-    pod = json.load(stream)
-containers = pod["spec"]["containers"]
-selected = next((item for item in containers if item["name"] == container_name), None)
-if selected is None:
-    raise SystemExit(f"container {container_name!r} is missing")
-if selected.get("envFrom"):
-    raise SystemExit(f"{mode} container must not use envFrom")
-environment = selected.get("env", [])
-if any(item.get("valueFrom") is not None for item in environment):
-    raise SystemExit(f"{mode} container has a Secret or other valueFrom environment source")
-
-if mode == "browser":
-    expected_environment = {
-        "HOME": "/tmp/home",
-        "TMPDIR": "/tmp",
-        "XDG_CACHE_HOME": "/tmp/xdg-cache",
-        "XDG_CONFIG_HOME": "/tmp/xdg-config",
-        "PLAYWRIGHT_MCP_PING_TIMEOUT_MS": "30000",
-    }
-    actual_environment = {item["name"]: item.get("value", "") for item in environment}
-    if actual_environment != expected_environment:
-        raise SystemExit(
-            "browser environment names differ from the explicit allowlist: "
-            f"{sorted(actual_environment)}"
-        )
-    expected_volumes = {"tmp", "dev-shm"}
-    volumes = pod["spec"].get("volumes", [])
-    if {item["name"] for item in volumes} != expected_volumes:
-        raise SystemExit(f"browser volume names differ from allowlist: {volumes!r}")
-    if any(set(item) != {"name", "emptyDir"} for item in volumes):
-        raise SystemExit("browser volume uses a source other than emptyDir")
-    expected_mounts = {"tmp": "/tmp", "dev-shm": "/dev/shm"}
-    actual_mounts = {
-        item["name"]: item["mountPath"] for item in selected.get("volumeMounts", [])
-    }
-    if actual_mounts != expected_mounts:
-        raise SystemExit(f"browser volume mounts differ from allowlist: {actual_mounts!r}")
-    if pod["spec"].get("automountServiceAccountToken") is not False:
-        raise SystemExit("browser Pod must explicitly disable ServiceAccount token automount")
-elif mode == "runtime":
-    expected_names = {
-        "KONTEXT_RUN_NAME",
-        "KONTEXT_AGENT_NAME",
-        "KONTEXT_GOAL",
-        "KONTEXT_PROVIDER",
-        "KONTEXT_MODEL",
-        "KONTEXT_TOOLS",
-        "KONTEXT_BUDGET_TOKENS",
-        "KONTEXT_BUDGET_WALLCLOCK",
-        "KONTEXT_BUDGET_DOLLARS",
-        "KONTEXT_MCP_CONFIG",
-        "KONTEXT_FAKE_SCENARIO",
-        "KONTEXT_FAKE_TOOL_SEQUENCE",
-        "KONTEXT_MAX_TURNS",
-        "KONTEXT_MAX_TOOL_CALLS",
-        "KONTEXT_MAX_TOOL_RESULT_BYTES",
-        "KONTEXT_MAX_TOTAL_TOOL_OUTPUT_BYTES",
-    }
-    actual_names = {item["name"] for item in environment}
-    if actual_names != expected_names:
-        raise SystemExit(
-            "fake runtime environment names differ from expected literals: "
-            f"{sorted(actual_names)}"
-        )
-    if pod["spec"].get("volumes"):
-        raise SystemExit("fake runtime Pod must not contain Secret, projected, or other volumes")
-    if selected.get("volumeMounts"):
-        raise SystemExit("fake runtime container must not contain volume mounts")
-else:
-    raise SystemExit(f"unsupported isolation mode {mode!r}")
-PY
-
-  service_account="$(
-    kubectl get pod "${pod}" -n "${NAMESPACE}" \
-      -o jsonpath='{.spec.serviceAccountName}'
-  )"
-  token_automount="$(
-    kubectl get serviceaccount "${service_account}" -n "${NAMESPACE}" \
-      -o jsonpath='{.automountServiceAccountToken}'
-  )"
-  if [[ "${token_automount}" != "false" ]]; then
-    echo "${pod}/${container} ServiceAccount permits token automount" >&2
-    return 1
-  fi
-
-  if [[ "${container}" == "mcp" ]]; then
-    process_names="$(
-      kubectl exec "${pod}" -n "${NAMESPACE}" -c "${container}" -- \
-        node -e 'for (const entry of require("fs").readFileSync("/proc/1/environ", "utf8").split("\0")) { const index = entry.indexOf("="); if (index > 0) console.log(entry.slice(0, index)); }'
-    )"
-  else
-    process_names="$(
-      kubectl exec "${pod}" -n "${NAMESPACE}" -c "${container}" -- \
-        /bin/sh -c 'tr "\000" "\n" </proc/1/environ | cut -d= -f1'
-    )"
-  fi
-  while read -r name; do
-    if [[ "${mode}" == "runtime" && "${name}" == KONTEXT_* ]]; then
-      continue
-    fi
-    if [[ "${name}" =~ (API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL) ||
-      "${name}" == AWS_* ||
-      "${name}" == AZURE_* ||
-      "${name}" == GOOGLE_* ||
-      "${name}" == ANTHROPIC_* ||
-      "${name}" == OPENAI_* ]]; then
-      echo "${pod}/${container} process environment contains credential-shaped variable ${name}" >&2
-      return 1
-    fi
-  done <<<"${process_names}"
 }
 
 collect_network_diagnostics() {
@@ -393,11 +96,7 @@ on_exit() {
   exit "${status}"
 }
 
-need curl
-need docker
-need kind
-need kubectl
-need python3
+need curl docker kind kubectl
 trap on_exit EXIT
 PREVIOUS_CONTEXT="$(kubectl config current-context 2>/dev/null || true)"
 
@@ -482,8 +181,8 @@ kubectl wait --for=condition=Ready pod/network-policy-http \
 
 echo "==> starting policy-selected runtime probes"
 "${APPLY_EXAMPLE}" reference-kind-network-policy-runs.yaml
-wait_for_run_phase reference-network-http Succeeded
-wait_for_run_phase reference-network-kubernetes Succeeded
+wait_for_run_phase reference-network-http Succeeded "${NAMESPACE}" 180 2
+wait_for_run_phase reference-network-kubernetes Succeeded "${NAMESPACE}" 180 2
 
 http_logs="$(
   kubectl logs run-reference-network-http -n "${NAMESPACE}" -c runtime
@@ -510,98 +209,8 @@ if [[ "${kubernetes_logs}" != *'"name":"kubernetes_read"'* ||
   exit 1
 fi
 
-echo "==> applying restricted Playwright MCP and deterministic HTML fixtures"
-"${APPLY_EXAMPLE}" reference-playwright-mcp.yaml
-kubectl rollout status deployment/playwright-fixture \
-  -n "${NAMESPACE}" --timeout=180s
-kubectl rollout status deployment/unrelated-http \
-  -n "${NAMESPACE}" --timeout=180s
-kubectl rollout status deployment/playwright-mcp \
-  -n "${NAMESPACE}" --timeout=300s
-
-playwright_pod="$(
-  kubectl get pods -n "${NAMESPACE}" \
-    -l app.kubernetes.io/name=playwright-mcp \
-    -o jsonpath='{.items[0].metadata.name}'
-)"
-assert_strict_pod_isolation "${playwright_pod}" mcp browser
-wait_for_no_browser_processes
-
-echo "==> running deterministic browser interaction"
-"${APPLY_EXAMPLE}" reference-playwright-browser-run.yaml
-wait_for_run_phase reference-playwright-browser Succeeded
-kubectl logs run-reference-playwright-browser -n "${NAMESPACE}" -c runtime \
-  >"${WORK_DIR}/playwright-browser.log"
-browser_result="$(
-  kubectl get agentrun reference-playwright-browser -n "${NAMESPACE}" \
-    -o jsonpath='{.status.result}'
-)"
-browser_logs="$(<"${WORK_DIR}/playwright-browser.log")"
-validate_tool_events \
-  "${WORK_DIR}/playwright-browser.log" \
-  5 480 2048 \
-  "browser_navigate,browser_snapshot,browser_type,browser_click,browser_snapshot" \
-  0 1
-if [[ "${browser_result}" != *"Kontext accepted"* ||
-  "${browser_logs}" != *'"toolCalls":5'* ]]; then
-  echo "browser run did not complete the expected five-call interaction" >&2
-  exit 1
-fi
-wait_for_no_browser_processes
-
-echo "==> proving browser profile isolation across AgentRuns"
-"${APPLY_EXAMPLE}" reference-playwright-fresh-run.yaml
-wait_for_run_phase reference-playwright-fresh Succeeded
-kubectl logs run-reference-playwright-fresh -n "${NAMESPACE}" -c runtime \
-  >"${WORK_DIR}/playwright-fresh.log"
-fresh_result="$(
-  kubectl get agentrun reference-playwright-fresh -n "${NAMESPACE}" \
-    -o jsonpath='{.status.result}'
-)"
-validate_tool_events \
-  "${WORK_DIR}/playwright-fresh.log" \
-  2 1024 2048 \
-  "browser_navigate,browser_snapshot" \
-  0 0
-if [[ "${fresh_result}" != *"State: empty"* ||
-  "${fresh_result}" == *"Kontext accepted"* ]]; then
-  echo "fresh AgentRun observed browser state from the prior session" >&2
-  exit 1
-fi
-wait_for_no_browser_processes
-
-echo "==> proving browser egress deny rules"
-"${APPLY_EXAMPLE}" reference-playwright-deny-run.yaml
-wait_for_run_phase reference-playwright-deny Succeeded
-kubectl logs run-reference-playwright-deny -n "${NAMESPACE}" -c runtime \
-  >"${WORK_DIR}/playwright-deny.log"
-deny_result="$(
-  kubectl get agentrun reference-playwright-deny -n "${NAMESPACE}" \
-    -o jsonpath='{.status.result}'
-)"
-validate_tool_events \
-  "${WORK_DIR}/playwright-deny.log" \
-  2 512 1024 \
-  "browser_navigate,browser_navigate" \
-  2 0
-if [[ "${deny_result}" != *'"isError":true'* ||
-  "${deny_result}" != *"mcp_timeout"* ]]; then
-  echo "browser deny run did not return both blocked destinations as tool errors" >&2
-  exit 1
-fi
-wait_for_no_browser_processes
-
-echo "==> proving wallclock cancellation cleans the browser session"
-"${APPLY_EXAMPLE}" reference-playwright-cancel-run.yaml
-kubectl wait --for=condition=Ready pod/run-reference-playwright-cancel \
-  -n "${NAMESPACE}" --timeout=90s
-assert_strict_pod_isolation run-reference-playwright-cancel runtime runtime
-wait_for_runtime_log_pattern \
-  run-reference-playwright-cancel \
-  '"stopReason":"tool_use","turn":2'
-wait_for_browser_processes
-wait_for_run_phase reference-playwright-cancel BudgetExceeded
-wait_for_pod_absent run-reference-playwright-cancel
-wait_for_no_browser_processes
+KONTEXT_NETWORK_POLICY_NAMESPACE="${NAMESPACE}" \
+  KONTEXT_NETWORK_POLICY_WORK_DIR="${WORK_DIR}" \
+  "${ROOT_DIR}/scripts/e2e-kind-playwright-mcp.sh"
 
 echo "NetworkPolicy and Playwright MCP acceptance passed with Calico ${CALICO_VERSION}"

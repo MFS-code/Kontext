@@ -4,7 +4,7 @@ A Kubernetes-native control plane for running, governing, and observing AI agent
 
 The thesis: **agents are workloads.** An agent should not live in a screen session or behind a bespoke orchestration service. It should be a resource your cluster understands — created with `kubectl apply`, observed with `kubectl logs -f`, governed by RBAC, budgets, and owner references, and restarted by a controller when it dies.
 
-Public surfaces (after DNS is wired):
+Public sites:
 
 - Marketing site: [kontext.run](https://kontext.run)
 - Docs: [docs.kontext.run](https://docs.kontext.run)
@@ -25,8 +25,8 @@ Kontext adds two custom resources under `kontext.dev/v1alpha1`, deliberately mir
 | Kontext | Kubernetes analogue | Behavior |
 |---|---|---|
 | `Agent` (mode `Service`) | `Deployment` | Always-on. The controller keeps one live `AgentRun` and re-casts it with backoff when it exits. |
-| `Agent` (mode `Task`) | reusable template | A definition that mints an `AgentRun` per invocation. *(Schema present; controller support planned.)* |
-| `Agent` (mode `Scheduled`) | `CronJob` | Mints runs on a cron schedule. *(Schema present; controller support not yet planned.)* |
+| `Agent` (mode `Task`) | reusable template | Schema available; the controller reports `UnsupportedMode`. Create a standalone `AgentRun` for one-shot work. |
+| `Agent` (mode `Scheduled`) | `CronJob` | Schema available; the controller reports `UnsupportedMode` and does not schedule runs. |
 | `AgentRun` | `Job` / `Pod` | One bounded execution. Owns exactly one Pod, holds the immutable spec snapshot, the final `.status.result`, and usage. |
 
 An `AgentRun` can also be created standalone, without any owning `Agent` — useful for ad-hoc dispatch and demos.
@@ -42,9 +42,8 @@ backward-compatible text projection. The full versioned contract is in
 ## Install a tagged release
 
 An existing Kubernetes cluster needs only kubectl and permission to create
-CRDs, cluster-scoped RBAC, a Namespace, and a Deployment. The install URL
-requires a matching [GitHub release](https://github.com/MFS-code/Kontext/releases);
-until the first alpha tag is published, use [Quickstart on kind](#quickstart-on-kind).
+CRDs, cluster-scoped RBAC, a Namespace, and a Deployment. Install the published
+`v0.1.0-alpha.1` release directly from GitHub:
 
 ```bash
 VERSION=v0.1.0-alpha.1
@@ -265,11 +264,12 @@ scripts/                   kind install + e2e
 
 ## Status
 
-`v1alpha1` is alpha on purpose: the API shape is allowed to evolve. `Service` mode and standalone `AgentRun`s are implemented and covered by envtest and kind e2e; `Task` and `Scheduled` modes exist in the schema but are not reconciled yet.
-
-No public alpha tag has been published yet. The release workflow publishes and
-verifies versioned images and installation artifacts when a version tag is
-pushed from `main`.
+The current public release is `v0.1.0-alpha.1`. Its GitHub release contains
+the digest-pinned install manifest and versioned multi-architecture images.
+`v1alpha1` is alpha on purpose: the API shape is allowed to evolve. `Service`
+mode and standalone `AgentRun`s are implemented and covered by envtest and
+kind e2e; `Task` and `Scheduled` modes exist in the schema but are not
+reconciled.
 
 ## License
 

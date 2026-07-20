@@ -3,7 +3,8 @@
 # install the controller through the development kustomize overlay.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 CLUSTER_NAME="${KIND_CLUSTER_NAME:-kontext}"
 IMAGE_SET="${KONTEXT_KIND_IMAGE_SET:-full}"
 OPERATOR_IMAGE="${KONTEXT_OPERATOR_IMAGE:-kontext-operator:dev}"
@@ -12,16 +13,7 @@ REPORTER_IMAGE="${KONTEXT_REPORTER_IMAGE:-kontext-reporter:dev}"
 REFERENCE_IMAGE="${KONTEXT_REFERENCE_IMAGE:-kontext-reference:dev}"
 STDOUT_FIXTURE_IMAGE="${KONTEXT_STDOUT_FIXTURE_IMAGE:-kontext-stdout-fixture:dev}"
 
-need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "missing required command: $1" >&2
-    exit 1
-  fi
-}
-
-need docker
-need kind
-need kubectl
+need docker kind kubectl
 
 case "${IMAGE_SET}" in
   full|network-policy) ;;
@@ -61,38 +53,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cp -R "${ROOT_DIR}/config" "${KIND_OVERLAY_DIR}/config"
-
-cat >"${KIND_OVERLAY_DIR}/kustomization.yaml" <<'EOF'
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-resources:
-  - config/overlays/dev
-
-patches:
-  - path: manager_patch.yaml
-EOF
-
-cat >"${KIND_OVERLAY_DIR}/manager_patch.yaml" <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: controller-manager
-  namespace: kontext-system
-spec:
-  template:
-    metadata:
-      annotations:
-        kontext.dev/local-operator-image-id: "${OPERATOR_IMAGE_ID}"
-    spec:
-      containers:
-        - name: manager
-          image: "${OPERATOR_IMAGE}"
-          env:
-            - name: KONTEXT_REPORTER_IMAGE
-              value: "${REPORTER_IMAGE}"
-EOF
+write_development_overlay \
+  "${KIND_OVERLAY_DIR}" \
+  "${OPERATOR_IMAGE}" \
+  "${REPORTER_IMAGE}" \
+  "${OPERATOR_IMAGE_ID}"
 
 if ! kind get clusters | grep -qx "${CLUSTER_NAME}"; then
   echo "==> creating kind cluster ${CLUSTER_NAME}"
@@ -120,15 +85,6 @@ DEPLOYED_IMAGE_ID_BEFORE="$(
     -o jsonpath='{.spec.template.metadata.annotations.kontext\.dev/local-operator-image-id}' \
     2>/dev/null || true
 )"
-if kubectl get crd agents.kontext.dev >/dev/null 2>&1; then
-  STORED_VERSION="$(kubectl get crd agents.kontext.dev -o jsonpath='{.spec.versions[?(@.storage==true)].name}' 2>/dev/null || true)"
-  if [[ "${STORED_VERSION}" == "v1" ]]; then
-    echo "==> removing v1 Agent resources before v1alpha1 CRD install"
-    kubectl delete agents --all --all-namespaces --wait=false --ignore-not-found=true || true
-    kubectl delete crd agents.kontext.dev --wait=true --ignore-not-found=true || true
-  fi
-fi
-kubectl delete deployment kontext-controller -n default --ignore-not-found=true
 kubectl kustomize "${KIND_OVERLAY_DIR}" |
   kubectl apply -f -
 

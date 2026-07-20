@@ -2,20 +2,12 @@
 # Render a single install manifest from the digest metadata produced by release CI.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/common.sh
-source "${ROOT_DIR}/scripts/lib/common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+ROOT_DIR="$(repo_root)"
 METADATA_FILE="${1:-}"
 
-need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "missing required command: $1" >&2
-    exit 1
-  fi
-}
-
-need jq
-need kubectl
+need jq kubectl
 
 if [[ -z "${METADATA_FILE}" || ! -f "${METADATA_FILE}" ]]; then
   echo "usage: $0 <image-digests.json>" >&2
@@ -29,10 +21,7 @@ if [[ "${metadata_api}" != "kontext.dev/release-images/v1alpha1" ]]; then
 fi
 
 release_tag="$(jq -er '.releaseTag | select(type == "string" and length > 0)' "${METADATA_FILE}")"
-core='v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
-prerelease_id='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
-release_pattern="^${core}(-${prerelease_id}(\.${prerelease_id})*)?$"
-if [[ ! "${release_tag}" =~ ${release_pattern} || "${#release_tag}" -gt 63 ]]; then
+if ! validate_release_tag "${release_tag}"; then
   echo "invalid release tag in ${METADATA_FILE}: ${release_tag}" >&2
   exit 1
 fi

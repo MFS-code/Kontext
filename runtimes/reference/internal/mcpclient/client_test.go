@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -65,7 +66,9 @@ func TestHTTPDiscoveryExecutionAuthBoundingAndClose(t *testing.T) {
 		&mcp.Tool{Name: "large", InputSchema: json.RawMessage(`{"type":"object"}`)},
 		func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: strings.Repeat("x", (8<<20)+1024)}},
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: strings.Repeat("é", (8<<19)+1024)},
+				},
 			}, nil
 		},
 	)
@@ -139,8 +142,20 @@ func TestHTTPDiscoveryExecutionAuthBoundingAndClose(t *testing.T) {
 	}
 
 	large, err := manager.Execute(context.Background(), "large", json.RawMessage(`{}`))
-	if err != nil || !large.Truncated || len(large.Content) > 8<<20 {
+	if err != nil ||
+		!large.Truncated ||
+		int64(len(large.Content)) > maxCapturedBytes ||
+		!utf8.ValidString(large.Content) ||
+		!json.Valid([]byte(large.Content)) {
 		t.Fatalf("large output was not bounded: bytes=%d result=%#v err=%v", len(large.Content), large, err)
+	}
+	var bounded struct {
+		Partial string `json:"partial"`
+	}
+	if err := json.Unmarshal([]byte(large.Content), &bounded); err != nil ||
+		bounded.Partial == "" ||
+		!utf8.ValidString(bounded.Partial) {
+		t.Fatalf("large output did not use a UTF-8 partial envelope: content=%q err=%v", large.Content, err)
 	}
 
 	toolError, err := manager.Execute(context.Background(), "tool_error", json.RawMessage(`{}`))

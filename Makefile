@@ -63,7 +63,7 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: verify
-verify: manifests generate test-release-identity ## Check generated artifacts, release identity, and gofmt; fail on drift.
+verify: manifests generate test-release-identity test-shell ## Check generated artifacts, release identity, shell utilities, and gofmt; fail on drift.
 	@if ! git diff --quiet --exit-code -- \
 		api/v1alpha1/zz_generated.deepcopy.go \
 		config/crd/bases \
@@ -146,6 +146,10 @@ docker-push: ## Push docker image with the manager.
 .PHONY: test-release-identity
 test-release-identity: ## Verify release tooling uses the canonical repository and registry.
 	./scripts/test-release-identity.sh
+
+.PHONY: test-shell
+test-shell: ## Run shared shell utility and validator regression tests.
+	./scripts/test-shell-common.sh
 
 .PHONY: release-manifest
 release-manifest: ## Render DIST_DIR/install.yaml from IMAGE_DIGESTS.

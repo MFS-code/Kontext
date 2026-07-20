@@ -1,47 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseFrontmatter, requirePageMetadata } from "../shared/docs.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const docsSite = path.resolve(__dirname, "..");
 const contentRoot = path.join(docsSite, "content");
 const dist = path.join(docsSite, "dist");
-
-function stripFrontmatter(raw) {
-  if (!raw.startsWith("---")) {
-    return { data: {}, body: raw.trim() };
-  }
-  const end = raw.indexOf("\n---", 3);
-  if (end === -1) {
-    return { data: {}, body: raw.trim() };
-  }
-  const block = raw.slice(4, end);
-  const body = raw.slice(end + 4).trim();
-  const data = {};
-  for (const line of block.split("\n")) {
-    const idx = line.indexOf(":");
-    if (idx === -1) {
-      continue;
-    }
-    const key = line.slice(0, idx).trim();
-    let value = line.slice(idx + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    data[key] = value;
-  }
-  return { data, body };
-}
-
-function pageIdToSrc(id) {
-  if (id === "SPEC") {
-    return "SPEC.md";
-  }
-  return `${id}.md`;
-}
 
 function loadPagesFromNav() {
   const navPath = path.join(contentRoot, "docs-nav.json");
@@ -53,22 +18,23 @@ function loadPagesFromNav() {
   return {
     config,
     pages: ids.map((id) => {
-      const src = pageIdToSrc(id);
-      const srcPath = path.join(contentRoot, src);
+      const metadata = requirePageMetadata(id);
+      const srcPath = path.join(contentRoot, metadata.srcFile);
       if (!fs.existsSync(srcPath)) {
-        throw new Error(`docs-nav.json references missing page: ${id} (${src})`);
+        throw new Error(
+          `docs-nav.json references missing page: ${id} (${metadata.srcFile})`,
+        );
       }
       const raw = fs.readFileSync(srcPath, "utf8");
-      const { data, body } = stripFrontmatter(raw);
+      const { data, content } = parseFrontmatter(raw);
       return {
         id,
         title: typeof data.title === "string" ? data.title : id,
         description:
           typeof data.description === "string" ? data.description : "",
-        src,
-        mdOut: src,
+        metadata,
         raw,
-        body,
+        body: content.trim(),
       };
     }),
   };
@@ -95,21 +61,16 @@ const llmsLines = [
   "",
 ];
 
-const fullParts = [
-  "# Kontext Documentation",
-  "",
-  `> ${siteDescription}`,
-  "",
-];
+const fullParts = ["# Kontext Documentation", "", `> ${siteDescription}`, ""];
 
 for (const page of pages) {
-  const outPath = path.join(dist, "raw", page.mdOut);
+  const outPath = path.join(dist, page.metadata.rawPath.slice(1));
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, page.raw);
 
   const desc = page.description ? `: ${page.description}` : "";
   llmsLines.push(
-    `- [${page.title}](https://docs.kontext.run/raw/${page.mdOut})${desc}`,
+    `- [${page.title}](https://docs.kontext.run${page.metadata.rawPath})${desc}`,
   );
   fullParts.push(`---\n\n# ${page.title}\n\n${page.body}\n`);
 }

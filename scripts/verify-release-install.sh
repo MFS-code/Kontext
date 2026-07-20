@@ -2,9 +2,9 @@
 # Verify install, upgrade, retained-CRD removal, and complete removal on a clean cluster.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/common.sh
-source "${ROOT_DIR}/scripts/lib/common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+ROOT_DIR="$(repo_root)"
 CURRENT_MANIFEST="${1:-}"
 CURRENT_VERSION="${2:-}"
 PREVIOUS_MANIFEST="${3:-}"
@@ -19,32 +19,6 @@ if [[ -n "${PREVIOUS_MANIFEST}" && (! -f "${PREVIOUS_MANIFEST}" || -z "${PREVIOU
   echo "previous manifest and version must be supplied together" >&2
   exit 2
 fi
-
-wait_for_run_phase() {
-  local name="$1"
-  local expected="$2"
-  local namespace="${3:-default}"
-  local phase=""
-  for _ in $(seq 1 180); do
-    phase="$(
-      kubectl get agentrun "${name}" -n "${namespace}" \
-        -o jsonpath='{.status.phase}' 2>/dev/null || true
-    )"
-    if [[ "${phase}" == "${expected}" ]]; then
-      return 0
-    fi
-    case "${phase}" in
-      ""|Pending|Running) ;;
-      *)
-        echo "expected ${namespace}/${name} phase=${expected}, got ${phase}" >&2
-        return 1
-        ;;
-    esac
-    sleep 1
-  done
-  echo "${namespace}/${name} did not reach ${expected}; last phase=${phase}" >&2
-  return 1
-}
 
 install_release() {
   local manifest="$1"
@@ -73,7 +47,7 @@ smoke_release_runtime() {
   local version="$1"
   kubectl delete agentrun echo-review --ignore-not-found=true --wait=true
   KONTEXT_RELEASE_TAG="${version}" "${APPLY_EXAMPLE}" echo-task-run.yaml
-  wait_for_run_phase echo-review Succeeded
+  wait_for_run_phase echo-review Succeeded default 180 1
 
   local runtime_image=""
   runtime_image="$(

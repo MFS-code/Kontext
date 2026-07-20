@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/tools"
@@ -234,15 +235,56 @@ func TestKubernetesReadReturnsRBACDenialToModel(t *testing.T) {
 	if !result.IsError ||
 		result.ErrorCode != "kubernetes_rbac_denied" ||
 		!result.Truncated ||
-		!json.Valid([]byte(result.Content)) {
+		!json.Valid([]byte(result.Content)) ||
+		!utf8.ValidString(result.Content) ||
+		int64(len(result.Content)) > 8 {
 		t.Fatalf("unexpected result %#v", result)
+	}
+	if result.Content != "{}" {
+		t.Fatalf("unexpected tiny-limit response content=%q", result.Content)
+	}
+}
+
+func TestKubernetesReadBoundsUTF8Response(t *testing.T) {
+	const maxBytes = int64(20)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte(`"éééééééééééé"`))
+	}))
+	defer server.Close()
+	registry, err := tools.New(tools.Config{
+		Allowed:          []string{tools.NameKubernetesRead},
+		MaxCapturedBytes: maxBytes,
+		Kubernetes: tools.KubernetesConfig{
+			BaseURL:   server.URL,
+			Namespace: "current",
+			Token:     "token",
+			Client:    server.Client(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	result, err := registry.Execute(context.Background(), runtimeapi.ToolCall{
+		ID:        "kube-unicode",
+		Name:      tools.NameKubernetesRead,
+		Arguments: json.RawMessage(`{"operation":"get","resource":"pods","name":"pod-1"}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if result.IsError || !result.Truncated ||
+		int64(len(result.Content)) > maxBytes ||
+		!utf8.ValidString(result.Content) ||
+		!json.Valid([]byte(result.Content)) {
+		t.Fatalf("unexpected bounded result %#v", result)
 	}
 	var bounded struct {
 		Partial string `json:"partial"`
 	}
 	if err := json.Unmarshal([]byte(result.Content), &bounded); err != nil ||
-		bounded.Partial != `{"messag` {
-		t.Fatalf("unexpected truncated response content=%q err=%v", result.Content, err)
+		bounded.Partial == "" ||
+		!utf8.ValidString(bounded.Partial) {
+		t.Fatalf("unexpected partial envelope content=%q err=%v", result.Content, err)
 	}
 }
 

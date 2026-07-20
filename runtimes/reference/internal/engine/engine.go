@@ -2,13 +2,12 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"time"
-	"unicode/utf8"
 
+	"github.com/MFS-code/Kontext/internal/tooloutput"
 	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/events"
@@ -181,7 +180,7 @@ func (runner Runner) cleanupToolExecutor(
 	defer cancel()
 	if err := closer.Close(cleanupCtx); err != nil {
 		const code = "tool_cleanup_failed"
-		message := truncateUTF8(fmt.Sprintf("tool cleanup failed: %v", err), 4<<10)
+		message := tooloutput.TruncateUTF8(fmt.Sprintf("tool cleanup failed: %v", err), 4<<10)
 		if result.ExitCode == 0 {
 			failure := state.failure(
 				runner,
@@ -309,61 +308,12 @@ func applyToolOutputLimits(
 	if maxBytes < 0 {
 		maxBytes = 0
 	}
-	if int64(len(result.Content)) > maxBytes {
-		result.Content = truncateToolContent(result.Content, maxBytes)
+	if content, truncated := tooloutput.Bound(result.Content, maxBytes); truncated {
+		result.Content = content
 		result.Truncated = true
 	}
 	*totalBytes += int64(len(result.Content))
 	return result
-}
-
-func truncateToolContent(value string, maxBytes int64) string {
-	if !json.Valid([]byte(value)) {
-		return truncateUTF8(value, maxBytes)
-	}
-	if maxBytes <= 0 {
-		return ""
-	}
-	if maxBytes == 1 {
-		return "0"
-	}
-
-	const emptyPartial = `{"partial":""}`
-	if maxBytes < int64(len(emptyPartial)) {
-		return "{}"
-	}
-
-	low := 0
-	high := len(value)
-	best := emptyPartial
-	for low <= high {
-		middle := low + (high-low)/2
-		prefix := truncateUTF8(value, int64(middle))
-		encoded, _ := json.Marshal(struct {
-			Partial string `json:"partial"`
-		}{Partial: prefix})
-		if int64(len(encoded)) <= maxBytes {
-			best = string(encoded)
-			low = middle + 1
-			continue
-		}
-		high = middle - 1
-	}
-	return best
-}
-
-func truncateUTF8(value string, maxBytes int64) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	if int64(len(value)) <= maxBytes {
-		return value
-	}
-	end := int(maxBytes)
-	for end > 0 && !utf8.ValidString(value[:end]) {
-		end--
-	}
-	return value[:end]
 }
 
 func (runner Runner) limitFailure(

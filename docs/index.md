@@ -20,8 +20,8 @@ when it dies.
 | Kontext | Kubernetes analogue | Behavior |
 |---|---|---|
 | `Agent` (mode `Service`) | `Deployment` | Always-on. The controller keeps one live `AgentRun` and re-casts it when it exits. |
-| `Agent` (mode `Task`) | reusable template | Schema present; controller support is planned. |
-| `Agent` (mode `Scheduled`) | `CronJob` | Schema present; not reconciled yet. |
+| `Agent` (mode `Task`) | reusable template | Schema available; the controller reports `UnsupportedMode`. Use a standalone `AgentRun` for one-shot work. |
+| `Agent` (mode `Scheduled`) | `CronJob` | Schema available; the controller reports `UnsupportedMode` and does not schedule runs. |
 | `AgentRun` | `Job` / `Pod` | One bounded execution. Owns exactly one Pod and holds `.status.result`. |
 
 You can also create a standalone `AgentRun` without an owning `Agent` — useful

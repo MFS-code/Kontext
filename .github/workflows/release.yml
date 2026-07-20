@@ -41,15 +41,8 @@ jobs:
           fi
 
           version="${GITHUB_REF_NAME}"
-          core='v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
-          prerelease_id='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
-          pattern="^${core}(-${prerelease_id}(\.${prerelease_id})*)?$"
-          if [[ ! "${version}" =~ ${pattern} ]]; then
-            echo "::error::release tags must use vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-PRERELEASE"
-            exit 1
-          fi
-          if [[ "${#version}" -gt 63 ]]; then
-            echo "::error::release tags must fit the 63-character Kubernetes version label"
+          if ! validate_release_tag "${version}"; then
+            echo "::error::release tags must use SemVer with a v prefix and fit a 63-character Kubernetes label"
             exit 1
           fi
 

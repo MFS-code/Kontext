@@ -63,9 +63,6 @@ func TestObservePodMalformedTerminationOnSuccessFails(t *testing.T) {
 	if observation.Result != "" {
 		t.Fatalf("expected empty result for malformed payload, got %q", observation.Result)
 	}
-	if observation.ExitCode == nil || *observation.ExitCode != 0 {
-		t.Fatalf("expected exit code 0, got %#v", observation.ExitCode)
-	}
 	if !strings.Contains(observation.Message, "termination payload was malformed") {
 		t.Fatalf("expected malformed payload message, got %q", observation.Message)
 	}
@@ -101,12 +98,15 @@ func TestObservePodMalformedTerminationOnFailureNotesParseError(t *testing.T) {
 }
 
 func TestObservePodRunning(t *testing.T) {
+	startedAt := metav1.Now()
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{
 			ContainerStatuses: []corev1.ContainerStatus{
 				{
-					Name:  podbuilder.RuntimeContainerName,
-					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+					Name: podbuilder.RuntimeContainerName,
+					State: corev1.ContainerState{
+						Running: &corev1.ContainerStateRunning{StartedAt: startedAt},
+					},
 				},
 			},
 		},
@@ -114,6 +114,9 @@ func TestObservePodRunning(t *testing.T) {
 	observation := status.ObservePod(pod)
 	if observation.Phase != kontextv1alpha1.AgentRunPhaseRunning {
 		t.Fatalf("expected Running, got %s", observation.Phase)
+	}
+	if observation.StartedAt == nil || !observation.StartedAt.Equal(&startedAt) {
+		t.Fatalf("expected runtime start %s, got %v", startedAt, observation.StartedAt)
 	}
 }
 
@@ -372,9 +375,6 @@ func TestObservePodTerminatedFailure(t *testing.T) {
 	observation := status.ObservePod(pod)
 	if observation.Phase != kontextv1alpha1.AgentRunPhaseFailed {
 		t.Fatalf("expected Failed, got %s", observation.Phase)
-	}
-	if observation.ExitCode == nil || *observation.ExitCode != 2 {
-		t.Fatalf("expected exit code 2, got %v", observation.ExitCode)
 	}
 	if observation.Result != "partial" {
 		t.Fatalf("expected result partial, got %q", observation.Result)

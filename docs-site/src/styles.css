@@ -7,6 +7,10 @@
   --sidebar: #f7f6f2;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --sans: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --tok-prompt: #2f6f55;
+  --tok-cmd: #2a5580;
+  --tok-key: #5a4d78;
+  --tok-str: #8a5a3c;
 }
 
 * {
@@ -272,6 +276,42 @@ a {
   font-size: inherit;
   background: none;
   padding: 0;
+}
+
+.markdown .hljs-attr,
+.markdown .hljs-attribute,
+.markdown .hljs-property {
+  color: var(--tok-key);
+}
+
+.markdown .hljs-string,
+.markdown .hljs-regexp {
+  color: var(--tok-str);
+}
+
+.markdown .hljs-built_in,
+.markdown .hljs-keyword,
+.markdown .hljs-name,
+.markdown .hljs-section,
+.markdown .hljs-selector-tag,
+.markdown .hljs-title {
+  color: var(--tok-cmd);
+  font-weight: 600;
+}
+
+.markdown .hljs-bullet,
+.markdown .hljs-literal,
+.markdown .hljs-meta,
+.markdown .hljs-number,
+.markdown .hljs-symbol,
+.markdown .hljs-template-variable,
+.markdown .hljs-variable {
+  color: var(--tok-prompt);
+}
+
+.markdown .hljs-comment,
+.markdown .hljs-quote {
+  color: var(--muted);
 }
 
 .inline-code,

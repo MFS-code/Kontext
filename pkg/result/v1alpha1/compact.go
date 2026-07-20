@@ -5,7 +5,20 @@ import (
 	"fmt"
 )
 
-const truncatedOutputJSON = `{"truncated":true}`
+const (
+	// TruncatedOutputMediaType identifies the terminal marker used when output
+	// cannot fit in the Kubernetes termination message.
+	TruncatedOutputMediaType = "application/vnd.kontext.truncated+json"
+	truncatedOutputJSON      = `{"truncated":true}`
+)
+
+// TruncatedOutput returns a fresh copy of the terminal output truncation marker.
+func TruncatedOutput() *Output {
+	return &Output{
+		MediaType: TruncatedOutputMediaType,
+		Value:     json.RawMessage(truncatedOutputJSON),
+	}
+}
 
 // Compact serializes an envelope within maxBytes. It removes the least
 // status-relevant data first and always marks data loss explicitly.
@@ -46,10 +59,7 @@ func Compact(envelope Envelope, maxBytes int) ([]byte, error) {
 		}
 	}
 	if compacted.Output != nil {
-		compacted.Output = &Output{
-			MediaType: "application/vnd.kontext.truncated+json",
-			Value:     json.RawMessage(truncatedOutputJSON),
-		}
+		compacted.Output = TruncatedOutput()
 		compacted.Truncation.OutputTruncated = true
 		if encoded, ok := marshalWithin(compacted, maxBytes); ok {
 			return encoded, nil

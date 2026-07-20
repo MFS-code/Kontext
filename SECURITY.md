@@ -5,11 +5,9 @@ and should not be treated as a hardened multi-tenant sandbox.
 
 ## Supported versions
 
-Before the first public release, `main` is development code and no version is
-supported for production use. After publication, security fixes target the
-latest alpha release. Older alpha releases may not receive patches.
-
-The support policy will become stricter when the API leaves alpha.
+Security fixes target the latest published alpha release, currently
+`v0.1.0-alpha.1`. The `main` branch is development code, not a supported
+distribution. Older alpha releases may not receive patches.
 
 ## Reporting a vulnerability
 
@@ -29,8 +27,8 @@ Include the affected version or commit, prerequisites, reproduction steps,
 impact, and any suggested mitigation. Remove live credentials and unrelated
 private data.
 
-There is no guaranteed response time during alpha. Reports will be reviewed
-privately before disclosure or remediation details are published.
+There is no guaranteed response time during alpha. The project reviews reports
+privately before publishing disclosure or remediation details.
 
 ## Security boundaries
 

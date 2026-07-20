@@ -2,9 +2,9 @@
 # Apply one release-neutral example with either local dev or versioned images.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/common.sh
-source "${ROOT_DIR}/scripts/lib/common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+ROOT_DIR="$(repo_root)"
 EXAMPLES_DIR="${ROOT_DIR}/deploy/examples/v1alpha1"
 EXAMPLE_ARG="${1:-}"
 if [[ -n "${EXAMPLE_ARG}" && "${EXAMPLE_ARG}" != */* ]]; then
@@ -13,10 +13,7 @@ else
   EXAMPLE_FILE="${EXAMPLE_ARG}"
 fi
 
-if ! command -v kubectl >/dev/null 2>&1; then
-  echo "missing required command: kubectl" >&2
-  exit 1
-fi
+need kubectl
 
 if [[ -z "${EXAMPLE_FILE}" || ! -f "${EXAMPLE_FILE}" ]]; then
   echo "usage: $0 <example.yaml|deploy/examples/v1alpha1/example.yaml> [kubectl apply options]" >&2
@@ -83,11 +80,7 @@ append_image() {
 }
 
 if [[ -n "${KONTEXT_RELEASE_TAG:-}" ]]; then
-  core='v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
-  prerelease_id='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
-  release_pattern="^${core}(-${prerelease_id}(\.${prerelease_id})*)?$"
-  if [[ ! "${KONTEXT_RELEASE_TAG}" =~ ${release_pattern} ||
-    "${#KONTEXT_RELEASE_TAG}" -gt 63 ]]; then
+  if ! validate_release_tag "${KONTEXT_RELEASE_TAG}"; then
     echo "invalid KONTEXT_RELEASE_TAG: ${KONTEXT_RELEASE_TAG}" >&2
     exit 2
   fi

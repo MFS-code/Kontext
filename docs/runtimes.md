@@ -42,7 +42,9 @@ keep full events and diagnostics outside Kubernetes status. The Pod termination
 message and its `AgentRun.status` projection are authoritative for terminal
 output; raw logs are only the event/diagnostic stream.
 
-See `deploy/examples/v1alpha1/README.md` for one manifest for each path.
+See the
+[v1alpha1 example manifests](https://github.com/MFS-code/Kontext/tree/main/deploy/examples/v1alpha1)
+for one manifest for each path.
 
 ## Context and tools
 

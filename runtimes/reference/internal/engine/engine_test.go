@@ -8,6 +8,7 @@ import (
 	"math"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
@@ -481,8 +482,11 @@ func TestRunnerBoundsToolOutputAndReturnsToolErrors(t *testing.T) {
 			selectedProvider.requests[1].Messages[len(selectedProvider.requests[1].Messages)-1],
 		)
 		if len(results) != 2 ||
-			results[0].Content != "abcd" ||
-			results[1].Content != "ab" ||
+			results[0].Content != "{}" ||
+			results[1].Content != "{}" ||
+			int64(len(results[0].Content)+len(results[1].Content)) > totalOutput ||
+			int64(len(results[0].Content)) > perResult ||
+			int64(len(results[1].Content)) > perResult ||
 			!results[0].Truncated ||
 			!results[1].Truncated {
 			t.Fatalf("unexpected bounded results %#v", results)
@@ -514,6 +518,7 @@ func TestRunnerBoundsToolOutputAndReturnsToolErrors(t *testing.T) {
 		)
 		if len(results) != 1 ||
 			results[0].Content != "0" ||
+			int64(len(results[0].Content)) > perResult ||
 			!json.Valid([]byte(results[0].Content)) ||
 			!results[0].Truncated {
 			t.Fatalf("unexpected tiny structured result %#v", results)
@@ -552,6 +557,44 @@ func TestRunnerBoundsToolOutputAndReturnsToolErrors(t *testing.T) {
 		if err := json.Unmarshal([]byte(results[0].Content), &bounded); err != nil ||
 			bounded["partial"] == "" {
 			t.Fatalf("structured prefix was not preserved: content=%q err=%v", results[0].Content, err)
+		}
+	})
+
+	t.Run("plain UTF-8 result uses partial envelope", func(t *testing.T) {
+		selectedProvider := &scriptedProvider{
+			responses: []runtimeapi.CompletionResponse{
+				toolCallResponse("call-1"),
+				finalResponse("done"),
+			},
+		}
+		executor := lookupExecutor(runtimeapi.ToolResult{Content: "éééééééééé"})
+		runtimeConfig := baseConfig()
+		perResult := int64(18)
+		runtimeConfig.MaxToolResultBytes = &perResult
+		result := runnerWithTools(selectedProvider, executor).Run(
+			context.Background(),
+			runtimeConfig,
+		)
+		if result.ExitCode != 0 {
+			t.Fatalf("unexpected failure %#v", result.Envelope.Error)
+		}
+		results := runtimeapi.MessageToolResults(
+			selectedProvider.requests[1].Messages[len(selectedProvider.requests[1].Messages)-1],
+		)
+		if len(results) != 1 ||
+			!results[0].Truncated ||
+			int64(len(results[0].Content)) > perResult ||
+			!utf8.ValidString(results[0].Content) ||
+			!json.Valid([]byte(results[0].Content)) {
+			t.Fatalf("unexpected UTF-8 result %#v", results)
+		}
+		var bounded struct {
+			Partial string `json:"partial"`
+		}
+		if err := json.Unmarshal([]byte(results[0].Content), &bounded); err != nil ||
+			bounded.Partial == "" ||
+			!utf8.ValidString(bounded.Partial) {
+			t.Fatalf("unexpected partial envelope content=%q err=%v", results[0].Content, err)
 		}
 	})
 

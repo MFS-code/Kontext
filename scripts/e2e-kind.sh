@@ -3,49 +3,11 @@
 # scripts/collect-kind-diagnostics.sh; locally run that script after a failed e2e.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+ROOT_DIR="$(repo_root)"
 TOOLS_NAMESPACE="kontext-e2e-tools"
 APPLY_EXAMPLE="${ROOT_DIR}/scripts/apply-example.sh"
-
-need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "missing required command: $1" >&2
-    exit 1
-  fi
-}
-
-is_terminal_failure_phase() {
-  case "$1" in
-    Failed|BudgetExceeded) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-wait_for_run_phase() {
-  local name="$1"
-  local expected="$2"
-  local namespace="${3:-default}"
-  local phase=""
-  for _ in $(seq 1 60); do
-    phase="$(
-      kubectl get agentrun "${name}" -n "${namespace}" \
-        -o jsonpath='{.status.phase}' 2>/dev/null || true
-    )"
-    if [[ "${phase}" == "${expected}" ]]; then
-      return 0
-    fi
-    case "${phase}" in
-      ""|Pending|Running) ;;
-      *)
-        echo "expected ${name} phase=${expected}, got phase=${phase}" >&2
-        return 1
-        ;;
-    esac
-    sleep 2
-  done
-  echo "timed out waiting for ${name} phase=${expected}; last phase=${phase}" >&2
-  return 1
-}
 
 cleanup_e2e_resources() {
   local status=0
@@ -94,19 +56,7 @@ echo "==> applying standalone echo task run"
 "${APPLY_EXAMPLE}" echo-task-run.yaml
 
 echo "==> waiting for AgentRun to succeed"
-phase=""
-for _ in $(seq 1 60); do
-  phase="$(kubectl get agentrun echo-review -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-  if [[ "${phase}" == "Succeeded" ]]; then
-    break
-  fi
-  if is_terminal_failure_phase "${phase}"; then
-    echo "expected echo-review to succeed, got phase=${phase}" >&2
-    exit 1
-  fi
-  sleep 2
-done
-
+wait_for_run_phase echo-review Succeeded
 phase="$(kubectl get agentrun echo-review -o jsonpath='{.status.phase}')"
 result="$(kubectl get agentrun echo-review -o jsonpath='{.status.result}')"
 if [[ "${phase}" != "Succeeded" ]]; then
