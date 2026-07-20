@@ -27,13 +27,6 @@ when it dies.
 You can also create a standalone `AgentRun` without an owning `Agent` — useful
 for ad-hoc dispatch and demos.
 
-## What Kontext does not do
-
-Kontext stays general. It never learns consumer vocabulary such as "code
-owner", "repository", or "pull request". Application behavior lives in the
-runtime image. The control plane only owns Pod lifecycle, budgets it can
-enforce, and status projection.
-
 ## Next steps
 
 1. [Install without cloning](/docs/quickstart)
