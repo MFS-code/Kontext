@@ -28,7 +28,7 @@ func TestKubernetesReadUsesCurrentNamespaceAndServiceAccount(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"kind":"Pod","metadata":{"name":"pod-1"}}`))
 	}))
 	defer server.Close()
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed: []string{tools.NameKubernetesRead},
 		Kubernetes: tools.KubernetesConfig{
 			BaseURL:   server.URL,
@@ -89,7 +89,7 @@ func TestKubernetesReadSchemaAndRoutingShareResourceRegistry(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"items":[]}`))
 	}))
 	defer server.Close()
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed: []string{tools.NameKubernetesRead},
 		Kubernetes: tools.KubernetesConfig{
 			BaseURL:   server.URL,
@@ -157,7 +157,7 @@ func TestKubernetesReadBoundsListsAndNeverAllowsSecrets(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"kind":"DeploymentList","items":[]}`))
 	}))
 	defer server.Close()
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed: []string{tools.NameKubernetesRead},
 		Kubernetes: tools.KubernetesConfig{
 			BaseURL:   server.URL,
@@ -211,7 +211,7 @@ func TestKubernetesReadReturnsRBACDenialToModel(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"message":"forbidden"}`))
 	}))
 	defer server.Close()
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed:          []string{tools.NameKubernetesRead},
 		MaxCapturedBytes: 8,
 		Kubernetes: tools.KubernetesConfig{
@@ -251,7 +251,7 @@ func TestKubernetesReadBoundsUTF8Response(t *testing.T) {
 		_, _ = writer.Write([]byte(`"éééééééééééé"`))
 	}))
 	defer server.Close()
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed:          []string{tools.NameKubernetesRead},
 		MaxCapturedBytes: maxBytes,
 		Kubernetes: tools.KubernetesConfig{
@@ -300,7 +300,7 @@ func TestKubernetesReadBuildsIPv6ServiceURL(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"kind":"PodList","items":[]}`)),
 		}, nil
 	})}
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed: []string{tools.NameKubernetesRead},
 		Kubernetes: tools.KubernetesConfig{
 			Namespace: "current",

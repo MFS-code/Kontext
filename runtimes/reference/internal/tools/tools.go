@@ -65,10 +65,6 @@ func (err *Error) Error() string {
 	return fmt.Sprintf("%s: %s", err.Code, err.Message)
 }
 
-func New(toolConfig Config) (*Registry, error) {
-	return NewWithContext(context.Background(), toolConfig)
-}
-
 func NewWithContext(ctx context.Context, toolConfig Config) (*Registry, error) {
 	config := toolConfig
 	if config.MaxCapturedBytes <= 0 {

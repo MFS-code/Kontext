@@ -27,15 +27,14 @@ type Resolver func(config.Config) (provider.Provider, error)
 type ToolExecutor interface {
 	Definitions() []runtimeapi.ToolDefinition
 	Execute(context.Context, runtimeapi.ToolCall) (runtimeapi.ToolResult, error)
+	Close(context.Context) error
 }
 
-type ToolResolver func(config.Config) (ToolExecutor, error)
 type ContextToolResolver func(context.Context, config.Config) (ToolExecutor, error)
 
 type Runner struct {
 	Emitter             Emitter
 	Resolve             Resolver
-	ResolveTools        ToolResolver
 	ResolveToolsContext ContextToolResolver
 	Now                 func() time.Time
 }
@@ -45,38 +44,46 @@ type Result struct {
 	ExitCode int
 }
 
+type execution struct {
+	emitter      Emitter
+	config       config.Config
+	provider     provider.Provider
+	toolExecutor ToolExecutor
+	state        *loopState
+	limits       limitsPolicy
+}
+
 func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Result {
 	resolve := runner.Resolve
 	if resolve == nil {
 		resolve = provider.Resolve
 	}
-	resolveTools := runner.ResolveToolsContext
-	if resolveTools == nil && runner.ResolveTools != nil {
-		resolveTools = func(_ context.Context, runtimeConfig config.Config) (ToolExecutor, error) {
-			return runner.ResolveTools(runtimeConfig)
-		}
-	}
-	if resolveTools == nil {
-		resolveTools = func(ctx context.Context, runtimeConfig config.Config) (ToolExecutor, error) {
-			return tools.NewWithContext(ctx, tools.Config{
-				Allowed: runtimeConfig.Tools,
-				MCP:     runtimeConfig.MCP,
-			})
-		}
-	}
 	now := runner.Now
 	if now == nil {
 		now = time.Now
 	}
-	state := newLoopState(runtimeConfig.Goal, now)
+	execution := &execution{
+		emitter: runner.Emitter,
+		config:  runtimeConfig,
+		state:   newLoopState(runtimeConfig.Goal, now),
+		limits:  newLimitsPolicy(runtimeConfig),
+	}
 
-	runner.emit(events.TypeLifecycle, map[string]any{
+	execution.emit(events.TypeLifecycle, map[string]any{
 		"phase":     "started",
 		"runName":   runtimeConfig.RunName,
 		"agentName": runtimeConfig.AgentName,
 		"provider":  runtimeConfig.Provider,
 		"model":     runtimeConfig.Model,
 	})
+	if runner.ResolveToolsContext == nil {
+		return execution.fail(
+			"invalid_tool_configuration",
+			"tool resolver is required",
+			nil,
+			"",
+		)
+	}
 	selectedProvider, err := resolve(runtimeConfig)
 	if err != nil {
 		code := "unsupported_provider"
@@ -87,24 +94,38 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 				code = "invalid_provider_configuration"
 			}
 		}
-		return state.failure(runner, runtimeConfig, code, err.Error(), nil, "")
+		return execution.fail(code, err.Error(), nil, "")
 	}
-	toolExecutor, err := resolveTools(ctx, runtimeConfig)
+	execution.provider = selectedProvider
+	toolExecutor, err := runner.ResolveToolsContext(ctx, runtimeConfig)
 	if err != nil {
 		code := "invalid_tool_configuration"
 		var toolError *tools.Error
 		if errors.As(err, &toolError) && toolError.Code != "" {
 			code = toolError.Code
 		}
-		return state.failure(runner, runtimeConfig, code, err.Error(), nil, "")
+		return execution.fail(code, err.Error(), nil, "")
 	}
-	definitions := toolExecutor.Definitions()
+	if toolExecutor == nil {
+		return execution.fail(
+			"invalid_tool_configuration",
+			"tool resolver returned a nil tool executor",
+			nil,
+			"",
+		)
+	}
+	execution.toolExecutor = toolExecutor
+	return execution.run(ctx)
+}
+
+func (execution *execution) run(ctx context.Context) Result {
+	definitions := execution.toolExecutor.Definitions()
 	if len(definitions) > 0 {
 		names := make([]string, 0, len(definitions))
 		for _, definition := range definitions {
 			names = append(names, definition.Name)
 		}
-		runner.emit(events.TypeLifecycle, map[string]any{
+		execution.emit(events.TypeLifecycle, map[string]any{
 			"phase": "tools_available",
 			"count": len(definitions),
 			"names": names,
@@ -112,51 +133,24 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 	}
 
 	for {
-		outcome := runner.providerTurn(
-			ctx,
-			runtimeConfig,
-			selectedProvider,
-			definitions,
-			state,
-		)
+		outcome := execution.providerTurn(ctx, definitions)
 		switch outcome.kind {
 		case turnOutcomePaused:
 			continue
 		case turnOutcomeFinal:
-			result := runner.cleanupToolExecutor(
-				toolExecutor,
-				outcome.result,
-				state,
-				runtimeConfig,
-			)
+			result := execution.cleanupToolExecutor(outcome.result)
 			if result.Envelope.Output != nil {
-				runner.emit(events.TypeOutput, map[string]any{
+				execution.emit(events.TypeOutput, map[string]any{
 					"mediaType": resultv1alpha1.DefaultMediaType,
 					"value":     runtimeapi.MessageText(outcome.response.Message),
 				})
 			}
 			return result
 		case turnOutcomeFailed:
-			return runner.cleanupToolExecutor(
-				toolExecutor,
-				outcome.result,
-				state,
-				runtimeConfig,
-			)
+			return execution.cleanupToolExecutor(outcome.result)
 		case turnOutcomeToolBatch:
-			if result := runner.executeToolBatch(
-				ctx,
-				runtimeConfig,
-				toolExecutor,
-				state,
-				outcome,
-			); result != nil {
-				return runner.cleanupToolExecutor(
-					toolExecutor,
-					*result,
-					state,
-					runtimeConfig,
-				)
+			if result := execution.executeToolBatch(ctx, outcome); result != nil {
+				return execution.cleanupToolExecutor(*result)
 			}
 		default:
 			panic(fmt.Sprintf("unsupported turn outcome %d", outcome.kind))
@@ -164,36 +158,18 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 	}
 }
 
-func (runner Runner) cleanupToolExecutor(
-	executor ToolExecutor,
-	result Result,
-	state *loopState,
-	runtimeConfig config.Config,
-) Result {
-	closer, ok := executor.(interface {
-		Close(context.Context) error
-	})
-	if !ok {
-		return result
-	}
+func (execution *execution) cleanupToolExecutor(result Result) Result {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := closer.Close(cleanupCtx); err != nil {
+	if err := execution.toolExecutor.Close(cleanupCtx); err != nil {
 		const code = "tool_cleanup_failed"
 		message := tooloutput.TruncateUTF8(fmt.Sprintf("tool cleanup failed: %v", err), 4<<10)
 		if result.ExitCode == 0 {
-			failure := state.failure(
-				runner,
-				runtimeConfig,
-				code,
-				message,
-				nil,
-				state.lastRequestID,
-			)
+			failure := execution.fail(code, message, nil, execution.state.lastRequestID)
 			failure.Envelope.Output = result.Envelope.Output
 			return failure
 		}
-		runner.emitError(code, message, nil)
+		execution.emitError(code, message, nil)
 	}
 	return result
 }
@@ -218,31 +194,136 @@ func terminalStopFailure(reason runtimeapi.StopReason) (string, string) {
 	}
 }
 
-func limitReached(limit *int64, value int64) bool {
-	return limit != nil && value >= *limit
+type limitViolation struct {
+	code    string
+	message string
 }
 
-func batchExceedsLimit(limit *int64, consumed int64, requested int64) bool {
-	if limit == nil {
-		return false
+type limitsPolicy struct {
+	tokenBudget             *int64
+	maxTurns                *int64
+	maxToolCalls            *int64
+	maxToolResultBytes      *int64
+	maxTotalToolOutputBytes *int64
+}
+
+func newLimitsPolicy(runtimeConfig config.Config) limitsPolicy {
+	return limitsPolicy{
+		tokenBudget:             runtimeConfig.TokenBudget,
+		maxTurns:                runtimeConfig.MaxTurns,
+		maxToolCalls:            runtimeConfig.MaxToolCalls,
+		maxToolResultBytes:      runtimeConfig.MaxToolResultBytes,
+		maxTotalToolOutputBytes: runtimeConfig.MaxTotalToolOutputBytes,
 	}
-	remaining := *limit - consumed
-	return remaining < 0 || requested > remaining
 }
 
-func remainingTokenBudget(limit *int64, consumed int64) *int64 {
-	if limit == nil {
+func (limits limitsPolicy) checkBeforeProviderTurn(state *loopState) *limitViolation {
+	if limits.reached(limits.maxTurns, int64(state.turns)) {
+		return &limitViolation{
+			code:    "turn_limit_exceeded",
+			message: "maximum provider turns reached before final output",
+		}
+	}
+	return nil
+}
+
+func (limits limitsPolicy) checkAfterResponse(state *loopState) *limitViolation {
+	// Provider usage is checked after a response and may equal the budget. A
+	// follow-up tool batch requires remaining budget, so its preflight uses >=.
+	if limits.tokenBudget != nil && state.consumedTokens > *limits.tokenBudget {
+		return &limitViolation{
+			code:    "token_limit_exceeded",
+			message: "measured provider usage exceeded the run token budget",
+		}
+	}
+	return nil
+}
+
+func (limits limitsPolicy) checkBeforeToolBatch(
+	state *loopState,
+	requestedCalls int64,
+) *limitViolation {
+	if limits.reached(limits.tokenBudget, state.consumedTokens) {
+		return &limitViolation{
+			code:    "token_limit_exceeded",
+			message: "run token budget was exhausted before tool results could be returned",
+		}
+	}
+	if limits.reached(limits.maxTurns, int64(state.turns)) {
+		return &limitViolation{
+			code:    "turn_limit_exceeded",
+			message: "maximum provider turns reached before tool results could be returned",
+		}
+	}
+	if limits.batchExceeds(limits.maxToolCalls, int64(state.toolCalls), requestedCalls) {
+		return &limitViolation{
+			code:    "tool_call_limit_exceeded",
+			message: "maximum tool calls reached before final output",
+		}
+	}
+	return limits.checkBeforeToolCall(state)
+}
+
+func (limits limitsPolicy) checkBeforeToolCall(state *loopState) *limitViolation {
+	if limits.reached(limits.maxTotalToolOutputBytes, state.totalToolOutputBytes) {
+		return &limitViolation{
+			code:    "tool_output_limit_exceeded",
+			message: "total tool-output limit reached before final output",
+		}
+	}
+	return nil
+}
+
+func (limits limitsPolicy) remainingTokenBudget(consumed int64) *int64 {
+	if limits.tokenBudget == nil {
 		return nil
 	}
-	remaining := *limit - consumed
+	remaining := *limits.tokenBudget - consumed
 	if remaining < 1 {
 		remaining = 1
 	}
 	return &remaining
 }
 
-func tokenBudgetExceeded(limit *int64, consumed int64) bool {
-	return limit != nil && consumed > *limit
+func (limits limitsPolicy) applyToolOutput(
+	result runtimeapi.ToolResult,
+	totalBytes *int64,
+) runtimeapi.ToolResult {
+	maxBytes := int64(len(result.Content))
+	if limits.maxToolResultBytes != nil && *limits.maxToolResultBytes < maxBytes {
+		maxBytes = *limits.maxToolResultBytes
+	}
+	if limits.maxTotalToolOutputBytes != nil {
+		remaining := *limits.maxTotalToolOutputBytes - *totalBytes
+		if remaining < maxBytes {
+			maxBytes = remaining
+		}
+	}
+	if maxBytes < 0 {
+		maxBytes = 0
+	}
+	if content, truncated := tooloutput.Bound(result.Content, maxBytes); truncated {
+		result.Content = content
+		result.Truncated = true
+	}
+	*totalBytes += int64(len(result.Content))
+	return result
+}
+
+func (limits limitsPolicy) reached(limit *int64, value int64) bool {
+	return limit != nil && value >= *limit
+}
+
+func (limits limitsPolicy) batchExceeds(
+	limit *int64,
+	consumed int64,
+	requested int64,
+) bool {
+	if limit == nil {
+		return false
+	}
+	remaining := *limit - consumed
+	return remaining < 0 || requested > remaining
 }
 
 func measuredTokens(usage runtimeapi.Usage) int64 {
@@ -289,71 +370,47 @@ func saturatingAdd(left int64, right int64) int64 {
 	return left + right
 }
 
-func applyToolOutputLimits(
-	result runtimeapi.ToolResult,
-	runtimeConfig config.Config,
-	totalBytes *int64,
-) runtimeapi.ToolResult {
-	maxBytes := int64(len(result.Content))
-	if runtimeConfig.MaxToolResultBytes != nil &&
-		*runtimeConfig.MaxToolResultBytes < maxBytes {
-		maxBytes = *runtimeConfig.MaxToolResultBytes
-	}
-	if runtimeConfig.MaxTotalToolOutputBytes != nil {
-		remaining := *runtimeConfig.MaxTotalToolOutputBytes - *totalBytes
-		if remaining < maxBytes {
-			maxBytes = remaining
-		}
-	}
-	if maxBytes < 0 {
-		maxBytes = 0
-	}
-	if content, truncated := tooloutput.Bound(result.Content, maxBytes); truncated {
-		result.Content = content
-		result.Truncated = true
-	}
-	*totalBytes += int64(len(result.Content))
-	return result
-}
-
-func (runner Runner) limitFailure(
+func (execution *execution) fail(
 	code string,
 	message string,
-	usage runtimeapi.Usage,
-	metadata Metadata,
+	retryable *bool,
+	requestID string,
 ) Result {
-	retryable := false
-	runner.emitError(code, message, &retryable)
-	result := failed(code, message, &retryable, metadata)
-	result.Envelope.Usage = envelopeUsage(usage)
+	execution.emitError(code, message, retryable)
+	result := Result{
+		Envelope: failureEnvelope(
+			code,
+			message,
+			retryable,
+			execution.state.metadata(execution.config, requestID),
+		),
+		ExitCode: 1,
+	}
+	result.Envelope.Usage = envelopeUsage(execution.state.usage)
 	return result
 }
 
-func (runner Runner) emit(eventType events.Type, data any) {
-	if runner.Emitter == nil {
-		return
-	}
-	runner.Emitter.Emit(eventType, data)
+func (execution *execution) failLimit(
+	violation *limitViolation,
+	requestID string,
+) Result {
+	retryable := false
+	return execution.fail(violation.code, violation.message, &retryable, requestID)
 }
 
-func (runner Runner) emitError(code string, message string, retryable *bool) {
-	runner.emit(events.TypeError, map[string]any{
+func (execution *execution) emit(eventType events.Type, data any) {
+	if execution.emitter == nil {
+		return
+	}
+	execution.emitter.Emit(eventType, data)
+}
+
+func (execution *execution) emitError(code string, message string, retryable *bool) {
+	execution.emit(events.TypeError, map[string]any{
 		"code":      code,
 		"message":   message,
 		"retryable": retryable,
 	})
-}
-
-func failed(
-	code string,
-	message string,
-	retryable *bool,
-	metadata Metadata,
-) Result {
-	return Result{
-		Envelope: Failure(code, message, retryable, metadata),
-		ExitCode: 1,
-	}
 }
 
 func normalizeError(

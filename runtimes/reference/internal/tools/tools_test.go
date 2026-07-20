@@ -17,7 +17,7 @@ import (
 )
 
 func TestRegistryExposesOnlyAllowedTools(t *testing.T) {
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed: []string{tools.NameReadKnowledge, tools.NameReadKnowledge},
 	})
 	if err != nil {
@@ -30,7 +30,10 @@ func TestRegistryExposesOnlyAllowedTools(t *testing.T) {
 }
 
 func TestRegistryRejectsUnknownConfiguredTool(t *testing.T) {
-	_, err := tools.New(tools.Config{Allowed: []string{"not-built-in"}})
+	_, err := tools.NewWithContext(
+		context.Background(),
+		tools.Config{Allowed: []string{"not-built-in"}},
+	)
 	var toolError *tools.Error
 	if !errors.As(err, &toolError) || toolError.Code != "unknown_tool" {
 		t.Fatalf("unexpected error %v", err)
@@ -38,7 +41,10 @@ func TestRegistryRejectsUnknownConfiguredTool(t *testing.T) {
 }
 
 func TestRegistryReturnsDeniedAndUnknownCallsToModel(t *testing.T) {
-	registry, err := tools.New(tools.Config{Allowed: []string{tools.NameReadKnowledge}})
+	registry, err := tools.NewWithContext(
+		context.Background(),
+		tools.Config{Allowed: []string{tools.NameReadKnowledge}},
+	)
 	if err != nil {
 		t.Fatalf("create registry: %v", err)
 	}

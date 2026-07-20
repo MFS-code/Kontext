@@ -35,11 +35,9 @@ func run(
 	if err != nil {
 		fmt.Fprintf(stderr, "kontext reference runtime: %v\n", err)
 		startedAt := now().UTC()
-		emitter.Emit(events.TypeError, map[string]any{
-			"code":    "invalid_configuration",
-			"message": err.Error(),
-		})
-		envelope := engine.Failure(
+		if emitErr := engine.EmitFailure(
+			stdout,
+			emitter,
 			"invalid_configuration",
 			err.Error(),
 			nil,
@@ -49,8 +47,7 @@ func run(
 				StartedAt:   startedAt,
 				CompletedAt: now().UTC(),
 			},
-		)
-		if emitErr := resultv1alpha1.WriteEnvelopeLine(stdout, envelope); emitErr != nil {
+		); emitErr != nil {
 			fmt.Fprintf(stderr, "kontext reference runtime: emit result: %v\n", emitErr)
 		}
 		return 2

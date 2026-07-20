@@ -15,7 +15,7 @@ import (
 
 func TestShellUsesExplicitDirectoryAndFilteredEnvironment(t *testing.T) {
 	var streamed bytes.Buffer
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed: []string{tools.NameShell},
 		Stdout:  &streamed,
 	})
@@ -60,7 +60,10 @@ func TestShellUsesExplicitDirectoryAndFilteredEnvironment(t *testing.T) {
 }
 
 func TestShellRejectsSensitiveEnvironmentAndRelativeDirectory(t *testing.T) {
-	registry, err := tools.New(tools.Config{Allowed: []string{tools.NameShell}})
+	registry, err := tools.NewWithContext(
+		context.Background(),
+		tools.Config{Allowed: []string{tools.NameShell}},
+	)
 	if err != nil {
 		t.Fatalf("create registry: %v", err)
 	}
@@ -94,7 +97,7 @@ func TestShellRejectsSensitiveEnvironmentAndRelativeDirectory(t *testing.T) {
 
 func TestShellBoundsCapturedOutputButStreamsFullLogs(t *testing.T) {
 	var streamed bytes.Buffer
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed:          []string{tools.NameShell},
 		MaxCapturedBytes: 4,
 		Stdout:           &streamed,
@@ -128,7 +131,10 @@ func TestShellBoundsCapturedOutputButStreamsFullLogs(t *testing.T) {
 }
 
 func TestShellCancellationTerminatesProcessGroup(t *testing.T) {
-	registry, err := tools.New(tools.Config{Allowed: []string{tools.NameShell}})
+	registry, err := tools.NewWithContext(
+		context.Background(),
+		tools.Config{Allowed: []string{tools.NameShell}},
+	)
 	if err != nil {
 		t.Fatalf("create registry: %v", err)
 	}
