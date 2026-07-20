@@ -55,6 +55,7 @@ func (runner Runner) cleanupCreateFailure(
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 300*time.Millisecond)
 	defer cancel()
 	observed := &kontextv1alpha1.AgentRun{}
+	// A failed single probe cannot establish ownership, so leave the run untouched.
 	if err := runner.Client.Get(ctx, key, observed); apierrors.IsNotFound(err) {
 		return nil
 	} else if err != nil {
