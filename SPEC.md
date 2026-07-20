@@ -92,9 +92,9 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 
 | Field                | Type     | Req | Notes                                            |
 | -------------------- | -------- | --- | ------------------------------------------------ |
-| `agentRef.name`      | string   | no  | Owning `Agent`. A user-created reference to a Task Agent is an explicit execution trigger. Omitted = standalone ad-hoc run. |
+| `agentRef.name`      | string   | no  | Owning `Agent`. With Task CREATE admission installed, a user-created reference is an explicit execution trigger. Omitted = standalone ad-hoc run. |
 | `parameters`         | map[string]string | no | Immutable Task invocation parameters retained with the resolved snapshot. Requires `agentRef`. |
-| `goal`               | string   | yes* | Concrete, fully-resolved goal. Omitted only in a sparse Task invocation before CREATE admission. |
+| `goal`               | string   | yes | Concrete, fully-resolved goal.                   |
 | `provider`           | string   | no  | Resolved from Agent at creation.                 |
 | `model`              | string   | yes |                                                  |
 | `tools`              | []string | no  |                                                  |
@@ -103,7 +103,7 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 | `knowledgeConfigMapRef.name` | string | no | Static ConfigMap context mounted read-only at `/kontext/knowledge`. |
 | `serviceAccountName` | string   | no  |                                                  |
 | `env`                | []EnvVar | no  | Resolved literal or Secret-backed env snapshot.  |
-| `runtime.image`      | string   | yes* | Resolved from Agent. Omitted only in a sparse Task invocation before CREATE admission. |
+| `runtime.image`      | string   | yes | Resolved from Agent.                             |
 | `runtime.command`    | []string | no  | Required when stdout capture is configured.      |
 | `runtime.args`       | []string | no  | Appended to the declared command.                |
 | `runtime.result`     | object   | no  | Optional stdout result capture policy.           |
@@ -117,20 +117,30 @@ to provide a complete execution spec directly.
 
 ### Task invocation and resolution
 
-Creating a Task `Agent` never starts work. A user explicitly triggers it by
-creating a user-named `AgentRun` whose `spec.agentRef.name` names that Task
-Agent. Runs may be created concurrently; there is no generated-name or
-single-active-run restriction.
+Creating a Task `Agent` never starts work. Once Task CREATE admission is
+installed, a user explicitly triggers it by submitting a user-named
+`AgentRun` whose `spec.agentRef.name` names that Task Agent. Runs may be
+submitted concurrently; there is no generated-name or single-active-run
+restriction.
 
-A Task invocation is sparse: before CREATE admission it may contain only
-`agentRef` and optional `parameters`. Future CREATE admission resolves it into
-the complete immutable execution snapshot stored by the API server. It copies
-runtime, provider, model, tools, budget, service account, Secret reference,
-knowledge ConfigMap reference, and environment from the Agent. The concrete
-goal is copied from `goal` or rendered from `goalTemplate`. These execution
-fields are locked: an invocation that supplies any of them is rejected, even
-when the supplied value would match the template. Users needing execution
-overrides create a standalone `AgentRun` or a separate Agent definition.
+A Task invocation request is sparse: it may contain only `agentRef` and
+optional `parameters`. Kubernetes
+[invokes mutating admission first](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/)
+and then validates the final object against the CRD. Future CREATE admission
+therefore receives the sparse request, resolves it in memory, and returns the
+complete immutable execution snapshot that the API server validates and
+stores. The persisted `AgentRun.spec` always includes `goal`, `model`, and
+`runtime.image`; an unresolved sparse object is never valid stored state.
+Without the Task webhook infrastructure and mutator from #83/#84, the API
+server rejects the sparse request as missing required fields.
+
+Resolution copies runtime, provider, model, tools, budget, service account,
+Secret reference, knowledge ConfigMap reference, and environment from the
+Agent. The concrete goal is copied from `goal` or rendered from
+`goalTemplate`. These execution fields are locked: an invocation request that
+supplies any of them is rejected, even when the supplied value would match the
+template. Users needing execution overrides create a standalone `AgentRun` or
+a separate Agent definition.
 
 A Task Agent configures exactly one of `goal` or `goalTemplate`. A static
 `goal` accepts no parameters. A template uses only ASCII identifier
@@ -153,7 +163,8 @@ built, once at this boundary.
 
 The pure resolver in `internal/runfactory` defines these semantics for future
 admission code. This version does not register a webhook, so sparse Task
-objects are schema-valid but are not yet resolved end to end.
+CREATE requests remain schema-invalid and cannot reach the AgentRun
+controller.
 
 ### `status`
 

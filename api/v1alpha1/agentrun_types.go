@@ -19,10 +19,13 @@ type AgentRef struct {
 	Name string `json:"name"`
 }
 
-// AgentRunSpec defines the desired state of AgentRun.
+// AgentRunSpec defines the desired state of AgentRun. Persisted specs are
+// always complete. A future CREATE mutating webhook may decode a sparse Task
+// request into this type, but it must resolve the required execution fields
+// before API-server schema validation and persistence.
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="AgentRun spec is immutable"
 // +kubebuilder:validation:XValidation:rule="has(self.agentRef) || !has(self.parameters)",message="parameters require agentRef"
-// +kubebuilder:validation:XValidation:rule="(has(self.goal) && has(self.model) && has(self.runtime)) || (has(self.agentRef) && !has(self.goal) && !has(self.provider) && !has(self.model) && !has(self.tools) && !has(self.budget) && !has(self.secretRef) && !has(self.knowledgeConfigMapRef) && !has(self.serviceAccountName) && !has(self.runtime) && !has(self.env))",message="AgentRun must be a complete execution spec or a sparse invocation containing only agentRef and parameters"
+// +kubebuilder:validation:XValidation:rule="has(self.goal) && has(self.model) && has(self.runtime)",message="persisted AgentRun spec must contain a complete execution snapshot"
 type AgentRunSpec struct {
 	AgentRef *AgentRef `json:"agentRef,omitempty"`
 
@@ -30,11 +33,11 @@ type AgentRunSpec struct {
 	Parameters map[string]string `json:"parameters,omitempty"`
 
 	// +kubebuilder:validation:MinLength=1
-	Goal string `json:"goal,omitempty"`
+	Goal string `json:"goal"`
 
 	Provider string `json:"provider,omitempty"`
 	// +kubebuilder:validation:MinLength=1
-	Model string   `json:"model,omitempty"`
+	Model string   `json:"model"`
 	Tools []string `json:"tools,omitempty"`
 
 	Budget *BudgetSpec `json:"budget,omitempty"`
@@ -45,7 +48,7 @@ type AgentRunSpec struct {
 
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 
-	Runtime RuntimeSpec `json:"runtime,omitempty,omitzero"`
+	Runtime RuntimeSpec `json:"runtime"`
 
 	Env []EnvVar `json:"env,omitempty"`
 }

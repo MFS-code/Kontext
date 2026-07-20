@@ -2,44 +2,29 @@ package v1alpha1_test
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 )
 
-func TestSparseTaskInvocationJSONOmitsExecutionFields(t *testing.T) {
-	invocation := kontextv1alpha1.AgentRunSpec{
-		AgentRef: &kontextv1alpha1.AgentRef{Name: "task"},
-		Parameters: map[string]string{
-			"input": "value",
-		},
+func TestSparseTaskCreateRequestDecodesForFutureMutation(t *testing.T) {
+	// Kubernetes invokes mutating admission before it validates the final
+	// object against the CRD. The future Task webhook can therefore decode this
+	// request shape, resolve it in memory, and return a complete object. It must
+	// never marshal or persist this unresolved value.
+	data := []byte(`{"agentRef":{"name":"task"},"parameters":{"input":"value"}}`)
+	var invocation kontextv1alpha1.AgentRunSpec
+	if err := json.Unmarshal(data, &invocation); err != nil {
+		t.Fatalf("decode sparse CREATE request: %v", err)
 	}
-
-	data, err := json.Marshal(invocation)
-	if err != nil {
-		t.Fatalf("marshal sparse invocation: %v", err)
+	if invocation.AgentRef == nil || invocation.AgentRef.Name != "task" {
+		t.Fatalf("decoded agentRef = %#v", invocation.AgentRef)
 	}
-	encoded := string(data)
-	for _, field := range []string{
-		`"goal"`,
-		`"provider"`,
-		`"model"`,
-		`"tools"`,
-		`"budget"`,
-		`"secretRef"`,
-		`"knowledgeConfigMapRef"`,
-		`"serviceAccountName"`,
-		`"runtime"`,
-		`"env"`,
-	} {
-		if strings.Contains(encoded, field) {
-			t.Fatalf("sparse invocation unexpectedly serialized %s: %s", field, encoded)
-		}
+	if invocation.Parameters["input"] != "value" {
+		t.Fatalf("decoded parameters = %#v", invocation.Parameters)
 	}
-	if !strings.Contains(encoded, `"agentRef":{"name":"task"}`) ||
-		!strings.Contains(encoded, `"parameters":{"input":"value"}`) {
-		t.Fatalf("sparse invocation omitted allowed fields: %s", encoded)
+	if invocation.Goal != "" || invocation.Model != "" || invocation.Runtime.Image != "" {
+		t.Fatalf("sparse request unexpectedly contains execution fields: %#v", invocation)
 	}
 }
 

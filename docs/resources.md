@@ -32,11 +32,11 @@ fields when available.
 You can create an `AgentRun` standalone, without an owning `Agent`. That path
 is the fastest way to prove install health with the echo runtime.
 
-### Task invocations
+### Future Task invocation requests
 
 A Task Agent configures exactly one static `goal` or parameterized
-`goalTemplate`. A sparse invocation contains only `agentRef` and optional
-string `parameters`:
+`goalTemplate`. Once the Task CREATE webhook is installed, its sparse request
+shape contains only `agentRef` and optional string `parameters`:
 
 ```yaml
 apiVersion: kontext.dev/v1alpha1
@@ -57,9 +57,13 @@ references, environment, and the concrete goal are locked to the Agent
 template. Use a standalone run or another Agent definition when those fields
 must differ.
 
-The pure resolution contract is present in this release, but sparse CREATE
-admission is not registered yet. Until that follow-up lands, use fully resolved
-or standalone runs for end-to-end execution.
+This YAML is an admission request shape, not a valid persisted AgentRun in the
+current release. Kubernetes runs mutating admission before final CRD
+validation, so #84 will resolve the request before the API server validates and
+stores it. Persisted AgentRuns always contain `goal`, `model`, and
+`runtime.image`. Until the webhook infrastructure and mutator from #83/#84 are
+installed, the API server rejects sparse CREATE requests; use standalone runs
+for end-to-end execution.
 
 Task runs are user-named and can execute concurrently. For Task status,
 `lastRunName` means the newest retained owned run by creation time, while

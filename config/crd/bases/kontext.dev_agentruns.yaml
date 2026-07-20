@@ -49,7 +49,11 @@ spec:
           metadata:
             type: object
           spec:
-            description: AgentRunSpec defines the desired state of AgentRun.
+            description: |-
+              AgentRunSpec defines the desired state of AgentRun. Persisted specs are
+              always complete. A future CREATE mutating webhook may decode a sparse Task
+              request into this type, but it must resolve the required execution fields
+              before API-server schema validation and persistence.
             properties:
               agentRef:
                 description: AgentRef links an AgentRun to its owning Agent.
@@ -234,18 +238,18 @@ spec:
                 items:
                   type: string
                 type: array
+            required:
+            - goal
+            - model
+            - runtime
             type: object
             x-kubernetes-validations:
             - message: AgentRun spec is immutable
               rule: self == oldSelf
             - message: parameters require agentRef
               rule: has(self.agentRef) || !has(self.parameters)
-            - message: AgentRun must be a complete execution spec or a sparse invocation
-                containing only agentRef and parameters
-              rule: (has(self.goal) && has(self.model) && has(self.runtime)) || (has(self.agentRef)
-                && !has(self.goal) && !has(self.provider) && !has(self.model) && !has(self.tools)
-                && !has(self.budget) && !has(self.secretRef) && !has(self.knowledgeConfigMapRef)
-                && !has(self.serviceAccountName) && !has(self.runtime) && !has(self.env))
+            - message: persisted AgentRun spec must contain a complete execution snapshot
+              rule: has(self.goal) && has(self.model) && has(self.runtime)
           status:
             description: AgentRunStatus defines the observed state of AgentRun.
             properties:

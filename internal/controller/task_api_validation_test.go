@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
@@ -73,30 +74,33 @@ func TestTaskAgentAPIValidation(t *testing.T) {
 	}
 }
 
-func TestAgentRunInvocationAPIValidation(t *testing.T) {
+func TestAgentRunPersistenceAPIValidation(t *testing.T) {
 	tests := []struct {
-		name      string
-		spec      map[string]any
-		wantValid bool
+		name        string
+		spec        map[string]any
+		wantValid   bool
+		wantMessage string
 	}{
 		{
-			name:      "sparse reference only",
-			spec:      map[string]any{"agentRef": map[string]any{"name": "task"}},
-			wantValid: true,
+			name:        "sparse reference only is not persisted",
+			spec:        map[string]any{"agentRef": map[string]any{"name": "task"}},
+			wantMessage: "Required value",
 		},
 		{
-			name: "sparse parameters",
+			name: "sparse parameters are not persisted",
 			spec: map[string]any{
 				"agentRef":   map[string]any{"name": "task"},
 				"parameters": map[string]any{"input": "value"},
 			},
-			wantValid: true,
+			wantMessage: "Required value",
 		},
 		{
 			name: "parameters require reference",
-			spec: map[string]any{
-				"parameters": map[string]any{"input": "value"},
-			},
+			spec: mergeSpec(
+				completeAgentRunSpec(nil),
+				map[string]any{"parameters": map[string]any{"input": "value"}},
+			),
+			wantMessage: "parameters require agentRef",
 		},
 		{
 			name:      "standalone complete execution",
@@ -117,8 +121,9 @@ func TestAgentRunInvocationAPIValidation(t *testing.T) {
 			wantValid: true,
 		},
 		{
-			name: "standalone cannot be sparse",
-			spec: map[string]any{},
+			name:        "standalone cannot be sparse",
+			spec:        map[string]any{},
+			wantMessage: "Required value",
 		},
 		{
 			name: "referenced partial execution is rejected",
@@ -126,13 +131,17 @@ func TestAgentRunInvocationAPIValidation(t *testing.T) {
 				"agentRef": map[string]any{"name": "task"},
 				"goal":     "partial",
 			},
+			wantMessage: "Required value",
 		},
 		{
-			name: "sparse invocation rejects locked provider",
+			name: "runtime image remains required",
 			spec: map[string]any{
 				"agentRef": map[string]any{"name": "task"},
-				"provider": "fake",
+				"goal":     "resolved",
+				"model":    "test/model",
+				"runtime":  map[string]any{},
 			},
+			wantMessage: "image: Required value",
 		},
 	}
 
@@ -150,18 +159,24 @@ func TestAgentRunInvocationAPIValidation(t *testing.T) {
 			if !apierrors.IsInvalid(err) {
 				t.Fatalf("expected API validation error, got %v", err)
 			}
+			if test.wantMessage != "" && !strings.Contains(err.Error(), test.wantMessage) {
+				t.Fatalf("validation error does not contain %q: %v", test.wantMessage, err)
+			}
 		})
 	}
 }
 
 func TestAgentRunParametersAndSpecAreImmutable(t *testing.T) {
 	ctx := context.Background()
-	run := unstructuredAgentRun("task-run-parameters-immutable", map[string]any{
-		"agentRef":   map[string]any{"name": "task"},
-		"parameters": map[string]any{"input": "original"},
-	})
+	run := unstructuredAgentRun(
+		"task-run-parameters-immutable",
+		mergeSpec(
+			completeAgentRunSpec(map[string]any{"name": "task"}),
+			map[string]any{"parameters": map[string]any{"input": "original"}},
+		),
+	)
 	if err := k8sClient.Create(ctx, run); err != nil {
-		t.Fatalf("create sparse AgentRun: %v", err)
+		t.Fatalf("create complete resolved AgentRun: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = k8sClient.Delete(context.Background(), run)
@@ -176,6 +191,29 @@ func TestAgentRunParametersAndSpecAreImmutable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "AgentRun spec is immutable") {
 		t.Fatalf("immutability error is not actionable: %v", err)
+	}
+}
+
+func TestAgentRunReconcilerCannotObserveAdmittedSparseSpec(t *testing.T) {
+	// Kubernetes mutating admission runs before final CRD validation. Until the
+	// future Task mutator is installed, this sparse CREATE must fail validation,
+	// leaving no object for the AgentRun controller to reconcile.
+	ctx := context.Background()
+	name := "sparse-run-never-admitted"
+	run := unstructuredAgentRun(name, map[string]any{
+		"agentRef":   map[string]any{"name": "task"},
+		"parameters": map[string]any{"input": "value"},
+	})
+	if err := k8sClient.Create(ctx, run); !apierrors.IsInvalid(err) {
+		t.Fatalf("expected sparse CREATE to be rejected, got %v", err)
+	}
+
+	key := types.NamespacedName{Name: name, Namespace: "default"}
+	reconcileAgentRun(ctx, t, key)
+
+	var observed kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, key, &observed); !apierrors.IsNotFound(err) {
+		t.Fatalf("controller could observe sparse AgentRun: object=%#v error=%v", observed, err)
 	}
 }
 
