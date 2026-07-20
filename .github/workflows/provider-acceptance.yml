@@ -41,6 +41,7 @@ jobs:
       KIND_CLUSTER_NAME: provider-acceptance
       KONTEXT_ACCEPTANCE_NAMESPACE: provider-acceptance
       KONTEXT_ACCEPTANCE_SCENARIO: ${{ inputs.scenario }}
+      KONTEXT_KIND_IMAGE_SET: network-policy
       KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
       KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
       KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
@@ -71,31 +72,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build maintained operator image
-        uses: ./.github/actions/build-image
+      - name: Build maintained images
+        uses: ./.github/actions/build-core-images
         with:
-          context: .
-          tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
-          cache-scope: provider-acceptance-operator
-          load: "true"
-
-      - name: Build reusable reporter image
-        uses: ./.github/actions/build-image
-        with:
-          context: .
-          dockerfile: runtimes/reporter/Dockerfile
-          tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
-          cache-scope: provider-acceptance-reporter
-          load: "true"
-
-      - name: Build maintained reference runtime image
-        uses: ./.github/actions/build-image
-        with:
-          context: .
-          dockerfile: runtimes/reference/Dockerfile
-          tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
-          cache-scope: provider-acceptance-reference
-          load: "true"
+          image-set: network-policy
+          cache-scope: provider-acceptance-
 
       - name: Create ephemeral kind cluster
         uses: helm/kind-action@v1
@@ -103,18 +84,8 @@ jobs:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
           wait: 120s
 
-      - name: Load maintained images
-        run: |
-          kind load docker-image "${KONTEXT_OPERATOR_IMAGE}" --name "${KIND_CLUSTER_NAME}"
-          kind load docker-image "${KONTEXT_REPORTER_IMAGE}" --name "${KIND_CLUSTER_NAME}"
-          kind load docker-image "${KONTEXT_REFERENCE_IMAGE}" --name "${KIND_CLUSTER_NAME}"
-
-      - name: Install maintained operator
-        run: |
-          kubectl apply -k config/overlays/dev
-          kubectl rollout status deployment/controller-manager \
-            --namespace kontext-system \
-            --timeout=120s
+      - name: Install Kontext with maintained images
+        run: ./scripts/install-go-kind.sh
 
       - name: Run Anthropic acceptance
         if: inputs.provider == 'anthropic'
@@ -137,22 +108,13 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-      - name: Collect redacted failure diagnostics
+      - name: Preserve redacted failure diagnostics
         if: failure()
-        run: |
-          ./scripts/collect-kind-diagnostics.sh "${RUNNER_TEMP}/provider-diagnostics"
-          rm -f \
-            "${RUNNER_TEMP}/provider-diagnostics/agent-workloads.txt" \
-            "${RUNNER_TEMP}/provider-diagnostics/kontext-resources.txt" \
-            "${RUNNER_TEMP}/provider-diagnostics/workload-overview.txt"
-
-      - name: Upload failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/kind-diagnostics
         with:
-          name: provider-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/provider-diagnostics
-          if-no-files-found: ignore
+          diagnostics-dir: ${{ runner.temp }}/provider-diagnostics
+          artifact-name: provider-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          redact-workloads: "true"
           retention-days: 3
 
       - name: Delete kind cluster

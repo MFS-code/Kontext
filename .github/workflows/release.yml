@@ -379,17 +379,12 @@ jobs:
           fi
           ./scripts/verify-release-install.sh "${args[@]}"
 
-      - name: Collect diagnostics on failure
+      - name: Preserve diagnostics
         if: failure()
-        run: ./scripts/collect-kind-diagnostics.sh "${KONTEXT_DIAG_DIR}"
-
-      - name: Upload diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/kind-diagnostics
         with:
-          name: release-install-diagnostics-${{ github.run_id }}
-          path: ${{ env.KONTEXT_DIAG_DIR }}
-          if-no-files-found: ignore
+          diagnostics-dir: ${{ env.KONTEXT_DIAG_DIR }}
+          artifact-name: release-install-diagnostics-${{ github.run_id }}
 
       - name: Delete kind cluster
         if: always()
