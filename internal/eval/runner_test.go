@@ -121,9 +121,16 @@ func TestRunnerKeepRunsAndCreateFailureCleanup(t *testing.T) {
 	failing := &createFailClient{Client: fake.NewClientBuilder().WithScheme(scheme).Build()}
 	runner.Client = failing
 	runner.Options.KeepRuns = false
+	judge := &orderingJudge{t: t}
+	runner.Options.Judge = judge
 	records = runner.RunSuite(context.Background(), suite)
-	if len(records) != 1 || records[0].Pass || failing.deletes != 0 {
-		t.Fatalf("create failure cleanup was unsafe: %#v deletes=%d", records, failing.deletes)
+	if len(records) != 1 || records[0].Pass || failing.deletes != 0 || judge.called {
+		t.Fatalf(
+			"create failure handling was unsafe: %#v deletes=%d judge=%v",
+			records,
+			failing.deletes,
+			judge.called,
+		)
 	}
 }
 
@@ -148,9 +155,8 @@ func TestAmbiguousCreateCleansOnlyExactlyOwnedRun(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			base := newFakeEvalClient(t)
 			cluster := &ambiguousCreateClient{
-				Client:             base,
-				unowned:            unowned,
-				probeNotFoundCount: 1,
+				Client:  base,
+				unowned: unowned,
 			}
 			records := (Runner{
 				Client: cluster,
@@ -168,6 +174,9 @@ func TestAmbiguousCreateCleansOnlyExactlyOwnedRun(t *testing.T) {
 			}
 			remaining := &kontextv1alpha1.AgentRun{}
 			err := base.Get(context.Background(), key, remaining)
+			if cluster.gets != 1 {
+				t.Fatalf("create cleanup probed %d times, want 1", cluster.gets)
+			}
 			if unowned {
 				if err != nil || cluster.deletes != 0 {
 					t.Fatalf("unowned collision was modified: err=%v deletes=%d", err, cluster.deletes)
@@ -389,14 +398,20 @@ func TestEventGradersFailTransportAndTruncationErrors(t *testing.T) {
 			record := Record{StartedAt: time.Unix(0, 0)}
 			judge := &orderingJudge{t: t}
 			requirements := mustArtifactRequirements(t, item.Graders)
-			finished := (Runner{Logs: logs, Options: RunnerOptions{Judge: judge}}).finishRecord(
+			finished := (Runner{
+				Logs: logs,
+				Options: RunnerOptions{
+					Judge:    judge,
+					KeepRuns: true,
+				},
+			}).finishRecord(
 				context.Background(),
 				&record,
 				item,
 				requirements,
 				nil,
 				pod,
-				false,
+				true,
 				func() time.Time { return time.Unix(1, 0) },
 			)
 			if finished.Pass || len(finished.CollectionErrors) == 0 {
@@ -455,6 +470,51 @@ func TestCleanupUsesFreshContextAfterCancellation(t *testing.T) {
 	}
 }
 
+func TestCollectionUsesFreshContextAfterCaseTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	logs := &contextInspectingLogs{}
+	judge := &contextInspectingJudge{}
+	pod := &corev1.Pod{}
+	pod.Namespace = "evals"
+	pod.Name = "runtime"
+	item := Case{Graders: []Grader{{
+		Type: GraderEventCount,
+		Event: &EventCountExpectation{
+			Type: eventv1alpha1.TypeTool, Count: 0,
+		},
+	}}}
+	requirements := mustArtifactRequirements(t, item.Graders)
+	record := Record{StartedAt: time.Unix(0, 0)}
+
+	finished := (Runner{
+		Logs: logs,
+		Options: RunnerOptions{
+			Judge:    judge,
+			KeepRuns: true,
+		},
+	}).finishRecord(
+		ctx,
+		&record,
+		item,
+		requirements,
+		nil,
+		pod,
+		true,
+		func() time.Time { return time.Unix(1, 0) },
+	)
+
+	if logs.contextErr != nil || !logs.hadDeadline {
+		t.Fatalf("log collection context was not fresh and bounded: err=%v deadline=%v", logs.contextErr, logs.hadDeadline)
+	}
+	if judge.contextErr != nil || !judge.hadDeadline {
+		t.Fatalf("judge context was not fresh and bounded: err=%v deadline=%v", judge.contextErr, judge.hadDeadline)
+	}
+	if !containsCollectionError(finished.CollectionErrors, context.Canceled.Error()) {
+		t.Fatalf("original case timeout was not retained: %#v", finished.CollectionErrors)
+	}
+}
+
 func TestBoundedTailRetainsNewestBytes(t *testing.T) {
 	tail := newBoundedTail(5)
 	if _, err := tail.Write([]byte("abc")); err != nil {
@@ -474,7 +534,7 @@ func TestBoundedTailRetainsNewestBytes(t *testing.T) {
 func TestKubernetesLogFetcherSetsServerBoundsAndReportsIncompleteTail(t *testing.T) {
 	var captured *corev1.PodLogOptions
 	fetcher := KubernetesLogFetcher{
-		Stream: func(
+		stream: func(
 			_ context.Context,
 			_, _ string,
 			options *corev1.PodLogOptions,
