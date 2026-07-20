@@ -2,9 +2,11 @@ package engine
 
 import (
 	"encoding/json"
+	"io"
 	"time"
 
 	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/events"
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
@@ -18,8 +20,12 @@ type Metadata struct {
 	ToolCalls   int32
 }
 
-func Success(response runtimeapi.CompletionResponse, metadata Metadata) resultv1alpha1.Envelope {
-	text := runtimeapi.MessageText(response.Message)
+func Success(
+	message runtimeapi.Message,
+	usage runtimeapi.Usage,
+	metadata Metadata,
+) resultv1alpha1.Envelope {
+	text := runtimeapi.MessageText(message)
 	value, _ := json.Marshal(text)
 	turns := metadata.Turns
 	toolCalls := metadata.ToolCalls
@@ -32,7 +38,7 @@ func Success(response runtimeapi.CompletionResponse, metadata Metadata) resultv1
 			MediaType: resultv1alpha1.DefaultMediaType,
 			Value:     value,
 		},
-		Usage: envelopeUsage(response.Usage),
+		Usage: envelopeUsage(usage),
 		Timing: &resultv1alpha1.Timing{
 			StartedAt:      &metadata.StartedAt,
 			CompletedAt:    &metadata.CompletedAt,
@@ -48,7 +54,7 @@ func Success(response runtimeapi.CompletionResponse, metadata Metadata) resultv1
 	}
 }
 
-func Failure(
+func failureEnvelope(
 	code string,
 	message string,
 	retryable *bool,
@@ -78,6 +84,29 @@ func Failure(
 			Retryable: retryable,
 		},
 	}
+}
+
+// EmitFailure emits the error event and terminal envelope used when execution
+// cannot reach Runner, such as invalid environment configuration.
+func EmitFailure(
+	writer io.Writer,
+	emitter Emitter,
+	code string,
+	message string,
+	retryable *bool,
+	metadata Metadata,
+) error {
+	if emitter != nil {
+		emitter.Emit(events.TypeError, map[string]any{
+			"code":      code,
+			"message":   message,
+			"retryable": retryable,
+		})
+	}
+	return resultv1alpha1.WriteEnvelopeLine(
+		writer,
+		failureEnvelope(code, message, retryable, metadata),
+	)
 }
 
 func envelopeUsage(providerUsage runtimeapi.Usage) *resultv1alpha1.Usage {
