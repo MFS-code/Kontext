@@ -138,6 +138,24 @@ provider did not measure it; a present zero means it measured zero.
 
 `AgentRun` created from an `Agent` carries an owner reference to it → standard GC cascade. Standalone `AgentRun`s are allowed for ad-hoc execution, demos, and direct task dispatch.
 
+### Contract evolution policy
+
+The three public contract surfaces evolve differently:
+
+- **Result envelopes are lenient at the top level.** Consumers ignore unknown
+  top-level fields so producers can add optional result metadata without
+  breaking older readers. Known fields are still fully validated.
+  Runtime/provider-specific JSON belongs in `extensions` under namespaced keys
+  such as `anthropic.com/request`.
+- **Event envelopes are strict.** Consumers reject unknown top-level fields and
+  trailing JSON. Changing the event envelope shape requires a new event
+  contract version so streaming observers never silently interpret a different
+  record shape.
+- **CRDs evolve additively within `v1alpha1`.** Existing fields keep their
+  meaning and new fields are optional. Kubernetes structurally validates CRD
+  data; arbitrary JSON is confined to fields explicitly documented as
+  schemaless, currently `AgentRun.status.output.value`.
+
 ---
 
 ## Runtime image contract
@@ -173,11 +191,13 @@ The controller injects, on the Pod:
 
 ### Output — result
 
-The terminal envelope is optional at the control-plane boundary. An unchanged
-plain image that exits `0` without writing `/dev/termination-log` succeeds with
-absent `status.output` and an empty `status.result`. Native runtimes and images
-using injected stdout capture write richer structured output, usage, timing,
-and execution metadata.
+The terminal envelope is optional at the control-plane boundary. An empty or
+whitespace-only termination message is normalized internally to the current
+result API version with outcome `Succeeded` and no output, usage, or error; it
+is not a legacy wire payload. An unchanged plain image that exits `0` without
+writing `/dev/termination-log` therefore succeeds with absent `status.output`
+and an empty `status.result`. Native runtimes and images using injected stdout
+capture write richer structured output, usage, timing, and execution metadata.
 
 On completion, a runtime that provides a structured result writes a compact
 versioned envelope to `/dev/termination-log` (and may also write
@@ -255,7 +275,8 @@ transition:
 Legacy text becomes `text/plain` structured output. Legacy usage fields are
 recorded only when they are present in the payload. For compatibility, the
 process exit code remains authoritative for legacy payloads; a legacy `error`
-field is retained as diagnostic text but does not turn exit `0` into failure.
+field is retained as diagnostic text but never determines the run outcome and
+does not turn exit `0` into failure.
 
 Exit `0` with no termination payload or with a successful envelope means
 success. A non-zero process exit always fails the run. A failed envelope also

@@ -1,4 +1,11 @@
-// Package v1alpha1 contains API Schema definitions for the kontext v1alpha1 API group.
+// Package v1alpha1 contains API Schema definitions for the kontext v1alpha1
+// API group.
+//
+// CRDs evolve additively: existing fields retain their meaning and new
+// optional fields may be introduced within the version. Arbitrary JSON is
+// accepted only by fields explicitly documented and marked schemaless, such as
+// AgentRun status output values; every other field remains structurally
+// validated by Kubernetes.
 //
 // +kubebuilder:object:generate=true
 // +groupName=kontext.dev

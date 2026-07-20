@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 )
@@ -93,14 +94,14 @@ func envelopeFromPrefixedCandidate(captured CapturedResult) resultv1alpha1.Envel
 		return failureEnvelope("result_invalid", "prefixed Kontext result exceeded the capture limit")
 	}
 
-	parsed, err := resultv1alpha1.Parse(string(captured.Data))
+	envelope, legacy, err := resultv1alpha1.Parse(string(captured.Data))
 	if err != nil {
 		return failureEnvelope("result_invalid", fmt.Sprintf("invalid prefixed Kontext result: %v", err))
 	}
-	if parsed.Envelope == nil {
+	if legacy || strings.TrimSpace(string(captured.Data)) == "" {
 		return failureEnvelope("result_invalid", "prefixed Kontext result must be a versioned envelope")
 	}
-	return *parsed.Envelope
+	return envelope
 }
 
 func failureEnvelope(code string, message string) resultv1alpha1.Envelope {

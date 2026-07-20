@@ -1,5 +1,9 @@
 // Package v1alpha1 defines the versioned JSONL event contract shared by
 // Kontext runtimes and external observers.
+//
+// Event envelopes are strict records: parsers reject unknown top-level fields
+// and trailing data. Additive event changes therefore require a new contract
+// version rather than silently changing the shape consumed by observers.
 package v1alpha1
 
 import (

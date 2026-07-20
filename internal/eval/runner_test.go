@@ -329,6 +329,48 @@ func TestEnvelopeGradersUseTerminationMessageWithoutLogs(t *testing.T) {
 	}
 }
 
+func TestEnvelopeGradersRequireVersionedWireEnvelope(t *testing.T) {
+	item := Case{Graders: []Grader{{
+		Type:    GraderEnvelopeOutcome,
+		Outcome: resultv1alpha1.OutcomeSucceeded,
+	}}}
+	requirements := mustArtifactRequirements(t, item.Graders)
+	for name, message := range map[string]string{
+		"empty":      " \t\n",
+		"plain text": "legacy result",
+		"legacy JSON": `{
+			"result":"legacy result",
+			"tokensUsed":0
+		}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			pod := &corev1.Pod{}
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+				Name: "runtime",
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode: 0,
+					Message:  message,
+				}},
+			}}
+			record := Record{StartedAt: time.Unix(0, 0)}
+			finished := (Runner{}).finishRecord(
+				context.Background(),
+				&record,
+				item,
+				requirements,
+				nil,
+				pod,
+				false,
+				func() time.Time { return time.Unix(1, 0) },
+			)
+			if finished.Pass ||
+				!containsCollectionError(finished.CollectionErrors, "required versioned result envelope was absent") {
+				t.Fatalf("non-versioned wire payload was accepted: %#v", finished)
+			}
+		})
+	}
+}
+
 func TestEventGradersFailTransportAndTruncationErrors(t *testing.T) {
 	pod := &corev1.Pod{}
 	pod.Namespace = "evals"

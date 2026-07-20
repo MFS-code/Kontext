@@ -15,61 +15,46 @@ type LegacyPayload struct {
 	Error       string   `json:"error,omitempty"`
 }
 
-// ParsedResult is the normalized representation of a termination message.
-type ParsedResult struct {
-	Envelope *Envelope
-	Output   *Output
-	Usage    *Usage
-	Error    *ErrorInfo
-	Outcome  Outcome
-	Legacy   bool
-}
-
-// Parse decodes a versioned envelope, legacy payload, or plain-text result.
-func Parse(message string) (ParsedResult, error) {
+// Parse decodes a termination message into the current result envelope.
+// The returned boolean reports whether the message used a legacy JSON or
+// plain-text wire format.
+func Parse(message string) (Envelope, bool, error) {
 	message = strings.TrimSpace(message)
 	if message == "" {
-		return ParsedResult{}, nil
+		return successfulEnvelope(), false, nil
 	}
 	if !strings.HasPrefix(message, "{") {
-		return parsedPlainText(message), nil
+		envelope := successfulEnvelope()
+		envelope.Output = outputFromText(message)
+		return envelope, true, nil
 	}
 
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(message), &fields); err != nil {
-		return ParsedResult{}, fmt.Errorf("decode termination payload: %w", err)
+		return Envelope{}, false, fmt.Errorf("decode termination payload: %w", err)
 	}
 	if _, versioned := fields["apiVersion"]; versioned {
 		var envelope Envelope
 		if err := json.Unmarshal([]byte(message), &envelope); err != nil {
-			return ParsedResult{}, fmt.Errorf("decode result envelope: %w", err)
+			return Envelope{}, false, fmt.Errorf("decode result envelope: %w", err)
 		}
 		if err := envelope.Validate(); err != nil {
-			return ParsedResult{}, fmt.Errorf("validate result envelope: %w", err)
+			return Envelope{}, false, fmt.Errorf("validate result envelope: %w", err)
 		}
-		return ParsedResult{
-			Envelope: &envelope,
-			Output:   envelope.Output,
-			Usage:    envelope.Usage,
-			Error:    envelope.Error,
-			Outcome:  envelope.Outcome,
-		}, nil
+		return envelope, false, nil
 	}
 
 	var legacy LegacyPayload
 	if err := json.Unmarshal([]byte(message), &legacy); err != nil {
-		return ParsedResult{}, fmt.Errorf("decode legacy termination payload: %w", err)
+		return Envelope{}, false, fmt.Errorf("decode legacy termination payload: %w", err)
 	}
-	parsed := ParsedResult{
-		Output:  outputFromText(legacy.Result),
-		Usage:   usageFromLegacy(legacy),
-		Outcome: OutcomeSucceeded,
-		Legacy:  true,
-	}
+	envelope := successfulEnvelope()
+	envelope.Output = outputFromText(legacy.Result)
+	envelope.Usage = usageFromLegacy(legacy)
 	if legacy.Error != "" {
-		parsed.Error = &ErrorInfo{Message: legacy.Error}
+		envelope.Error = &ErrorInfo{Message: legacy.Error}
 	}
-	return parsed, nil
+	return envelope, true, nil
 }
 
 // ProjectLegacyResult deterministically projects structured output into the
@@ -92,11 +77,10 @@ func ProjectLegacyResult(output *Output) string {
 	return compact.String()
 }
 
-func parsedPlainText(message string) ParsedResult {
-	return ParsedResult{
-		Output:  outputFromText(message),
-		Outcome: OutcomeSucceeded,
-		Legacy:  true,
+func successfulEnvelope() Envelope {
+	return Envelope{
+		APIVersion: APIVersion,
+		Outcome:    OutcomeSucceeded,
 	}
 }
 
