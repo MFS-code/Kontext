@@ -48,7 +48,8 @@ func runReporter(
 
 func envelopeFromCapture(format CaptureFormat, captured CapturedResult, childExitCode int) resultv1alpha1.Envelope {
 	var envelope resultv1alpha1.Envelope
-	if format == CaptureFormatLastLine {
+	switch format {
+	case CaptureFormatLastLine:
 		envelope = resultv1alpha1.Envelope{
 			APIVersion: resultv1alpha1.APIVersion,
 			Outcome:    resultv1alpha1.OutcomeSucceeded,
@@ -66,7 +67,7 @@ func envelopeFromCapture(format CaptureFormat, captured CapturedResult, childExi
 				Value:     value,
 			}
 		}
-	} else {
+	case CaptureFormatKontextEnvelope:
 		envelope = envelopeFromPrefixedCandidate(captured)
 	}
 
