@@ -359,6 +359,7 @@ func TestOpenAISerializesToolsCallsAndResults(t *testing.T) {
 			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
 	}
+	const boundedContent = `{"partial":"{\"exitCode\":0"}`
 	request.Messages = append(request.Messages,
 		runtimeapi.Message{
 			Role: runtimeapi.RoleAssistant,
@@ -381,7 +382,7 @@ func TestOpenAISerializesToolsCallsAndResults(t *testing.T) {
 					ToolResult: &runtimeapi.ToolResult{
 						CallID:    "call-1",
 						Name:      "lookup",
-						Content:   `{"partial":"{\"exitCode\":0"}`,
+						Content:   boundedContent,
 						IsError:   true,
 						ErrorCode: "lookup_failed",
 						Truncated: true,
@@ -416,7 +417,7 @@ func TestOpenAISerializesToolsCallsAndResults(t *testing.T) {
 		t.Fatalf("tool error metadata was lost: %#v", toolResult)
 	}
 	content, ok := toolResult["content"].(string)
-	if !ok || !json.Valid([]byte(content)) {
+	if !ok || content != boundedContent || !json.Valid([]byte(content)) {
 		t.Fatalf("structured tool content became invalid: %#v", toolResult["content"])
 	}
 }

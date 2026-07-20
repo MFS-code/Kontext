@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/MFS-code/Kontext/internal/tooloutput"
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
@@ -229,19 +230,8 @@ func (tool *kubernetesTool) Execute(
 			Message: fmt.Sprintf("read Kubernetes API response: %v", err),
 		}
 	}
-	truncated := int64(len(body)) > tool.maxBytes
-	if truncated {
-		body = body[:tool.maxBytes]
-		body, err = json.Marshal(struct {
-			Partial string `json:"partial"`
-		}{Partial: string(body)})
-		if err != nil {
-			return outcome{}, &Error{
-				Code:    "kubernetes_response_failed",
-				Message: fmt.Sprintf("encode truncated Kubernetes response: %v", err),
-			}
-		}
-	}
+	content, truncated := tooloutput.Bound(string(body), tool.maxBytes)
+	body = []byte(content)
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		code := "kubernetes_request_rejected"
 		switch response.StatusCode {
