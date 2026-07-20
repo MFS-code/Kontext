@@ -1,21 +1,12 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
+import { requirePageMetadata } from "../../shared/docs.js";
 import type { DocPageMeta } from "../content";
 import { Markdown } from "./Markdown";
 
 type DocPageProps = {
   page: DocPageMeta | undefined;
 };
-
-function rawMarkdownHref(path: string): string {
-  if (path === "/docs") {
-    return "/raw/docs/index.md";
-  }
-  if (path === "/SPEC") {
-    return "/raw/SPEC.md";
-  }
-  return `/raw${path}.md`;
-}
 
 export function DocPage({ page }: DocPageProps) {
   useEffect(() => {
@@ -42,18 +33,20 @@ export function DocPage({ page }: DocPageProps) {
     );
   }
 
+  const source = requirePageMetadata(page.id);
+
   return (
     <article className="doc">
       <p className="eyebrow">{page.description}</p>
       <Markdown source={page.body} />
       <p className="source-link">
         <a
-          href={`https://github.com/MFS-code/Kontext/blob/main/${page.id === "SPEC" ? "SPEC.md" : `${page.id}.md`}`}
+          href={`https://github.com/MFS-code/Kontext/blob/main/${source.githubPath}`}
         >
           Edit on GitHub
         </a>
         {" · "}
-        <a href={rawMarkdownHref(page.path)}>Raw Markdown</a>
+        <a href={source.rawPath}>Raw Markdown</a>
       </p>
     </article>
   );
