@@ -32,7 +32,6 @@ pip-wheel-metadata/
 # Environment and local secrets
 .env
 .env.*
-!.env.example
 
 # IDE and OS files
 .DS_Store
@@ -58,7 +57,4 @@ AGENTS.md
 
 # Local Node tooling (docs-site, etc.)
 node_modules/
-
 .vercel/
-.vercel
-.env*

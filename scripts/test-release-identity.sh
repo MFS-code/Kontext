@@ -2,9 +2,9 @@
 # Check that release tooling consumes the canonical repository and registry identity.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/common.sh
-source "${ROOT_DIR}/scripts/lib/common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+ROOT_DIR="$(repo_root)"
 
 fail() {
   echo "release identity test failed: $*" >&2
@@ -51,7 +51,7 @@ for script in \
   "${ROOT_DIR}/scripts/render-release-manifest.sh" \
   "${ROOT_DIR}/scripts/apply-example.sh" \
   "${ROOT_DIR}/scripts/verify-release-install.sh"; do
-  grep -Fq 'source "${ROOT_DIR}/scripts/lib/common.sh"' "${script}" ||
+  grep -Fq '/lib/common.sh"' "${script}" ||
     fail "${script#${ROOT_DIR}/} does not source common identity"
   if grep -Fq "ghcr.io/mfs-code" "${script}"; then
     fail "${script#${ROOT_DIR}/} duplicates the registry owner"

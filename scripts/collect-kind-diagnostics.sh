@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+ROOT_DIR="$(repo_root)"
 OUT_DIR="${1:-${ROOT_DIR}/.ci-diagnostics}"
 NAMESPACE="${KONTEXT_NAMESPACE:-kontext-system}"
-
-need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "missing required command: $1" >&2
-    exit 1
-  fi
-}
 
 dump_logs_for_label() {
   local label="$1"
