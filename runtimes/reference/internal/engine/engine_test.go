@@ -60,6 +60,117 @@ func TestRunnerRequiresContextAwareToolResolver(t *testing.T) {
 	}
 }
 
+func TestRunnerClosesEveryResolvedExecutorExactlyOnce(t *testing.T) {
+	tests := []struct {
+		name           string
+		returnExecutor bool
+		resolverError  error
+		wantExitCode   int
+		wantCloseCalls int
+	}{
+		{
+			name:           "executor and error",
+			returnExecutor: true,
+			resolverError:  errors.New("resolve failed"),
+			wantExitCode:   1,
+			wantCloseCalls: 1,
+		},
+		{
+			name:           "nil and error",
+			resolverError:  errors.New("resolve failed"),
+			wantExitCode:   1,
+			wantCloseCalls: 0,
+		},
+		{
+			name:           "successful executor",
+			returnExecutor: true,
+			wantExitCode:   0,
+			wantCloseCalls: 1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &closingToolExecutor{
+				close: func(context.Context) error { return nil },
+			}
+			runner := engine.Runner{
+				Emitter: &recordingEmitter{},
+				ResolveToolsContext: func(
+					context.Context,
+					config.Config,
+				) (engine.ToolExecutor, error) {
+					if !test.returnExecutor {
+						return nil, test.resolverError
+					}
+					return executor, test.resolverError
+				},
+			}
+
+			result := runner.Run(context.Background(), baseConfig())
+			if result.ExitCode != test.wantExitCode {
+				t.Fatalf("exit code=%d, want %d; result=%#v", result.ExitCode, test.wantExitCode, result)
+			}
+			if executor.closeCalls != test.wantCloseCalls {
+				t.Fatalf("close calls=%d, want %d", executor.closeCalls, test.wantCloseCalls)
+			}
+			if test.resolverError != nil &&
+				(result.Envelope.Error == nil ||
+					result.Envelope.Error.Code != "invalid_tool_configuration" ||
+					result.Envelope.Error.Message != test.resolverError.Error()) {
+				t.Fatalf("resolver error was not preserved: %#v", result.Envelope.Error)
+			}
+		})
+	}
+}
+
+func TestRunnerReportsCleanupAfterResolverFailure(t *testing.T) {
+	emitter := &dataRecordingEmitter{}
+	executor := &closingToolExecutor{
+		close: func(context.Context) error {
+			return errors.New("close failed")
+		},
+	}
+	runner := engine.Runner{
+		Emitter: emitter,
+		ResolveToolsContext: func(
+			context.Context,
+			config.Config,
+		) (engine.ToolExecutor, error) {
+			return executor, errors.New("resolve failed")
+		},
+	}
+
+	result := runner.Run(context.Background(), baseConfig())
+	if result.Envelope.Error == nil ||
+		result.Envelope.Error.Code != "invalid_tool_configuration" ||
+		result.Envelope.Error.Message != "resolve failed" {
+		t.Fatalf("cleanup replaced resolver failure: %#v", result.Envelope.Error)
+	}
+	if executor.closeCalls != 1 {
+		t.Fatalf("close calls=%d, want 1", executor.closeCalls)
+	}
+
+	var errorCodes []string
+	for _, event := range emitter.events {
+		switch event.eventType {
+		case events.TypeError:
+			data, ok := event.data.(map[string]any)
+			if !ok {
+				t.Fatalf("unexpected error event data %#v", event.data)
+			}
+			code, _ := data["code"].(string)
+			errorCodes = append(errorCodes, code)
+		case events.TypeOutput:
+			t.Fatal("resolver failure emitted terminal output")
+		}
+	}
+	if len(errorCodes) != 2 ||
+		errorCodes[0] != "invalid_tool_configuration" ||
+		errorCodes[1] != "tool_cleanup_failed" {
+		t.Fatalf("unexpected error event ordering %#v", errorCodes)
+	}
+}
+
 func TestRunnerNormalizesProviderFailures(t *testing.T) {
 	tests := []struct {
 		name     string

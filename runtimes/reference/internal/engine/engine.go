@@ -98,13 +98,14 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 	}
 	execution.provider = selectedProvider
 	toolExecutor, err := runner.ResolveToolsContext(ctx, runtimeConfig)
+	execution.toolExecutor = toolExecutor
 	if err != nil {
 		code := "invalid_tool_configuration"
 		var toolError *tools.Error
 		if errors.As(err, &toolError) && toolError.Code != "" {
 			code = toolError.Code
 		}
-		return execution.fail(code, err.Error(), nil, "")
+		return execution.finish(execution.fail(code, err.Error(), nil, ""))
 	}
 	if toolExecutor == nil {
 		return execution.fail(
@@ -114,7 +115,6 @@ func (runner Runner) Run(ctx context.Context, runtimeConfig config.Config) Resul
 			"",
 		)
 	}
-	execution.toolExecutor = toolExecutor
 	return execution.run(ctx)
 }
 
@@ -138,7 +138,7 @@ func (execution *execution) run(ctx context.Context) Result {
 		case turnOutcomePaused:
 			continue
 		case turnOutcomeFinal:
-			result := execution.cleanupToolExecutor(outcome.result)
+			result := execution.finish(outcome.result)
 			if result.Envelope.Output != nil {
 				execution.emit(events.TypeOutput, map[string]any{
 					"mediaType": resultv1alpha1.DefaultMediaType,
@@ -147,15 +147,22 @@ func (execution *execution) run(ctx context.Context) Result {
 			}
 			return result
 		case turnOutcomeFailed:
-			return execution.cleanupToolExecutor(outcome.result)
+			return execution.finish(outcome.result)
 		case turnOutcomeToolBatch:
 			if result := execution.executeToolBatch(ctx, outcome); result != nil {
-				return execution.cleanupToolExecutor(*result)
+				return execution.finish(*result)
 			}
 		default:
 			panic(fmt.Sprintf("unsupported turn outcome %d", outcome.kind))
 		}
 	}
+}
+
+func (execution *execution) finish(result Result) Result {
+	if execution.toolExecutor == nil {
+		return result
+	}
+	return execution.cleanupToolExecutor(result)
 }
 
 func (execution *execution) cleanupToolExecutor(result Result) Result {
