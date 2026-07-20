@@ -1,7 +1,6 @@
 # Image URL to use all building/pushing image targets
 IMG ?= kontext-operator:dev
 ECHO_IMG ?= kontext-echo:dev
-ANTHROPIC_IMG ?= kontext-runtime-anthropic:dev
 REPORTER_IMG ?= kontext-reporter:dev
 REFERENCE_IMG ?= kontext-reference:dev
 STDOUT_FIXTURE_IMG ?= kontext-stdout-fixture:dev
@@ -113,10 +112,6 @@ docker-build: ## Build docker image for the operator.
 .PHONY: docker-build-echo
 docker-build-echo: ## Build docker image for the echo runtime.
 	$(MAKE) docker-build-image IMAGE="$(ECHO_IMG)" DOCKERFILE="runtimes/echo/Dockerfile" CONTEXT="runtimes/echo"
-
-.PHONY: docker-build-anthropic
-docker-build-anthropic: ## Build the unmaintained legacy Python example.
-	$(MAKE) docker-build-image IMAGE="$(ANTHROPIC_IMG)" DOCKERFILE="runtimes/python-anthropic/Dockerfile" CONTEXT="runtimes/python-anthropic"
 
 .PHONY: docker-build-reporter
 docker-build-reporter: ## Build the reusable result reporter image.
