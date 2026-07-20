@@ -1,19 +1,14 @@
 package mcpclient
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os/exec"
-	"regexp"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -21,28 +16,14 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/MFS-code/Kontext/internal/procgroup"
-	"github.com/MFS-code/Kontext/internal/tooloutput"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 const (
-	maxCapturedBytes            = int64(8 << 20)
-	maxHTTPWireBytes            = int64(64 << 20)
-	maxStdioFrameBytes          = int64(64 << 20)
-	maxDiscoveredTools          = 256
-	maxToolDescriptionBytes     = 16 << 10
-	maxToolSchemaBytes          = 256 << 10
-	maxToolDefinitionBytes      = 280 << 10
-	maxTotalToolDefinitionBytes = 4 << 20
-	maxExternalErrorBytes       = int64(4 << 10)
-	maxStderrLineBytes          = 64 << 10
-	httpCloseRequestTimeout     = 2 * time.Second
-	processTerminationGrace     = 500 * time.Millisecond
-	fallbackDescriptionPrefix   = "MCP tool"
+	maxStdioFrameBytes      = int64(64 << 20)
+	processTerminationGrace = 500 * time.Millisecond
 )
-
-var mcpToolNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
 
 type Error struct {
 	Code    string
@@ -74,12 +55,6 @@ type remoteTool struct {
 	name   string
 	server *server
 	schema *jsonschema.Resolved
-}
-
-type frozenTool struct {
-	name       string
-	definition runtimeapi.ToolDefinition
-	schema     *jsonschema.Resolved
 }
 
 type server struct {
@@ -175,11 +150,19 @@ func (manager *Manager) Execute(
 	arguments json.RawMessage,
 ) (Result, error) {
 	if manager == nil {
-		return Result{IsError: true, ErrorCode: "mcp_unavailable", Content: "MCP execution is unavailable"}, nil
+		return Result{
+			IsError:   true,
+			ErrorCode: "mcp_unavailable",
+			Content:   "MCP execution is unavailable",
+		}, nil
 	}
 	selected, exists := manager.tools[name]
 	if !exists {
-		return Result{IsError: true, ErrorCode: "unknown_tool", Content: fmt.Sprintf("tool %q is not available", name)}, nil
+		return Result{
+			IsError:   true,
+			ErrorCode: "unknown_tool",
+			Content:   fmt.Sprintf("tool %q is not available", name),
+		}, nil
 	}
 	if err := validateArguments(selected.name, selected.schema, arguments); err != nil {
 		return Result{
@@ -376,7 +359,7 @@ func (current *server) call(
 		}, nil
 	}
 
-	content, normalizeErr := normalizeResult(response, current.redactor)
+	content, truncated, normalizeErr := normalizeResult(response, current.redactor)
 	if normalizeErr != nil {
 		return Result{
 			IsError:   true,
@@ -384,7 +367,6 @@ func (current *server) call(
 			Content:   normalizeErr.Message,
 		}, nil
 	}
-	content, truncated := tooloutput.Bound(content, maxCapturedBytes)
 	return Result{
 		Content:   content,
 		IsError:   response.IsError,
@@ -451,271 +433,6 @@ func (current *server) terminateCommand(ctx context.Context, command *managedCom
 	)
 }
 
-func discoverTools(
-	ctx context.Context,
-	serverName string,
-	session *mcp.ClientSession,
-	redactor redactor,
-) ([]frozenTool, error) {
-	var discovered []frozenTool
-	seen := make(map[string]struct{})
-	totalDefinitionBytes := 0
-	for tool, err := range session.Tools(ctx, nil) {
-		if err != nil {
-			return nil, fmt.Errorf("discover tools: %w", err)
-		}
-		if len(discovered) >= maxDiscoveredTools {
-			return nil, &Error{
-				Code: "mcp_discovery_limit_exceeded",
-				Message: fmt.Sprintf(
-					"MCP server %q exposes more than %d tools",
-					serverName,
-					maxDiscoveredTools,
-				),
-			}
-		}
-		if tool == nil || !mcpToolNamePattern.MatchString(tool.Name) {
-			return nil, &Error{
-				Code: "mcp_invalid_tool_definition",
-				Message: fmt.Sprintf(
-					"MCP server %q returned a tool name outside the 1..128 [A-Za-z0-9_.-]+ constraint",
-					serverName,
-				),
-			}
-		}
-		if redactor.containsSensitive(tool.Name) {
-			return nil, &Error{
-				Code:    "mcp_invalid_tool_definition",
-				Message: fmt.Sprintf("MCP server %q returned a tool name containing a resolved sensitive value", serverName),
-			}
-		}
-		if _, duplicate := seen[tool.Name]; duplicate {
-			return nil, &Error{
-				Code:    "mcp_invalid_tool_definition",
-				Message: fmt.Sprintf("MCP server %q returned duplicate tool %q", serverName, tool.Name),
-			}
-		}
-		seen[tool.Name] = struct{}{}
-		description := strings.TrimSpace(tool.Description)
-		if description == "" {
-			description = fmt.Sprintf("%s %q from server %q.", fallbackDescriptionPrefix, tool.Name, serverName)
-		}
-		description = redactor.replace(description)
-		if len(description) > maxToolDescriptionBytes {
-			return nil, discoveryLimitError(
-				serverName,
-				tool.Name,
-				"description",
-				len(description),
-				maxToolDescriptionBytes,
-			)
-		}
-		rawSchema, marshalErr := json.Marshal(tool.InputSchema)
-		if marshalErr != nil {
-			return nil, &Error{
-				Code:    "mcp_invalid_tool_definition",
-				Message: fmt.Sprintf("MCP server %q tool %q schema cannot be encoded", serverName, tool.Name),
-			}
-		}
-		if redactor.containsSensitive(string(rawSchema)) {
-			return nil, &Error{
-				Code: "mcp_invalid_tool_definition",
-				Message: fmt.Sprintf(
-					"MCP server %q tool %q schema contains a resolved sensitive value",
-					serverName,
-					tool.Name,
-				),
-			}
-		}
-		if tool.InputSchema != nil && len(rawSchema) > maxToolSchemaBytes {
-			return nil, discoveryLimitError(
-				serverName,
-				tool.Name,
-				"schema",
-				len(rawSchema),
-				maxToolSchemaBytes,
-			)
-		}
-		schema, resolvedSchema, err := normalizeSchema(tool.InputSchema)
-		if err != nil {
-			return nil, &Error{
-				Code:    "mcp_invalid_tool_definition",
-				Message: fmt.Sprintf("MCP server %q tool %q: %v", serverName, tool.Name, err),
-			}
-		}
-		if len(schema) > maxToolSchemaBytes {
-			return nil, discoveryLimitError(
-				serverName,
-				tool.Name,
-				"schema",
-				len(schema),
-				maxToolSchemaBytes,
-			)
-		}
-		definitionBytes := len(tool.Name) + len(description) + len(schema)
-		if definitionBytes > maxToolDefinitionBytes {
-			return nil, discoveryLimitError(
-				serverName,
-				tool.Name,
-				"definition",
-				definitionBytes,
-				maxToolDefinitionBytes,
-			)
-		}
-		totalDefinitionBytes += definitionBytes
-		if totalDefinitionBytes > maxTotalToolDefinitionBytes {
-			return nil, &Error{
-				Code: "mcp_discovery_limit_exceeded",
-				Message: fmt.Sprintf(
-					"MCP server %q tool definitions exceed the %d-byte total limit",
-					serverName,
-					maxTotalToolDefinitionBytes,
-				),
-			}
-		}
-		discovered = append(discovered, frozenTool{
-			name: tool.Name,
-			definition: runtimeapi.ToolDefinition{
-				Name:        tool.Name,
-				Description: description,
-				InputSchema: schema,
-			},
-			schema: resolvedSchema,
-		})
-	}
-	return discovered, nil
-}
-
-func normalizeSchema(schema any) (json.RawMessage, *jsonschema.Resolved, error) {
-	if schema == nil {
-		schema = json.RawMessage(`{"type":"object"}`)
-	}
-	encoded, err := json.Marshal(schema)
-	if err != nil {
-		return nil, nil, fmt.Errorf("input schema cannot be encoded: %w", err)
-	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &object); err != nil || object == nil {
-		return nil, nil, errors.New("input schema must be a top-level JSON object")
-	}
-	var validationSchema jsonschema.Schema
-	if err := json.Unmarshal(encoded, &validationSchema); err != nil {
-		return nil, nil, fmt.Errorf("input schema is invalid: %w", err)
-	}
-	resolved, err := validationSchema.Resolve(nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("input schema is invalid: %w", err)
-	}
-	var compacted bytes.Buffer
-	if err := json.Compact(&compacted, encoded); err != nil {
-		return nil, nil, fmt.Errorf("input schema is malformed: %w", err)
-	}
-	return json.RawMessage(compacted.String()), resolved, nil
-}
-
-func discoveryLimitError(
-	serverName string,
-	toolName string,
-	part string,
-	actual int,
-	limit int,
-) *Error {
-	return &Error{
-		Code: "mcp_discovery_limit_exceeded",
-		Message: fmt.Sprintf(
-			"MCP server %q tool %q %s is %d bytes; limit is %d bytes",
-			serverName,
-			toolName,
-			part,
-			actual,
-			limit,
-		),
-	}
-}
-
-type resultError struct {
-	Code    string
-	Message string
-}
-
-func normalizeResult(
-	response *mcp.CallToolResult,
-	redactor redactor,
-) (string, *resultError) {
-	if response == nil {
-		return "", &resultError{Code: "mcp_invalid_response", Message: "MCP server returned an empty tool response"}
-	}
-	if response.StructuredContent != nil {
-		encoded, err := json.Marshal(response.StructuredContent)
-		if err != nil {
-			return "", &resultError{Code: "mcp_invalid_response", Message: "MCP structured content could not be encoded"}
-		}
-		var object map[string]any
-		decoder := json.NewDecoder(bytes.NewReader(encoded))
-		decoder.UseNumber()
-		if err := decoder.Decode(&object); err != nil || object == nil {
-			return "", &resultError{Code: "mcp_invalid_response", Message: "MCP structured content must be a JSON object"}
-		}
-		redacted := redactStructuredValue(object, redactor)
-		encoded, err = json.Marshal(redacted)
-		if err != nil {
-			return "", &resultError{Code: "mcp_invalid_response", Message: "MCP structured content could not be normalized"}
-		}
-		return string(encoded), nil
-	}
-	for _, item := range response.Content {
-		if _, text := item.(*mcp.TextContent); !text {
-			return "", &resultError{
-				Code:    "mcp_unsupported_content",
-				Message: "MCP tool returned unsupported non-text content",
-			}
-		}
-	}
-	text := make([]string, 0, len(response.Content))
-	for _, item := range response.Content {
-		text = append(text, redactor.replace(item.(*mcp.TextContent).Text))
-	}
-	return strings.Join(text, "\n"), nil
-}
-
-func redactStructuredValue(value any, redactor redactor) any {
-	switch typed := value.(type) {
-	case string:
-		return redactor.replace(typed)
-	case []any:
-		for index := range typed {
-			typed[index] = redactStructuredValue(typed[index], redactor)
-		}
-		return typed
-	case map[string]any:
-		for key, child := range typed {
-			typed[key] = redactStructuredValue(child, redactor)
-		}
-		return typed
-	default:
-		return value
-	}
-}
-
-func sameTools(left []frozenTool, right []frozenTool) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	rightByName := make(map[string]runtimeapi.ToolDefinition, len(right))
-	for _, tool := range right {
-		rightByName[tool.name] = tool.definition
-	}
-	for _, tool := range left {
-		candidate, exists := rightByName[tool.name]
-		if !exists ||
-			tool.definition.Description != candidate.Description ||
-			string(tool.definition.InputSchema) != string(candidate.InputSchema) {
-			return false
-		}
-	}
-	return true
-}
-
 func operationContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if timeout <= 0 {
 		return context.WithCancel(parent)
@@ -740,263 +457,12 @@ func validateArguments(
 	return nil
 }
 
-type boundedHTTPTransport struct {
-	base           http.RoundTripper
-	endpointOrigin string
-	headers        map[string]string
-	maxWireBytes   int64
-}
-
-var errMCPHTTPWireLimit = errors.New("mcp_http_wire_limit_exceeded")
-
-func (transport *boundedHTTPTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	cloned := request.Clone(request.Context())
-	cloned.Header = request.Header.Clone()
-	if origin(cloned.URL) == transport.endpointOrigin {
-		for name, value := range transport.headers {
-			cloned.Header.Set(name, value)
-		}
-	} else {
-		for name := range transport.headers {
-			cloned.Header.Del(name)
-		}
-	}
-	var cancel context.CancelFunc
-	if cloned.Method == http.MethodDelete {
-		closeCtx, closeCancel := context.WithTimeout(cloned.Context(), httpCloseRequestTimeout)
-		cancel = closeCancel
-		cloned = cloned.Clone(closeCtx)
-	}
-	response, err := transport.base.RoundTrip(cloned)
-	if err != nil {
-		if cancel != nil {
-			cancel()
-		}
-		return nil, err
-	}
-	wireLimit := transport.maxWireBytes
-	if wireLimit <= 0 {
-		wireLimit = maxHTTPWireBytes
-	}
-	if response.ContentLength > wireLimit {
-		_ = response.Body.Close()
-		if cancel != nil {
-			cancel()
-		}
-		return nil, fmt.Errorf(
-			"%w: MCP HTTP response Content-Length exceeds %d-byte wire limit",
-			errMCPHTTPWireLimit,
-			wireLimit,
-		)
-	}
-	response.Body = &countingReadCloser{
-		body:   response.Body,
-		limit:  wireLimit,
-		cancel: cancel,
-	}
-	return response, nil
-}
-
-type countingReadCloser struct {
-	body      io.ReadCloser
-	limit     int64
-	read      int64
-	exceeded  bool
-	cancel    context.CancelFunc
-	closeOnce sync.Once
-	closeErr  error
-}
-
-func (reader *countingReadCloser) Read(buffer []byte) (int, error) {
-	if reader.exceeded {
-		return 0, errMCPHTTPWireLimit
-	}
-	if len(buffer) == 0 {
-		return 0, nil
-	}
-	remaining := reader.limit - reader.read
-	maximumRead := int64(len(buffer))
-	if maximumRead > remaining+1 {
-		maximumRead = remaining + 1
-	}
-	if maximumRead < 1 {
-		maximumRead = 1
-	}
-	count, err := reader.body.Read(buffer[:maximumRead])
-	if int64(count) > remaining {
-		allowed := int(max(remaining, 0))
-		reader.read += int64(allowed)
-		reader.exceeded = true
-		return allowed, errMCPHTTPWireLimit
-	}
-	reader.read += int64(count)
-	return count, err
-}
-
-func (reader *countingReadCloser) Close() error {
-	reader.closeOnce.Do(func() {
-		reader.closeErr = reader.body.Close()
-		if reader.cancel != nil {
-			reader.cancel()
-		}
-	})
-	return reader.closeErr
-}
-
-func sameOriginRedirectPolicy(endpoint *url.URL) func(*http.Request, []*http.Request) error {
-	expectedOrigin := origin(endpoint)
-	return func(request *http.Request, via []*http.Request) error {
-		if origin(request.URL) != expectedOrigin {
-			return errors.New("MCP cross-origin redirect is not allowed")
-		}
-		if len(via) >= 10 {
-			return errors.New("MCP redirect limit exceeded")
-		}
-		return nil
-	}
-}
-
-func origin(value *url.URL) string {
-	if value == nil {
-		return ""
-	}
-	scheme := strings.ToLower(value.Scheme)
-	port := value.Port()
-	if port == "" {
-		switch scheme {
-		case "http":
-			port = "80"
-		case "https":
-			port = "443"
-		}
-	}
-	host := strings.ToLower(value.Hostname())
-	if port == "" {
-		return scheme + "://" + host
-	}
-	return scheme + "://" + net.JoinHostPort(host, port)
-}
-
 func cloneStrings(values map[string]string) map[string]string {
 	cloned := make(map[string]string, len(values))
 	for name, value := range values {
 		cloned[name] = value
 	}
 	return cloned
-}
-
-type redactor struct {
-	values []string
-}
-
-func newRedactor(values []string) redactor {
-	cloned := append([]string(nil), values...)
-	sort.Slice(cloned, func(left int, right int) bool {
-		return len(cloned[left]) > len(cloned[right])
-	})
-	return redactor{values: cloned}
-}
-
-func (redactor redactor) clean(value string) string {
-	return tooloutput.TruncateUTF8(redactor.replace(value), maxExternalErrorBytes)
-}
-
-func (redactor redactor) replace(value string) string {
-	for _, sensitive := range redactor.values {
-		if sensitive != "" {
-			value = strings.ReplaceAll(value, sensitive, "[REDACTED]")
-		}
-	}
-	return value
-}
-
-func (redactor redactor) containsSensitive(value string) bool {
-	for _, sensitive := range redactor.values {
-		if sensitive == "" {
-			continue
-		}
-		if strings.Contains(value, sensitive) {
-			return true
-		}
-		encoded, _ := json.Marshal(sensitive)
-		escaped := strings.Trim(string(encoded), `"`)
-		if escaped != sensitive && strings.Contains(value, escaped) {
-			return true
-		}
-	}
-	return false
-}
-
-func (current *server) safeMessage(value string) string {
-	return current.redactor.clean(value)
-}
-
-func (current *server) safeError(code string, prefix string, err error) *Error {
-	message := prefix
-	if err != nil {
-		message += ": " + err.Error()
-	}
-	return &Error{Code: code, Message: current.safeMessage(message)}
-}
-
-type redactingLineWriter struct {
-	mu         sync.Mutex
-	sink       io.Writer
-	redactor   redactor
-	buffer     []byte
-	discarding bool
-}
-
-func newRedactingLineWriter(sink io.Writer, redactor redactor) io.Writer {
-	return &redactingLineWriter{sink: sink, redactor: redactor}
-}
-
-func (writer *redactingLineWriter) Write(data []byte) (int, error) {
-	writer.mu.Lock()
-	defer writer.mu.Unlock()
-	originalLength := len(data)
-	for len(data) > 0 {
-		newline := bytes.IndexByte(data, '\n')
-		var part []byte
-		if newline < 0 {
-			part = data
-			data = nil
-		} else {
-			part = data[:newline+1]
-			data = data[newline+1:]
-		}
-		if writer.discarding {
-			if newline >= 0 {
-				writer.discarding = false
-			}
-			continue
-		}
-		if len(writer.buffer)+len(part) > maxStderrLineBytes {
-			writer.buffer = writer.buffer[:0]
-			writer.discarding = newline < 0
-			_, _ = io.WriteString(writer.sink, "MCP stderr line omitted: too long\n")
-			continue
-		}
-		writer.buffer = append(writer.buffer, part...)
-		if newline >= 0 {
-			_, _ = io.WriteString(writer.sink, writer.redactor.clean(string(writer.buffer)))
-			writer.buffer = writer.buffer[:0]
-		}
-	}
-	return originalLength, nil
-}
-
-func sortedEnvironment(values map[string]string) []string {
-	names := make([]string, 0, len(values))
-	for name := range values {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	environment := make([]string, 0, len(names))
-	for _, name := range names {
-		environment = append(environment, name+"="+values[name])
-	}
-	return environment
 }
 
 func errorCode(isError bool) string {

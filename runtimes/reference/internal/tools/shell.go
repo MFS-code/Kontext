@@ -11,11 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/MFS-code/Kontext/internal/environment"
 	"github.com/MFS-code/Kontext/internal/procgroup"
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
@@ -205,16 +205,7 @@ func filteredEnvironment(requested map[string]string) ([]string, error) {
 		}
 		values[name] = value
 	}
-	names := make([]string, 0, len(values))
-	for name := range values {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	environment := make([]string, 0, len(names))
-	for _, name := range names {
-		environment = append(environment, name+"="+values[name])
-	}
-	return environment, nil
+	return environment.Sorted(values), nil
 }
 
 func sensitiveEnvironmentName(name string) bool {

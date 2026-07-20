@@ -79,11 +79,10 @@ func TestEmitFailureBuildsValidatedFailureEnvelope(t *testing.T) {
 	if !found {
 		t.Fatalf("failure envelope not found in %q", output.String())
 	}
-	parsed, err := resultv1alpha1.Parse(string(payload))
-	if err != nil || parsed.Envelope == nil {
-		t.Fatalf("parse failure envelope: parsed=%#v err=%v", parsed, err)
+	envelope, err := resultv1alpha1.ParseVersioned(string(payload))
+	if err != nil {
+		t.Fatalf("parse failure envelope: %v", err)
 	}
-	envelope := *parsed.Envelope
 	if err := envelope.Validate(); err != nil {
 		t.Fatalf("validate envelope: %v", err)
 	}
