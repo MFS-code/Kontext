@@ -40,6 +40,12 @@ to estimate ordinary variance; then compare another model with the same prompt,
 limits, tools, context, and grader. Retain normalized usage and duration, and
 compare against a deterministic Job/script baseline for the same task.
 
+Declare cross-case checks under `spec.assertions`. `fieldsEqual` names at least
+two case records and the fields that must match. `forbiddenMarkers` names
+markers and record fields to scan, with an optional case list. These checks run
+once after record collection, appear separately in the JSON summary, and make
+the CLI fail without adding synthetic failures to individual case grades.
+
 The keyless suite at `evals/suites/keyless.yaml` covers:
 
 - one goal through two opaque fake model IDs;
@@ -64,13 +70,15 @@ external provider endpoint.
 ## Records and privacy
 
 Eval records use `kontext.dev/eval/v1alpha1`. They may contain status/model
-output only when a grader explicitly requests it. They do not retain
-`status.message`; failure evidence is the phase, projected envelope error code,
-grades, and collection errors. Envelope records are projections limited to the
-requested outcome, error code, model, turn count, or tool-call count. The runner
-never automatically reads Pod environments, Secret values, raw logs, artifacts,
-extensions, request IDs, or private reasoning. Optional usage retains missing
-versus measured-zero semantics.
+output only when a grader or suite assertion explicitly requests it. They do
+not retain `status.message`; failure evidence is the phase, projected envelope
+error code, grades, collection errors, and separate suite assertion results.
+Envelope records are projections limited to the requested outcome, error code,
+model, turn count, or tool-call count. Suite assertions scan those retained
+projections; they do not expand envelope or event collection into raw data. The
+runner never automatically reads Pod environments, Secret values, raw logs,
+artifacts, extensions, request IDs, or private reasoning. Optional usage
+retains missing versus measured-zero semantics.
 
 The dispatch-only provider workflow writes a separate bounded
 `ProviderAcceptanceRecord` with provider, opaque model, scenario, commit/run

@@ -20,22 +20,49 @@ func WriteOutputs(recordPath, summaryPath string, records []Record, summary Summ
 	return nil
 }
 
-func BuildSummary(suite string, startedAt, completedAt time.Time, records []Record, recordPath string) Summary {
+func BuildSummary(
+	suite string,
+	expectedTotal int,
+	startedAt, completedAt time.Time,
+	records []Record,
+	assertions []SuiteAssertionResult,
+	recordPath string,
+) Summary {
 	summary := Summary{
-		APIVersion:  APIVersion,
-		Suite:       suite,
-		StartedAt:   startedAt,
-		CompletedAt: completedAt,
-		Total:       len(records),
-		RecordPath:  recordPath,
+		APIVersion:    APIVersion,
+		Suite:         suite,
+		StartedAt:     startedAt,
+		CompletedAt:   completedAt,
+		ExpectedTotal: expectedTotal,
+		Total:         len(records),
+		Assertions:    assertions,
+		RecordPath:    recordPath,
 	}
-	for _, record := range records {
+	for index, record := range records {
 		if record.Pass {
 			summary.Passed++
 		} else {
 			summary.Failed++
 		}
+		if len(record.CollectionErrors) > 0 {
+			summary.CollectionErrorCount += len(record.CollectionErrors)
+			caseID := record.CaseID
+			if caseID == "" {
+				caseID = fmt.Sprintf("record[%d]", index)
+			}
+			summary.CollectionErrorCases = append(summary.CollectionErrorCases, caseID)
+		}
 	}
+	for _, assertion := range assertions {
+		if !assertion.Pass {
+			summary.AssertionFailures++
+		}
+	}
+	summary.Pass = summary.Total == summary.ExpectedTotal &&
+		summary.Failed == 0 &&
+		summary.Passed == summary.Total &&
+		summary.CollectionErrorCount == 0 &&
+		summary.AssertionFailures == 0
 	return summary
 }
 

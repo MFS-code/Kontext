@@ -7,6 +7,22 @@ spec:
     namespace: kontext-eval
     timeout: 45s
     runtimeImage: kontext-reference:dev
+  assertions:
+    - type: fieldsEqual
+      records: [same-goal-model-a, same-goal-model-b]
+      fields: [statusResult]
+    - type: forbiddenMarkers
+      fields:
+        - statusResult
+        - statusOutput
+        - envelope
+        - events
+        - grades
+        - judge
+        - collectionErrors
+      markers:
+        - keyless-placeholder
+        - fixture process is exiting
   cases:
     - id: same-goal-model-a
       description: Same deterministic goal through the first opaque model identifier

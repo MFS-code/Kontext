@@ -75,6 +75,11 @@ func TestRepositoryKeylessSuiteParsesAndKeepsPerCaseImages(t *testing.T) {
 	if len(suite.Spec.Cases) != 10 {
 		t.Fatalf("expected 10 keyless cases, got %d", len(suite.Spec.Cases))
 	}
+	if len(suite.Spec.Assertions) != 2 ||
+		suite.Spec.Assertions[0].Type != SuiteAssertionFieldsEqual ||
+		suite.Spec.Assertions[1].Type != SuiteAssertionForbiddenMarkers {
+		t.Fatalf("keyless suite assertions changed: %#v", suite.Spec.Assertions)
+	}
 
 	var availableNotUsed, crash *Case
 	for index := range suite.Spec.Cases {

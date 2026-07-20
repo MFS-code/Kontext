@@ -167,6 +167,26 @@ func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Re
 			now,
 		)
 	}
+	if err := requirementsForSuiteAssertions(
+		suite.Spec.Assertions,
+		item.ID,
+		&requirements,
+	); err != nil {
+		record.CollectionErrors = append(
+			record.CollectionErrors,
+			fmt.Sprintf("resolve suite assertion requirements: %v", err),
+		)
+		return runner.finishRecord(
+			ctx,
+			&record,
+			item,
+			requirements,
+			nil,
+			nil,
+			false,
+			now,
+		)
+	}
 	run := newAgentRun(name, namespace, item.AgentRun, ownershipLabels)
 	caseCtx, cancel := context.WithTimeout(ctx, item.Timeout.Duration)
 	defer cancel()
@@ -668,16 +688,4 @@ func labelValue(value string) string {
 		value = value[:63]
 	}
 	return value
-}
-
-func RecordsPass(records []Record, expected int) bool {
-	if len(records) != expected {
-		return false
-	}
-	for _, record := range records {
-		if !record.Pass {
-			return false
-		}
-	}
-	return true
 }

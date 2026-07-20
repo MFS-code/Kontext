@@ -43,6 +43,13 @@ spec:
     namespace: kontext-system
     timeout: 2m
     runtimeImage: kontext-reference:dev
+  assertions:
+    - type: fieldsEqual
+      records: [fake-success-model-a, fake-success-model-b]
+      fields: [statusResult]
+    - type: forbiddenMarkers
+      fields: [statusResult, statusOutput, collectionErrors]
+      markers: [credential-placeholder]
   cases:
     - id: fake-success-model-a
       description: Deterministic reference-runtime success
@@ -82,19 +89,32 @@ Other deterministic graders are `envelopeErrorCode`, `envelopeTurns`,
 Status-result matching supports exactly one of `exact`, `contains`, or
 `notContains`.
 
-The JSONL record contains only grader-requested status/model output, projected
-envelope fields, collection errors, and bounded event metadata rather than raw
-logs or `status.message`. The runner never automatically reads Pod environments
-or Secret values. Optional usage fields retain the distinction between missing
-and measured zero. A summary JSON file reports pass/fail totals and the record
-path.
+Suite assertions run after all case records exist and are separate from
+per-record graders. `fieldsEqual` compares each declared record field across at
+least two named cases. `forbiddenMarkers` scans the declared fields on every
+record, or only its optional `records` list. Supported fields are
+`terminalPhase`, `statusResult`, `statusOutput`, `statusUsage`, `podExitCode`,
+`envelope`, `events`, `grades`, `judge`, `collectionErrors`, and
+`durationMillis`. Unknown assertion types, case IDs, and fields fail suite
+validation.
 
-Artifact collection is grader-driven. Only fields named by deterministic
-graders are retained in a record. Phase and duration graders do not require a
-Pod that the wallclock controller has already deleted. Envelope graders parse
-the runtime container's authoritative termination message, event graders read
-only a bounded log tail, and exit-code graders require a terminated Pod.
-Missing or incomplete required artifacts fail the case.
+The JSONL record contains only explicitly requested status/model output,
+projected envelope fields, collection errors, and bounded event metadata rather
+than raw logs or `status.message`. The runner never automatically reads Pod
+environments or Secret values. Optional usage fields retain the distinction
+between missing and measured zero. A summary JSON file reports expected and
+actual case totals, collection-error counts and affected cases, each suite
+assertion result, an overall pass flag, and the record path.
+
+Artifact collection remains least-privilege. Suite assertions can request
+`statusResult`, `statusOutput`, `statusUsage`, or `podExitCode` for their
+targeted records. Their `envelope` and `events` fields scan only projections
+already requested by per-record graders; they never trigger full envelope or
+raw-log capture. Phase and duration graders do not require a Pod that the
+wallclock controller has already deleted. Envelope graders parse the runtime
+container's authoritative termination message, event graders read only a
+bounded log tail, and exit-code graders require a terminated Pod. Missing or
+incomplete required artifacts fail the case.
 
 `scripts/eval-kind.sh` runs the complete keyless suite against the existing
 kind cluster, validates the records, checks controller timeout cleanup, and

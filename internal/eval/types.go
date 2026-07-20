@@ -52,8 +52,9 @@ type Metadata struct {
 }
 
 type SuiteSpec struct {
-	Defaults SuiteDefaults `json:"defaults"`
-	Cases    []Case        `json:"cases"`
+	Defaults   SuiteDefaults    `json:"defaults"`
+	Assertions []SuiteAssertion `json:"assertions,omitempty"`
+	Cases      []Case           `json:"cases"`
 }
 
 type SuiteDefaults struct {
@@ -68,6 +69,28 @@ type Case struct {
 	AgentRun    kontextv1alpha1.AgentRunSpec `json:"agentRun"`
 	Timeout     *Duration                    `json:"timeout,omitempty"`
 	Graders     []Grader                     `json:"graders"`
+}
+
+type SuiteAssertionType string
+
+const (
+	SuiteAssertionFieldsEqual      SuiteAssertionType = "fieldsEqual"
+	SuiteAssertionForbiddenMarkers SuiteAssertionType = "forbiddenMarkers"
+)
+
+type SuiteAssertion struct {
+	Type    SuiteAssertionType `json:"type"`
+	Records []string           `json:"records,omitempty"`
+	Fields  []string           `json:"fields"`
+	Markers []string           `json:"markers,omitempty"`
+}
+
+type SuiteAssertionResult struct {
+	Type    SuiteAssertionType `json:"type"`
+	Records []string           `json:"records,omitempty"`
+	Fields  []string           `json:"fields"`
+	Pass    bool               `json:"pass"`
+	Message string             `json:"message"`
 }
 
 type GraderType string
@@ -224,14 +247,20 @@ type Record struct {
 }
 
 type Summary struct {
-	APIVersion  string    `json:"apiVersion"`
-	Suite       string    `json:"suite"`
-	StartedAt   time.Time `json:"startedAt"`
-	CompletedAt time.Time `json:"completedAt"`
-	Total       int       `json:"total"`
-	Passed      int       `json:"passed"`
-	Failed      int       `json:"failed"`
-	RecordPath  string    `json:"recordPath"`
+	APIVersion           string                 `json:"apiVersion"`
+	Suite                string                 `json:"suite"`
+	StartedAt            time.Time              `json:"startedAt"`
+	CompletedAt          time.Time              `json:"completedAt"`
+	ExpectedTotal        int                    `json:"expectedTotal"`
+	Total                int                    `json:"total"`
+	Passed               int                    `json:"passed"`
+	Failed               int                    `json:"failed"`
+	CollectionErrorCount int                    `json:"collectionErrorCount"`
+	CollectionErrorCases []string               `json:"collectionErrorCases,omitempty"`
+	Assertions           []SuiteAssertionResult `json:"assertions,omitempty"`
+	AssertionFailures    int                    `json:"assertionFailures"`
+	Pass                 bool                   `json:"pass"`
+	RecordPath           string                 `json:"recordPath"`
 }
 
 func podExitCode(pod *corev1.Pod) *int32 {
