@@ -76,6 +76,7 @@ func parseConfig(args []string, getenv func(string) string) (Config, error) {
 
 func parseCaptureFormat(value string) (CaptureFormat, error) {
 	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "_", "-"))
+	// Unhyphenated aliases accept CRD enum values used directly; the controller passes hyphenated forms.
 	switch normalized {
 	case "lastline", string(CaptureFormatLastLine):
 		return CaptureFormatLastLine, nil

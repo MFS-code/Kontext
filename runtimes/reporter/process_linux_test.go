@@ -4,7 +4,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"testing"
 )
 
@@ -19,7 +18,6 @@ fi
 `
 	var stderr bytes.Buffer
 	result, err := runChild(
-		context.Background(),
 		[]string{"sh", "-c", script},
 		&bytes.Buffer{},
 		&stderr,

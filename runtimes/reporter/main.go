@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -46,5 +45,5 @@ func execute(
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(signals)
 
-	return runReporter(context.Background(), config, stdout, stderr, signals)
+	return runReporter(config, stdout, stderr, signals)
 }
