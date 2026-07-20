@@ -32,7 +32,7 @@ func startCommandTransport(
 	frameLimit int64,
 ) (mcp.Transport, *managedCommand, error) {
 	command := exec.Command(serverConfig.Command, serverConfig.Args...)
-	command.Env = sortedEnvironment(serverConfig.Env)
+	command.Env = environment.Sorted(serverConfig.Env)
 	command.Stderr = newRedactingLineWriter(stderr, redactor)
 	procgroup.Prepare(command)
 
@@ -165,8 +165,4 @@ func (reader *lineValidatingReadCloser) Close() error {
 		reader.closeErr = reader.closer.Close()
 	})
 	return reader.closeErr
-}
-
-func sortedEnvironment(values map[string]string) []string {
-	return environment.Sorted(values)
 }

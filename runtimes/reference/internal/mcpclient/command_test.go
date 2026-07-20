@@ -3,22 +3,9 @@ package mcpclient
 import (
 	"errors"
 	"io"
-	"slices"
 	"strings"
 	"testing"
 )
-
-func TestSortedEnvironmentOrdersNames(t *testing.T) {
-	got := sortedEnvironment(map[string]string{
-		"ZED":    "last",
-		"ALPHA":  "first",
-		"MIDDLE": "middle",
-	})
-	want := []string{"ALPHA=first", "MIDDLE=middle", "ZED=last"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("environment = %#v, want %#v", got, want)
-	}
-}
 
 func TestLineValidatingReaderServesMultipleValidatedFrames(t *testing.T) {
 	const input = "{\"first\":1}\n\n{\"second\":2}"
