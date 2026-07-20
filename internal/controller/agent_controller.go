@@ -15,12 +15,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
-	"github.com/kontext-dev/kontext/internal/conditions"
-	"github.com/kontext-dev/kontext/internal/podbuilder"
-	"github.com/kontext-dev/kontext/internal/runtimepolicy"
-	"github.com/kontext-dev/kontext/internal/status"
-	"github.com/kontext-dev/kontext/internal/util"
+	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	"github.com/MFS-code/Kontext/internal/conditions"
+	"github.com/MFS-code/Kontext/internal/podbuilder"
+	"github.com/MFS-code/Kontext/internal/runtimepolicy"
+	"github.com/MFS-code/Kontext/internal/status"
+	"github.com/MFS-code/Kontext/internal/util"
 )
 
 const (

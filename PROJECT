@@ -2,7 +2,7 @@ domain: kontext.dev
 layout:
 - go.kubebuilder.io/v4
 projectName: kontext
-repo: github.com/kontext-dev/kontext
+repo: github.com/MFS-code/Kontext
 resources:
 - api:
     crdVersion: v1
@@ -11,7 +11,7 @@ resources:
   domain: kontext.dev
   group: kontext
   kind: Agent
-  path: github.com/kontext-dev/kontext/api/v1alpha1
+  path: github.com/MFS-code/Kontext/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -20,6 +20,6 @@ resources:
   domain: kontext.dev
   group: kontext
   kind: AgentRun
-  path: github.com/kontext-dev/kontext/api/v1alpha1
+  path: github.com/MFS-code/Kontext/api/v1alpha1
   version: v1alpha1
 version: "3"

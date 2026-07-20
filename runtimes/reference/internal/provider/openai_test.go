@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/provider"
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/provider"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 func TestOpenAICompletesAgainstCompatibleBaseURL(t *testing.T) {

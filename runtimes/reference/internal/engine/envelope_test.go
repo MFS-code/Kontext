@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/engine"
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/engine"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 func TestSuccessPreservesStructuredUsageAndOpaqueModel(t *testing.T) {

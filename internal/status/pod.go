@@ -7,9 +7,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
-	"github.com/kontext-dev/kontext/internal/podbuilder"
-	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
+	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	"github.com/MFS-code/Kontext/internal/podbuilder"
+	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 )
 
 // PodObservation summarizes a Pod for AgentRun reconciliation.

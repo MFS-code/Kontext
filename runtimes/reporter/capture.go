@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 
-	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
+	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 )
 
 type CapturedResult struct {

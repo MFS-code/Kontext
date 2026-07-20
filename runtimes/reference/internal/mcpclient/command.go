@@ -12,7 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
 )
 
 var errMCPStdioFrameLimit = errors.New("mcp_stdio_frame_limit_exceeded")

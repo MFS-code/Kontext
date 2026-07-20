@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "${ROOT_DIR}/scripts/lib/common.sh"
 METADATA_FILE="${1:-}"
 
 need() {
@@ -53,16 +55,25 @@ image_ref() {
     "${METADATA_FILE}"
 }
 
+validate_image_ref() {
+  local name="$1"
+  local package="$2"
+  local reference="$3"
+  local expected_prefix
+  local digest
+
+  expected_prefix="$(kontext_image "${package}")@sha256:"
+  digest="${reference#"${expected_prefix}"}"
+  if [[ "${reference}" != "${expected_prefix}"* || ! "${digest}" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "invalid ${name} image reference: ${reference}" >&2
+    exit 1
+  fi
+}
+
 operator_image="$(image_ref operator)"
 reporter_image="$(image_ref reporter)"
-if [[ ! "${operator_image}" =~ ^ghcr\.io/mfs-code/kontext-operator@sha256:[0-9a-f]{64}$ ]]; then
-  echo "invalid operator image reference: ${operator_image}" >&2
-  exit 1
-fi
-if [[ ! "${reporter_image}" =~ ^ghcr\.io/mfs-code/kontext-reporter@sha256:[0-9a-f]{64}$ ]]; then
-  echo "invalid reporter image reference: ${reporter_image}" >&2
-  exit 1
-fi
+validate_image_ref operator kontext-operator "${operator_image}"
+validate_image_ref reporter kontext-reporter "${reporter_image}"
 
 overlay_dir="$(mktemp -d "${ROOT_DIR}/config/overlays/.release.XXXXXX")"
 cleanup() {

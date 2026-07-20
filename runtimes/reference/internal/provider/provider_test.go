@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/provider"
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/provider"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 func TestResolveSelectsFakeProvider(t *testing.T) {

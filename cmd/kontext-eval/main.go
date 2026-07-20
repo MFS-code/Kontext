@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/kontext-dev/kontext/internal/eval"
+	"github.com/MFS-code/Kontext/internal/eval"
 )
 
 func main() {

@@ -3,8 +3,8 @@ package runtimepolicy_test
 import (
 	"testing"
 
-	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
-	"github.com/kontext-dev/kontext/internal/runtimepolicy"
+	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	"github.com/MFS-code/Kontext/internal/runtimepolicy"
 )
 
 func TestNormalizeProviderDefaults(t *testing.T) {

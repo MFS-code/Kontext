@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 func TestValidateResponse(t *testing.T) {

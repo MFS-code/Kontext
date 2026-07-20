@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
-	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
+	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 type Metadata struct {
