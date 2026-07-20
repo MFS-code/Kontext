@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "${ROOT_DIR}/scripts/lib/common.sh"
 EXAMPLES_DIR="${ROOT_DIR}/deploy/examples/v1alpha1"
 EXAMPLE_ARG="${1:-}"
 if [[ -n "${EXAMPLE_ARG}" && "${EXAMPLE_ARG}" != */* ]]; then
@@ -91,17 +93,17 @@ if [[ -n "${KONTEXT_RELEASE_TAG:-}" ]]; then
   fi
 
   append_image \
-    "ghcr.io/mfs-code/kontext-echo" \
-    "ghcr.io/mfs-code/kontext-echo:${KONTEXT_RELEASE_TAG}"
+    "$(kontext_image kontext-echo)" \
+    "$(kontext_image kontext-echo):${KONTEXT_RELEASE_TAG}"
   append_image \
-    "ghcr.io/mfs-code/kontext-reference" \
-    "ghcr.io/mfs-code/kontext-reference:${KONTEXT_RELEASE_TAG}"
+    "$(kontext_image kontext-reference)" \
+    "$(kontext_image kontext-reference):${KONTEXT_RELEASE_TAG}"
 else
   append_image \
-    "ghcr.io/mfs-code/kontext-echo" \
+    "$(kontext_image kontext-echo)" \
     "${KONTEXT_ECHO_IMAGE:-kontext-echo:dev}"
   append_image \
-    "ghcr.io/mfs-code/kontext-reference" \
+    "$(kontext_image kontext-reference)" \
     "${KONTEXT_REFERENCE_IMAGE:-kontext-reference:dev}"
   append_image \
     "busybox" \

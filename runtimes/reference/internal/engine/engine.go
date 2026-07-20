@@ -9,12 +9,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/events"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/provider"
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/tools"
+	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/events"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/provider"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/tools"
 )
 
 // Emitter publishes best-effort observability events. The result envelope is

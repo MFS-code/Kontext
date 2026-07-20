@@ -13,10 +13,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
-	"github.com/kontext-dev/kontext/internal/conditions"
-	"github.com/kontext-dev/kontext/internal/controller"
-	"github.com/kontext-dev/kontext/internal/podbuilder"
+	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	"github.com/MFS-code/Kontext/internal/conditions"
+	"github.com/MFS-code/Kontext/internal/controller"
+	"github.com/MFS-code/Kontext/internal/podbuilder"
 )
 
 func TestAgentReconcilerMintsServiceRun(t *testing.T) {

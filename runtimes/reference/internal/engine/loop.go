@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/conversation"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/events"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/provider"
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/conversation"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/events"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/provider"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 type loopState struct {

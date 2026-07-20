@@ -7,8 +7,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
-	"github.com/kontext-dev/kontext/internal/podbuilder"
+	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	"github.com/MFS-code/Kontext/internal/podbuilder"
 )
 
 func TestBuildPodInjectsKontextEnv(t *testing.T) {

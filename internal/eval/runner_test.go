@@ -20,9 +20,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
-	eventv1alpha1 "github.com/kontext-dev/kontext/pkg/event/v1alpha1"
-	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
+	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	eventv1alpha1 "github.com/MFS-code/Kontext/pkg/event/v1alpha1"
+	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 )
 
 func TestRunnerCollectsGradesJudgesThenCleansOnlyCreatedRun(t *testing.T) {

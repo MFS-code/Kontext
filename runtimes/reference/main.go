@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	resultv1alpha1 "github.com/kontext-dev/kontext/pkg/result/v1alpha1"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/engine"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/events"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/tools"
+	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/engine"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/events"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/tools"
 )
 
 func main() {

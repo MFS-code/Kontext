@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
+	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 )
 
 func TestSetStatusConditionsPreservesTransitionTimeForReasonAndMessageChanges(t *testing.T) {

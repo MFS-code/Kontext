@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/tools"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/tools"
 )
 
 func TestReadKnowledgeReadsAndBoundsMountedFile(t *testing.T) {

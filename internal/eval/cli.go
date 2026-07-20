@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
+	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 )
 
 func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/events"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/events"
 )
 
 func TestEmitterWritesOneVersionedJSONEventPerLine(t *testing.T) {

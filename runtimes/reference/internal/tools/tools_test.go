@@ -11,9 +11,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/tools"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/tools"
 )
 
 func TestRegistryExposesOnlyAllowedTools(t *testing.T) {

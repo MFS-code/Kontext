@@ -18,7 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tag.outputs.version }}
+      github_owner: ${{ steps.tag.outputs.github_owner }}
+      registry: ${{ steps.tag.outputs.registry }}
       registry_owner: ${{ steps.tag.outputs.registry_owner }}
+      repository: ${{ steps.tag.outputs.repository }}
     steps:
       - name: Check out repository history
         uses: actions/checkout@v4
@@ -31,6 +34,12 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          source scripts/lib/common.sh
+          if [[ "${GITHUB_REPOSITORY}" != "${KONTEXT_GITHUB_REPOSITORY}" ]]; then
+            echo "::error::release workflow must run from ${KONTEXT_GITHUB_REPOSITORY}, got ${GITHUB_REPOSITORY}"
+            exit 1
+          fi
+
           version="${GITHUB_REF_NAME}"
           core='v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
           prerelease_id='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
@@ -49,20 +58,23 @@ jobs:
             echo "::error::release tag ${version} does not point to a commit on ${DEFAULT_BRANCH}"
             exit 1
           fi
-          if gh release view "${version}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          if gh release view "${version}" --repo "${KONTEXT_GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo "::error::release ${version} already exists"
             exit 1
           fi
 
           echo "version=${version}" >>"${GITHUB_OUTPUT}"
-          echo "registry_owner=${GITHUB_REPOSITORY_OWNER,,}" >>"${GITHUB_OUTPUT}"
+          echo "github_owner=${KONTEXT_GITHUB_OWNER}" >>"${GITHUB_OUTPUT}"
+          echo "registry=${KONTEXT_REGISTRY}" >>"${GITHUB_OUTPUT}"
+          echo "registry_owner=${KONTEXT_REGISTRY_OWNER}" >>"${GITHUB_OUTPUT}"
+          echo "repository=${KONTEXT_GITHUB_REPOSITORY}" >>"${GITHUB_OUTPUT}"
 
   images:
     name: Publish ${{ matrix.name }}
     needs: validate
     runs-on: ubuntu-latest
     env:
-      REGISTRY: ghcr.io
+      REGISTRY: ${{ needs.validate.outputs.registry }}
       REGISTRY_OWNER: ${{ needs.validate.outputs.registry_owner }}
     permissions:
       contents: read
@@ -100,7 +112,7 @@ jobs:
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
@@ -168,7 +180,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PACKAGES_TOKEN || github.token }}
           PACKAGE: ${{ matrix.package }}
           OWNER_TYPE: ${{ github.event.repository.owner.type }}
-          OWNER: ${{ github.repository_owner }}
+          OWNER: ${{ needs.validate.outputs.github_owner }}
         run: |
           # For user-owned repos, use /users/{owner}/... — not /user/..., which
           # targets the authenticated token identity (often not the package owner).
@@ -324,10 +336,11 @@ jobs:
         id: previous
         env:
           GH_TOKEN: ${{ github.token }}
+          KONTEXT_GITHUB_REPOSITORY: ${{ needs.validate.outputs.repository }}
         run: |
           releases="$(
             gh release list \
-              --repo "${GITHUB_REPOSITORY}" \
+              --repo "${KONTEXT_GITHUB_REPOSITORY}" \
               --exclude-drafts \
               --limit 1000 \
               --json tagName,publishedAt
@@ -344,7 +357,7 @@ jobs:
 
           mkdir -p previous-release
           if ! gh release download "${previous}" \
-            --repo "${GITHUB_REPOSITORY}" \
+            --repo "${KONTEXT_GITHUB_REPOSITORY}" \
             --pattern install.yaml \
             --dir previous-release; then
             echo "::warning::previous release ${previous} has no install manifest; skipping cross-version upgrade"
@@ -408,6 +421,7 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          KONTEXT_GITHUB_REPOSITORY: ${{ needs.validate.outputs.repository }}
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
           flags=()
@@ -415,10 +429,10 @@ jobs:
             flags+=(--prerelease)
           fi
           gh release create "${VERSION}" \
-            --repo "${GITHUB_REPOSITORY}" \
+            --repo "${KONTEXT_GITHUB_REPOSITORY}" \
             --verify-tag \
             --title "Kontext ${VERSION}" \
-            --notes "Install with: kubectl apply -f https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/install.yaml. See image-digests.json for immutable image references. This release serves the kontext.dev/v1alpha1 API." \
+            --notes "Install with: kubectl apply -f https://github.com/${KONTEXT_GITHUB_REPOSITORY}/releases/download/${VERSION}/install.yaml. See image-digests.json for immutable image references. This release serves the kontext.dev/v1alpha1 API." \
             "${flags[@]}" \
             release-assets/image-digests.json \
             release-assets/dist/install.yaml

@@ -6,8 +6,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	kontextv1alpha1 "github.com/kontext-dev/kontext/api/v1alpha1"
-	"github.com/kontext-dev/kontext/internal/conditions"
+	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	"github.com/MFS-code/Kontext/internal/conditions"
 )
 
 func findCondition(conds []metav1.Condition, condType string) *metav1.Condition {

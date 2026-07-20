@@ -17,7 +17,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/config"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
 )
 
 func TestHTTPDiscoveryExecutionAuthBoundingAndClose(t *testing.T) {

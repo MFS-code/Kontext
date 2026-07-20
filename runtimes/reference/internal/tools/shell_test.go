@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/tools"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/tools"
 )
 
 func TestShellUsesExplicitDirectoryAndFilteredEnvironment(t *testing.T) {

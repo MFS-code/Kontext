@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	eventv1alpha1 "github.com/kontext-dev/kontext/pkg/event/v1alpha1"
+	eventv1alpha1 "github.com/MFS-code/Kontext/pkg/event/v1alpha1"
 )
 
 func TestParseValidatesVersionTypeTimestampAndShape(t *testing.T) {

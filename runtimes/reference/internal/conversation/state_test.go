@@ -3,8 +3,8 @@ package conversation_test
 import (
 	"testing"
 
-	"github.com/kontext-dev/kontext/runtimes/reference/internal/conversation"
-	runtimeapi "github.com/kontext-dev/kontext/runtimes/reference/internal/runtimeapi"
+	"github.com/MFS-code/Kontext/runtimes/reference/internal/conversation"
+	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
 func TestStateTracksConversationWithoutExposingMutableSlices(t *testing.T) {

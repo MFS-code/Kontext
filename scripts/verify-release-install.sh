@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "${ROOT_DIR}/scripts/lib/common.sh"
 CURRENT_MANIFEST="${1:-}"
 CURRENT_VERSION="${2:-}"
 PREVIOUS_MANIFEST="${3:-}"
@@ -77,7 +79,7 @@ smoke_release_runtime() {
   runtime_image="$(
     kubectl get agentrun echo-review -o jsonpath='{.spec.runtime.image}'
   )"
-  if [[ "${runtime_image}" != "ghcr.io/mfs-code/kontext-echo:${version}" ]]; then
+  if [[ "${runtime_image}" != "$(kontext_image kontext-echo):${version}" ]]; then
     echo "unexpected echo runtime image: ${runtime_image}" >&2
     return 1
   fi
@@ -109,7 +111,7 @@ spec:
   goal: Verify custom-resource retention during control-plane removal.
   model: echo-model
   runtime:
-    image: ghcr.io/mfs-code/kontext-echo:${CURRENT_VERSION}
+    image: $(kontext_image kontext-echo):${CURRENT_VERSION}
 EOF
 
 kubectl delete clusterrolebinding manager-rolebinding --ignore-not-found=true
