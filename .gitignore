@@ -1,33 +1,9 @@
 # Byte-compiled files
 __pycache__/
 *.py[cod]
-*$py.class
 
-# Python build artifacts
-build/
+# Generated release and docs-site output
 dist/
-*.egg-info/
-*.egg
-
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
-
-# Test, coverage, and tooling caches
-.coverage
-.coverage.*
-htmlcov/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.pyre/
-.tox/
-.nox/
-
-# Installer and dependency metadata
-pip-wheel-metadata/
 
 # Environment and local secrets
 .env

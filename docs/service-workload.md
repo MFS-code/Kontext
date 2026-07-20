@@ -10,10 +10,8 @@ Service mode keeps an agent available the way a Deployment keeps a Pod
 available. The controller owns one live `AgentRun` for the `Agent` and mints a
 replacement when that run exits.
 
-<Note>
-  The example uses the published `v0.1.0-alpha.1` echo image. Pin a release tag
-  or digest in your own manifests.
-</Note>
+> **Note:** The example uses the published `v0.1.0-alpha.1` echo image. Pin a
+> release tag or digest in your own manifests.
 
 ## Apply a Service Agent
 

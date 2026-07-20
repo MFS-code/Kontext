@@ -20,9 +20,7 @@ smallest integration that supplies the result semantics you need.
   Secrets. It emits versioned events and a
   `kontext.dev/result/v1alpha1` envelope.
 - Bring-your-own images are first-class. Kontext does not require the
-  maintained runtime. `runtimes/python-anthropic` is an unmaintained,
-  source-only migration example; it is neither contract-conformant nor
-  published.
+  maintained runtime.
 
 ## Result capture
 

@@ -73,7 +73,7 @@ make kind-install       # build operator + echo images, load into kind, install 
 ./scripts/eval-kind.sh  # deterministic evals against the same cluster
 ```
 
-The e2e script proves the two core behaviors:
+The e2e script proves four core behaviors:
 
 - a standalone `AgentRun` runs to completion and lands `.status.result`
 - unmodified images can expose last-line or structured stdout results
@@ -110,7 +110,6 @@ kubectl get agentruns -w
 |---|---|
 | [`runtimes/echo/`](runtimes/echo) | Keyless control-plane conformance oracle. It still emits the accepted legacy termination payload during the v1alpha1 transition. |
 | [`runtimes/reference/`](runtimes/reference) | Maintained provider-neutral Go runtime with fake, Anthropic, and OpenAI-compatible transports plus a bounded built-in tool loop. |
-| [`runtimes/python-anthropic/`](runtimes/python-anthropic) | Unmaintained source-only migration example. It predates the current runtime contract and is not published. |
 | [`runtimes/reporter/`](runtimes/reporter) | Reusable PID 1 supervisor. Preserves child logs and process semantics while producing the versioned result envelope. |
 
 Provider credentials are wired by the controller from a Kubernetes Secret into
