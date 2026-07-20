@@ -22,6 +22,7 @@ fi
 
 install_release() {
   local manifest="$1"
+  local expect_webhook="${2:-true}"
   kubectl apply -f "${manifest}"
   kubectl rollout status deployment/controller-manager \
     --namespace kontext-system \
@@ -39,6 +40,31 @@ install_release() {
   )"
   if [[ "${operator_image}" != *@sha256:* || "${reporter_image}" != *@sha256:* ]]; then
     echo "install manifest did not deploy digest-pinned images" >&2
+    return 1
+  fi
+
+  if [[ "${expect_webhook}" != "true" ]]; then
+    return 0
+  fi
+
+  kubectl get service webhook-service -n kontext-system >/dev/null
+  kubectl get secret webhook-server-cert -n kontext-system >/dev/null
+  kubectl get mutatingwebhookconfiguration task-agentrun-mutator.kontext.dev >/dev/null
+  kubectl get role webhook-certificate-manager -n kontext-system >/dev/null
+  kubectl get clusterrole webhook-registration-manager >/dev/null
+
+  local secret_ca=""
+  local registered_ca=""
+  secret_ca="$(
+    kubectl get secret webhook-server-cert -n kontext-system \
+      -o jsonpath='{.data.ca\.crt}'
+  )"
+  registered_ca="$(
+    kubectl get mutatingwebhookconfiguration task-agentrun-mutator.kontext.dev \
+      -o jsonpath='{.webhooks[0].clientConfig.caBundle}'
+  )"
+  if [[ -z "${secret_ca}" || "${secret_ca}" != "${registered_ca}" ]]; then
+    echo "release webhook registration does not trust the bootstrapped Secret CA" >&2
     return 1
   fi
 }
@@ -62,16 +88,30 @@ smoke_release_runtime() {
 
 if [[ -n "${PREVIOUS_MANIFEST}" ]]; then
   echo "==> installing previous release ${PREVIOUS_VERSION}"
-  install_release "${PREVIOUS_MANIFEST}"
+  install_release "${PREVIOUS_MANIFEST}" false
   smoke_release_runtime "${PREVIOUS_VERSION}"
 fi
 
 echo "==> installing current release ${CURRENT_VERSION}"
-install_release "${CURRENT_MANIFEST}"
+install_release "${CURRENT_MANIFEST}" true
 smoke_release_runtime "${CURRENT_VERSION}"
+
+if [[ -n "${PREVIOUS_MANIFEST}" ]]; then
+  echo "==> rolling back to previous release ${PREVIOUS_VERSION}"
+  install_release "${PREVIOUS_MANIFEST}" false
+  smoke_release_runtime "${PREVIOUS_VERSION}"
+
+  echo "==> restoring current release ${CURRENT_VERSION}"
+  install_release "${CURRENT_MANIFEST}" true
+  smoke_release_runtime "${CURRENT_VERSION}"
+fi
 
 echo "==> running registry-backed keyless acceptance"
 KONTEXT_RELEASE_TAG="${CURRENT_VERSION}" "${ROOT_DIR}/scripts/e2e-kind.sh"
+
+echo "==> running registry-backed webhook TLS and HA acceptance"
+KONTEXT_ECHO_IMAGE="$(kontext_image kontext-echo):${CURRENT_VERSION}" \
+  "${ROOT_DIR}/scripts/e2e-kind-webhook.sh"
 
 echo "==> verifying control-plane removal with CR retention"
 cat <<EOF | kubectl apply -f -
@@ -90,13 +130,16 @@ EOF
 
 kubectl delete clusterrolebinding manager-rolebinding --ignore-not-found=true
 kubectl delete clusterrole manager-role --ignore-not-found=true
+kubectl delete mutatingwebhookconfiguration task-agentrun-mutator.kontext.dev --ignore-not-found=true
+kubectl delete clusterrolebinding webhook-registration-manager --ignore-not-found=true
+kubectl delete clusterrole webhook-registration-manager --ignore-not-found=true
 kubectl delete namespace kontext-system --ignore-not-found=true --wait=true
 
 kubectl get crd agents.kontext.dev agentruns.kontext.dev >/dev/null
 kubectl get agent retained-install-check -n default >/dev/null
 
 echo "==> reinstalling after retained-CRD removal"
-install_release "${CURRENT_MANIFEST}"
+install_release "${CURRENT_MANIFEST}" true
 kubectl get agent retained-install-check -n default >/dev/null
 kubectl delete agent retained-install-check -n default --wait=true
 
@@ -107,7 +150,10 @@ if kubectl get crd agents.kontext.dev >/dev/null 2>&1 ||
   kubectl get crd agentruns.kontext.dev >/dev/null 2>&1 ||
   kubectl get namespace kontext-system >/dev/null 2>&1 ||
   kubectl get clusterrole manager-role >/dev/null 2>&1 ||
-  kubectl get clusterrolebinding manager-rolebinding >/dev/null 2>&1; then
+  kubectl get clusterrolebinding manager-rolebinding >/dev/null 2>&1 ||
+  kubectl get mutatingwebhookconfiguration task-agentrun-mutator.kontext.dev >/dev/null 2>&1 ||
+  kubectl get clusterrole webhook-registration-manager >/dev/null 2>&1 ||
+  kubectl get clusterrolebinding webhook-registration-manager >/dev/null 2>&1; then
   echo "complete uninstall left Kontext resources behind" >&2
   exit 1
 fi

@@ -132,6 +132,10 @@ docker-build-all: docker-build docker-build-echo docker-build-reporter docker-bu
 kind-install: docker-build docker-build-echo docker-build-reporter docker-build-reference docker-build-stdout-fixture ## Build kind images and install the operator into kind.
 	./scripts/install-go-kind.sh
 
+.PHONY: test-webhook-kind
+test-webhook-kind: ## Run focused webhook TLS and HA acceptance on the current cluster.
+	./scripts/e2e-kind-webhook.sh
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}

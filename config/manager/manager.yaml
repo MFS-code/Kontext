@@ -24,11 +24,18 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: webhook-cert
+          secret:
+            secretName: webhook-server-cert
+            optional: true
+            defaultMode: 0400
       containers:
         - name: manager
           image: controller:latest
           command:
             - /manager
+          args:
+            - --leader-elect
           env:
             - name: KONTEXT_REPORTER_IMAGE
               value: reporter:latest
@@ -41,9 +48,14 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: webhook-cert
+              mountPath: /var/run/kontext/webhook
+              readOnly: true
           ports:
             - containerPort: 8081
               name: health
+            - containerPort: 9443
+              name: webhook
           livenessProbe:
             httpGet:
               path: /healthz

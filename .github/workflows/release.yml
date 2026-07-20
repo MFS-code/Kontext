@@ -305,7 +305,7 @@ jobs:
       - validate
       - manifest
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       KIND_CLUSTER_NAME: kontext-release-verification
       KONTEXT_DIAG_DIR: ${{ github.workspace }}/.ci-diagnostics
