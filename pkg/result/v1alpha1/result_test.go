@@ -2,6 +2,7 @@ package v1alpha1_test
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -140,6 +141,38 @@ func TestParseVersionedEnvelopeToleratesUnknownTopLevelFields(t *testing.T) {
 	}
 	if legacy || envelope.Outcome != resultv1alpha1.OutcomeSucceeded {
 		t.Fatalf("unexpected parsed envelope %#v legacy=%v", envelope, legacy)
+	}
+}
+
+func TestParseVersionedRequiresVersionedWirePayload(t *testing.T) {
+	for name, message := range map[string]string{
+		"empty":       "",
+		"whitespace":  " \t\r\n ",
+		"plain text":  "plain answer",
+		"legacy JSON": `{"result":"done"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := resultv1alpha1.ParseVersioned(message); !errors.Is(err, resultv1alpha1.ErrVersionedEnvelopeRequired) {
+				t.Fatalf("expected versioned-envelope sentinel, got %v", err)
+			}
+		})
+	}
+
+	envelope, err := resultv1alpha1.ParseVersioned(`{
+		"apiVersion":"kontext.dev/result/v1alpha1",
+		"outcome":"Succeeded",
+		"futureField":true
+	}`)
+	if err != nil {
+		t.Fatalf("parse versioned envelope: %v", err)
+	}
+	if envelope.Outcome != resultv1alpha1.OutcomeSucceeded {
+		t.Fatalf("unexpected versioned envelope %#v", envelope)
+	}
+
+	if _, err := resultv1alpha1.ParseVersioned(`{"apiVersion":`); err == nil ||
+		errors.Is(err, resultv1alpha1.ErrVersionedEnvelopeRequired) {
+		t.Fatalf("expected underlying malformed-payload error, got %v", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -14,6 +15,10 @@ type LegacyPayload struct {
 	DollarsUsed *float64 `json:"dollarsUsed,omitempty"`
 	Error       string   `json:"error,omitempty"`
 }
+
+// ErrVersionedEnvelopeRequired indicates that a termination message was empty
+// or used a legacy wire format where a versioned envelope was required.
+var ErrVersionedEnvelopeRequired = errors.New("versioned result envelope required")
 
 // Parse decodes a termination message into the current result envelope.
 // The returned boolean reports whether the message used a legacy JSON or
@@ -55,6 +60,19 @@ func Parse(message string) (Envelope, bool, error) {
 		envelope.Error = &ErrorInfo{Message: legacy.Error}
 	}
 	return envelope, true, nil
+}
+
+// ParseVersioned decodes a termination message only when the wire payload
+// contains a versioned result envelope.
+func ParseVersioned(message string) (Envelope, error) {
+	envelope, legacy, err := Parse(message)
+	if err != nil {
+		return Envelope{}, err
+	}
+	if legacy || strings.TrimSpace(message) == "" {
+		return Envelope{}, ErrVersionedEnvelopeRequired
+	}
+	return envelope, nil
 }
 
 // ProjectLegacyResult deterministically projects structured output into the

@@ -257,16 +257,16 @@ func (runner Runner) finishRecord(
 			if terminated == nil {
 				record.CollectionErrors = append(record.CollectionErrors, "required runtime termination message was unavailable")
 			} else {
-				envelope, legacy, err := resultv1alpha1.Parse(terminated.Message)
-				if err != nil {
-					record.CollectionErrors = append(
-						record.CollectionErrors,
-						fmt.Sprintf("parse required runtime termination message: %v", err),
-					)
-				} else if legacy || strings.TrimSpace(terminated.Message) == "" {
+				envelope, err := resultv1alpha1.ParseVersioned(terminated.Message)
+				if errors.Is(err, resultv1alpha1.ErrVersionedEnvelopeRequired) {
 					record.CollectionErrors = append(
 						record.CollectionErrors,
 						"required versioned result envelope was absent from runtime termination message",
+					)
+				} else if err != nil {
+					record.CollectionErrors = append(
+						record.CollectionErrors,
+						fmt.Sprintf("parse required runtime termination message: %v", err),
 					)
 				} else {
 					record.Envelope = projectEnvelope(envelope, requirements)
