@@ -184,6 +184,57 @@ func TestValidateGraderRejectsVacuousExpectations(t *testing.T) {
 	}
 }
 
+func TestValidateStructuredOutputGraderBranches(t *testing.T) {
+	present := true
+	valid := true
+	tests := map[string]struct {
+		expectation *StructuredOutputExpectation
+		wantError   string
+	}{
+		"missing expectation": {
+			wantError: "structuredOutput expectation is required",
+		},
+		"empty expectation": {
+			expectation: &StructuredOutputExpectation{},
+			wantError:   "structuredOutput requires present, valid, or mediaType",
+		},
+		"blank media type only": {
+			expectation: &StructuredOutputExpectation{MediaType: " \t "},
+			wantError:   "structuredOutput.mediaType must not be blank",
+		},
+		"blank media type with present": {
+			expectation: &StructuredOutputExpectation{Present: &present, MediaType: " \t "},
+			wantError:   "structuredOutput.mediaType must not be blank",
+		},
+		"present only": {
+			expectation: &StructuredOutputExpectation{Present: &present},
+		},
+		"valid only": {
+			expectation: &StructuredOutputExpectation{Valid: &valid},
+		},
+		"media type only": {
+			expectation: &StructuredOutputExpectation{MediaType: "application/json"},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := validateStructuredOutputGrader(Grader{
+				Type:             GraderStructuredOutput,
+				StructuredOutput: test.expectation,
+			})
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("valid expectation was rejected: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("validation error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
 func TestNameForCaseIsStableDNSSafeAndBounded(t *testing.T) {
 	first := NameForCase("Suite_Name", "CASE with spaces", strings.Repeat("x", 100))
 	second := NameForCase("Suite_Name", "CASE with spaces", strings.Repeat("x", 100))

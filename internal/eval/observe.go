@@ -17,9 +17,46 @@ const (
 	MaxEventLineBytes = 64 << 10
 )
 
+var (
+	eventAPIVersionFieldMarker          = []byte(`"apiVersion"`)
+	currentEventAPIVersionMarker        = []byte(`"` + eventv1alpha1.APIVersion + `"`)
+	escapedCurrentEventAPIVersionMarker = bytes.ReplaceAll(
+		currentEventAPIVersionMarker,
+		[]byte("/"),
+		[]byte(`\/`),
+	)
+)
+
 type parsedLogs struct {
 	Events EventSummary
 	Errors []string
+}
+
+type lifecycleEventData struct {
+	Phase string `json:"phase"`
+}
+
+type toolEventData struct {
+	Name      string `json:"name"`
+	Count     *int32 `json:"count"`
+	IsError   *bool  `json:"isError"`
+	ErrorCode string `json:"errorCode"`
+	Truncated *bool  `json:"truncated"`
+}
+
+type errorEventData struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type outputEventData struct {
+	MediaType string          `json:"mediaType"`
+	Value     json.RawMessage `json:"value"`
+}
+
+type usageEventData struct {
+	Turn  *int32                     `json:"turn"`
+	Usage map[string]json.RawMessage `json:"usage"`
 }
 
 func ParseLogs(
@@ -49,7 +86,7 @@ func ParseLogs(
 		line := append([]byte(nil), scanner.Bytes()...)
 		event, err := eventv1alpha1.Parse(line)
 		if err != nil {
-			if malformedRelevantEvent(line, relevantTypes) {
+			if hasCurrentEventAPIVersionMarker(line) {
 				parsed.Errors = append(parsed.Errors, fmt.Sprintf("parse required runtime event: %v", err))
 			}
 			continue
@@ -57,7 +94,8 @@ func ParseLogs(
 		if _, relevant := relevantTypes[event.Type]; !relevant {
 			continue
 		}
-		if err := validateEventData(event); err != nil {
+		data, err := parseEventData(event)
+		if err != nil {
 			parsed.Errors = append(
 				parsed.Errors,
 				fmt.Sprintf("parse required %s event data: %v", event.Type, err),
@@ -74,7 +112,7 @@ func ParseLogs(
 			continue
 		}
 		if _, detailsRequired := detailTypes[event.Type]; detailsRequired {
-			summarizeEvent(&parsed.Events, event)
+			summarizeEvent(&parsed.Events, event, data)
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -83,184 +121,134 @@ func ParseLogs(
 	return parsed
 }
 
-func malformedRelevantEvent(line []byte, relevantTypes map[eventv1alpha1.Type]struct{}) bool {
-	var header struct {
-		APIVersion string             `json:"apiVersion"`
-		Type       eventv1alpha1.Type `json:"type"`
-	}
-	if err := json.Unmarshal(line, &header); err == nil {
-		_, relevant := relevantTypes[header.Type]
-		return relevant && strings.HasPrefix(header.APIVersion, "kontext.dev/event/")
-	}
-	normalized := normalizeMalformedFrame(line)
-	versionMarker := []byte(`"apiVersion":"` + eventv1alpha1.APIVersion + `"`)
-	if !bytes.Contains(normalized, versionMarker) {
+// hasCurrentEventAPIVersionMarker intentionally ignores event type. A line
+// claiming the current protocol version must satisfy the strict top-level
+// envelope and use a known current-version type, even when no grader requests
+// that type. JSON may encode slashes in the version string as either "/" or
+// "\/", so both exact quoted values are recognized after an apiVersion key
+// without normalizing or reparsing the malformed frame.
+func hasCurrentEventAPIVersionMarker(line []byte) bool {
+	fieldIndex := bytes.Index(line, eventAPIVersionFieldMarker)
+	if fieldIndex < 0 {
 		return false
 	}
-	for eventType := range relevantTypes {
-		marker := []byte(`"type":"` + string(eventType) + `"`)
-		if bytes.Contains(normalized, marker) {
-			return true
-		}
+	valueRegion := bytes.TrimLeft(
+		line[fieldIndex+len(eventAPIVersionFieldMarker):],
+		" \t\r\n",
+	)
+	if len(valueRegion) == 0 || valueRegion[0] != ':' {
+		return false
 	}
-	return len(relevantTypes) > 0 && bytes.Contains(normalized, []byte(`"type"`))
+	valueRegion = bytes.TrimLeft(valueRegion[1:], " \t\r\n")
+	return bytes.HasPrefix(valueRegion, currentEventAPIVersionMarker) ||
+		bytes.HasPrefix(valueRegion, escapedCurrentEventAPIVersionMarker)
 }
 
-func normalizeMalformedFrame(line []byte) []byte {
-	normalized := make([]byte, 0, len(line))
-	for _, value := range line {
-		switch value {
-		case ' ', '\t', '\n', '\r', '\f', '\v':
-			continue
-		default:
-			normalized = append(normalized, value)
-		}
-	}
-	return bytes.ReplaceAll(normalized, []byte(`\/`), []byte(`/`))
-}
-
-func validateEventData(event eventv1alpha1.Event) error {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(event.Data, &fields); err != nil {
-		return fmt.Errorf("data must be an object: %w", err)
-	}
-	if fields == nil {
-		return fmt.Errorf("data must be an object")
+func parseEventData(event eventv1alpha1.Event) (any, error) {
+	trimmed := bytes.TrimSpace(event.Data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, fmt.Errorf("data must be an object")
 	}
 	switch event.Type {
 	case eventv1alpha1.TypeLifecycle:
-		if _, err := requiredString(fields, "phase"); err != nil {
-			return err
+		var data lifecycleEventData
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			return nil, fmt.Errorf("decode lifecycle data: %w", err)
 		}
+		if strings.TrimSpace(data.Phase) == "" {
+			return nil, fmt.Errorf("phase is required and must not be empty")
+		}
+		return data, nil
 	case eventv1alpha1.TypeTool:
-		if _, err := requiredString(fields, "name"); err != nil {
-			return err
+		var data toolEventData
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			return nil, fmt.Errorf("decode tool data: %w", err)
 		}
-		count, err := requiredInt32(fields, "count")
-		if err != nil {
-			return err
+		if strings.TrimSpace(data.Name) == "" {
+			return nil, fmt.Errorf("name is required and must not be empty")
 		}
-		if count < 1 {
-			return fmt.Errorf("count must be at least 1")
+		if data.Count == nil {
+			return nil, fmt.Errorf("count is required")
 		}
-		if _, err := requiredBool(fields, "isError"); err != nil {
-			return err
+		if *data.Count < 1 {
+			return nil, fmt.Errorf("count must be at least 1")
 		}
-		if _, err := requiredBool(fields, "truncated"); err != nil {
-			return err
+		if data.IsError == nil {
+			return nil, fmt.Errorf("isError is required")
 		}
-		if value, exists := fields["errorCode"]; exists {
-			var errorCode string
-			if err := json.Unmarshal(value, &errorCode); err != nil {
-				return fmt.Errorf("errorCode must be a string")
-			}
+		if data.Truncated == nil {
+			return nil, fmt.Errorf("truncated is required")
 		}
+		return data, nil
 	case eventv1alpha1.TypeError:
-		if _, err := requiredString(fields, "code"); err != nil {
-			return err
+		var data errorEventData
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			return nil, fmt.Errorf("decode error data: %w", err)
 		}
-		if _, err := requiredString(fields, "message"); err != nil {
-			return err
+		if strings.TrimSpace(data.Code) == "" {
+			return nil, fmt.Errorf("code is required and must not be empty")
 		}
+		if strings.TrimSpace(data.Message) == "" {
+			return nil, fmt.Errorf("message is required and must not be empty")
+		}
+		return data, nil
 	case eventv1alpha1.TypeOutput:
-		if _, err := requiredString(fields, "mediaType"); err != nil {
-			return err
+		var data outputEventData
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			return nil, fmt.Errorf("decode output data: %w", err)
 		}
-		if _, exists := fields["value"]; !exists {
-			return fmt.Errorf("value is required")
+		if strings.TrimSpace(data.MediaType) == "" {
+			return nil, fmt.Errorf("mediaType is required and must not be empty")
 		}
+		if data.Value == nil {
+			return nil, fmt.Errorf("value is required")
+		}
+		return data, nil
 	case eventv1alpha1.TypeUsage:
-		turn, err := requiredInt32(fields, "turn")
-		if err != nil {
-			return err
+		var data usageEventData
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			return nil, fmt.Errorf("decode usage data: %w", err)
 		}
-		if turn < 1 {
-			return fmt.Errorf("turn must be at least 1")
+		if data.Turn == nil {
+			return nil, fmt.Errorf("turn is required")
 		}
-		var usage map[string]json.RawMessage
-		if err := json.Unmarshal(fields["usage"], &usage); err != nil || usage == nil {
-			return fmt.Errorf("usage must be an object")
+		if *data.Turn < 1 {
+			return nil, fmt.Errorf("turn must be at least 1")
 		}
+		if data.Usage == nil {
+			return nil, fmt.Errorf("usage is required and must be an object")
+		}
+		return data, nil
+	default:
+		return nil, fmt.Errorf("unsupported event type %q", event.Type)
 	}
-	return nil
 }
 
-func summarizeEvent(summary *EventSummary, event eventv1alpha1.Event) {
-	var fields map[string]json.RawMessage
-	_ = json.Unmarshal(event.Data, &fields)
+func summarizeEvent(summary *EventSummary, event eventv1alpha1.Event, parsedData any) {
 	metadata := EventMetadata{Timestamp: event.Timestamp, Type: event.Type}
-	switch event.Type {
-	case eventv1alpha1.TypeLifecycle:
-		metadata.Phase, _ = requiredString(fields, "phase")
-		if metadata.Phase != "" {
-			summary.Lifecycle = append(summary.Lifecycle, metadata.Phase)
-		}
-	case eventv1alpha1.TypeTool:
+	switch data := parsedData.(type) {
+	case lifecycleEventData:
+		metadata.Phase = data.Phase
+		summary.Lifecycle = append(summary.Lifecycle, data.Phase)
+	case toolEventData:
 		tool := ToolEvent{
-			ErrorCode: optionalString(fields, "errorCode"),
+			Name:      data.Name,
+			Count:     *data.Count,
+			IsError:   *data.IsError,
+			ErrorCode: data.ErrorCode,
+			Truncated: *data.Truncated,
 		}
-		tool.Name, _ = requiredString(fields, "name")
-		tool.Count, _ = requiredInt32(fields, "count")
-		tool.IsError, _ = requiredBool(fields, "isError")
-		tool.Truncated, _ = requiredBool(fields, "truncated")
 		summary.Tools = append(summary.Tools, tool)
 		metadata.Name = tool.Name
 		metadata.IsError = tool.IsError
 		metadata.ErrorCode = tool.ErrorCode
 		metadata.Truncated = tool.Truncated
-	case eventv1alpha1.TypeError:
-		metadata.ErrorCode, _ = requiredString(fields, "code")
-		if metadata.ErrorCode != "" {
-			summary.Errors = append(summary.Errors, metadata.ErrorCode)
-		}
-	case eventv1alpha1.TypeOutput, eventv1alpha1.TypeUsage:
+	case errorEventData:
+		metadata.ErrorCode = data.Code
+		summary.Errors = append(summary.Errors, data.Code)
+	case outputEventData, usageEventData:
 	}
 	summary.Metadata = append(summary.Metadata, metadata)
-}
-
-func requiredString(fields map[string]json.RawMessage, name string) (string, error) {
-	value, exists := fields[name]
-	if !exists {
-		return "", fmt.Errorf("%s is required", name)
-	}
-	var decoded string
-	if err := json.Unmarshal(value, &decoded); err != nil {
-		return "", fmt.Errorf("%s must be a string", name)
-	}
-	if strings.TrimSpace(decoded) == "" {
-		return "", fmt.Errorf("%s must not be empty", name)
-	}
-	return decoded, nil
-}
-
-func requiredInt32(fields map[string]json.RawMessage, name string) (int32, error) {
-	value, exists := fields[name]
-	if !exists {
-		return 0, fmt.Errorf("%s is required", name)
-	}
-	var decoded int32
-	if err := json.Unmarshal(value, &decoded); err != nil {
-		return 0, fmt.Errorf("%s must be an integer", name)
-	}
-	return decoded, nil
-}
-
-func requiredBool(fields map[string]json.RawMessage, name string) (bool, error) {
-	value, exists := fields[name]
-	if !exists {
-		return false, fmt.Errorf("%s is required", name)
-	}
-	var decoded bool
-	if err := json.Unmarshal(value, &decoded); err != nil {
-		return false, fmt.Errorf("%s must be a boolean", name)
-	}
-	return decoded, nil
-}
-
-func optionalString(fields map[string]json.RawMessage, name string) string {
-	var decoded string
-	_ = json.Unmarshal(fields[name], &decoded)
-	return decoded
 }
 
 func boundedMessage(value string) string {

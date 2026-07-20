@@ -13,10 +13,6 @@ import (
 	"time"
 
 	"sigs.k8s.io/yaml"
-
-	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
-	eventv1alpha1 "github.com/MFS-code/Kontext/pkg/event/v1alpha1"
-	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 )
 
 const defaultTimeout = 5 * time.Minute
@@ -116,127 +112,6 @@ func prepareSuite(suite *EvalSuite, runtimeImageOverride string) error {
 				return fmt.Errorf("case %q grader %d: %w", item.ID, graderIndex, err)
 			}
 		}
-	}
-	return nil
-}
-
-func validateGrader(grader Grader) error {
-	switch grader.Type {
-	case GraderTerminalPhase:
-		switch grader.Phase {
-		case kontextv1alpha1.AgentRunPhaseSucceeded,
-			kontextv1alpha1.AgentRunPhaseFailed,
-			kontextv1alpha1.AgentRunPhaseBudgetExceeded:
-		default:
-			return fmt.Errorf("invalid terminal phase %q", grader.Phase)
-		}
-	case GraderStatusResult:
-		if grader.StatusResult == nil {
-			return errors.New("statusResult expectation is required")
-		}
-		count := 0
-		if grader.StatusResult.Exact != nil {
-			count++
-		}
-		if grader.StatusResult.Contains != nil {
-			count++
-		}
-		if grader.StatusResult.NotContains != nil {
-			count++
-		}
-		if count != 1 {
-			return errors.New("statusResult requires exactly one of exact, contains, or notContains")
-		}
-		if grader.StatusResult.Contains != nil && *grader.StatusResult.Contains == "" {
-			return errors.New("statusResult.contains must not be empty")
-		}
-		if grader.StatusResult.NotContains != nil && *grader.StatusResult.NotContains == "" {
-			return errors.New("statusResult.notContains must not be empty")
-		}
-	case GraderStructuredOutput:
-		if grader.StructuredOutput == nil {
-			return errors.New("structuredOutput expectation is required")
-		}
-		if grader.StructuredOutput.Present == nil &&
-			grader.StructuredOutput.Valid == nil &&
-			strings.TrimSpace(grader.StructuredOutput.MediaType) == "" {
-			return errors.New("structuredOutput requires present, valid, or mediaType")
-		}
-		if grader.StructuredOutput.MediaType != "" &&
-			strings.TrimSpace(grader.StructuredOutput.MediaType) == "" {
-			return errors.New("structuredOutput.mediaType must not be blank")
-		}
-	case GraderUsageFields:
-		if len(grader.UsageFields) == 0 {
-			return errors.New("usageFields must not be empty")
-		}
-		seenFields := make(map[string]struct{}, len(grader.UsageFields))
-		for _, field := range grader.UsageFields {
-			switch field {
-			case "tokens", "inputTokens", "outputTokens", "dollars":
-			default:
-				return fmt.Errorf("invalid usage field %q", field)
-			}
-			if _, exists := seenFields[field]; exists {
-				return fmt.Errorf("duplicate usage field %q", field)
-			}
-			seenFields[field] = struct{}{}
-		}
-	case GraderEnvelopeError:
-		if strings.TrimSpace(grader.ErrorCode) == "" {
-			return errors.New("errorCode is required")
-		}
-	case GraderEnvelopeOutcome:
-		switch grader.Outcome {
-		case resultv1alpha1.OutcomeSucceeded, resultv1alpha1.OutcomeFailed:
-		default:
-			return fmt.Errorf("invalid envelope outcome %q", grader.Outcome)
-		}
-	case GraderExecutionModel:
-		if strings.TrimSpace(grader.Model) == "" {
-			return errors.New("model is required")
-		}
-	case GraderEnvelopeTurns:
-		if grader.Turns == nil || *grader.Turns < 0 {
-			return errors.New("turns must be a non-negative integer")
-		}
-	case GraderEnvelopeTools:
-		if grader.ToolCalls == nil || *grader.ToolCalls < 0 {
-			return errors.New("toolCalls must be a non-negative integer")
-		}
-	case GraderEventCount:
-		if grader.Event == nil || grader.Event.Count < 0 {
-			return errors.New("event with non-negative count is required")
-		}
-		switch grader.Event.Type {
-		case eventv1alpha1.TypeLifecycle, eventv1alpha1.TypeOutput, eventv1alpha1.TypeUsage,
-			eventv1alpha1.TypeTool, eventv1alpha1.TypeError:
-		default:
-			return fmt.Errorf("invalid event type %q", grader.Event.Type)
-		}
-	case GraderToolEvents:
-		if grader.Tool == nil {
-			return errors.New("tool expectation is required")
-		}
-		if strings.TrimSpace(grader.Tool.Name) == "" {
-			return errors.New("tool.name is required")
-		}
-		if grader.Tool.Count < 0 {
-			return errors.New("tool.count must be non-negative")
-		}
-		if grader.Tool.ErrorCode != "" && strings.TrimSpace(grader.Tool.ErrorCode) == "" {
-			return errors.New("tool.errorCode must not be blank")
-		}
-	case GraderDuration:
-		if grader.MaxDuration.Duration <= 0 {
-			return errors.New("maxDuration must be greater than zero")
-		}
-	case GraderPodExitCode:
-		if grader.ExitCode == nil {
-			return errors.New("exitCode is required")
-		}
-	default:
-		return fmt.Errorf("unsupported grader type %q", grader.Type)
 	}
 	return nil
 }
