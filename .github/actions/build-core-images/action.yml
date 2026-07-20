@@ -1,0 +1,73 @@
+name: Build core images
+description: Build the local images used by Kontext kind jobs
+
+inputs:
+  image-set:
+    description: Image set to build (full or network-policy)
+    required: true
+  cache-scope:
+    description: Prefix prepended to each image's GitHub Actions cache scope
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Validate image set
+      shell: bash
+      env:
+        IMAGE_SET: ${{ inputs.image-set }}
+      run: |
+        case "${IMAGE_SET}" in
+          full|network-policy) ;;
+          *)
+            echo "unsupported image set: ${IMAGE_SET}" >&2
+            exit 1
+            ;;
+        esac
+
+    - name: Build operator image
+      uses: ./.github/actions/build-image
+      with:
+        context: .
+        tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
+        cache-scope: ${{ inputs.cache-scope }}operator
+        load: "true"
+
+    - name: Build echo runtime image
+      if: inputs.image-set == 'full'
+      uses: ./.github/actions/build-image
+      with:
+        context: runtimes/echo
+        dockerfile: runtimes/echo/Dockerfile
+        tags: ${{ env.KONTEXT_ECHO_IMAGE }}
+        cache-scope: ${{ inputs.cache-scope }}echo
+        load: "true"
+
+    - name: Build reusable reporter image
+      uses: ./.github/actions/build-image
+      with:
+        context: .
+        dockerfile: runtimes/reporter/Dockerfile
+        tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
+        cache-scope: ${{ inputs.cache-scope }}reporter
+        load: "true"
+
+    - name: Build model-agnostic reference runtime image
+      uses: ./.github/actions/build-image
+      with:
+        context: .
+        dockerfile: runtimes/reference/Dockerfile
+        tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
+        cache-scope: ${{ inputs.cache-scope }}reference
+        load: "true"
+
+    - name: Build stdout-capture fixture image
+      if: inputs.image-set == 'full'
+      uses: ./.github/actions/build-image
+      with:
+        context: runtimes/stdout-fixture
+        dockerfile: runtimes/stdout-fixture/Dockerfile
+        tags: ${{ env.KONTEXT_STDOUT_FIXTURE_IMAGE }}
+        cache-scope: ${{ inputs.cache-scope }}stdout-fixture
+        load: "true"
