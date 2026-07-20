@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -33,6 +34,8 @@ const (
 	nextTLSKey    = "next-tls.crt"
 	nextTLSKeyPEM = "next-tls.key"
 )
+
+var errRegistrationChanged = errors.New("webhook registration changed during CA promotion")
 
 type Clock func() time.Time
 
@@ -79,8 +82,10 @@ func NewLifecycle(k8sClient client.Client, store *Store, options Options) *Lifec
 }
 
 func (l *Lifecycle) Start(ctx context.Context) error {
-	if err := l.Ensure(ctx); err != nil {
-		return fmt.Errorf("initialize webhook TLS: %w", err)
+	if len(l.store.CABundle()) == 0 {
+		if err := l.Ensure(ctx); err != nil {
+			return fmt.Errorf("initialize webhook TLS: %w", err)
+		}
 	}
 	ticker := time.NewTicker(l.opts.ReconcileInterval)
 	defer ticker.Stop()
@@ -125,7 +130,7 @@ func (l *Lifecycle) Ensure(ctx context.Context) error {
 				return err
 			}
 			if err := l.promoteNext(ctx, secret, next); err != nil {
-				if apierrors.IsConflict(err) {
+				if apierrors.IsConflict(err) || errors.Is(err, errRegistrationChanged) {
 					continue
 				}
 				return err
@@ -296,7 +301,7 @@ func (l *Lifecycle) promoteNext(ctx context.Context, secret *corev1.Secret, next
 		return fmt.Errorf("verify webhook registration before CA promotion: %w", err)
 	}
 	if len(registration.Webhooks) != 1 || !bytes.Equal(registration.Webhooks[0].ClientConfig.CABundle, next.CACert) {
-		return fmt.Errorf("webhook registration does not trust staged CA")
+		return errRegistrationChanged
 	}
 	updated := secret.DeepCopy()
 	updated.Data = secretData(next)

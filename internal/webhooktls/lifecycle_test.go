@@ -3,6 +3,7 @@ package webhooktls
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -156,6 +157,24 @@ func TestLifecycleCARotationPublishesOverlapBeforePromotion(t *testing.T) {
 	}
 	if !bytes.Equal(registration.Webhooks[0].ClientConfig.CABundle, rotated.Data[CACertKey]) {
 		t.Fatal("serving CA was promoted before admission trust")
+	}
+}
+
+func TestPromotionRetriesWhenRegistrationChanges(t *testing.T) {
+	ctx := context.Background()
+	clock := &testClock{now: time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)}
+	k8sClient := newFakeClient(t)
+	lifecycle := NewLifecycle(k8sClient, &Store{}, testOptions(clock))
+	if err := lifecycle.Ensure(ctx); err != nil {
+		t.Fatalf("bootstrap lifecycle: %v", err)
+	}
+	secret := getSecret(t, k8sClient)
+	next, err := lifecycle.generate(secret.Data[CACertKey])
+	if err != nil {
+		t.Fatalf("generate staged certificates: %v", err)
+	}
+	if err := lifecycle.promoteNext(ctx, secret, next); !errors.Is(err, errRegistrationChanged) {
+		t.Fatalf("registration race should be retryable, got %v", err)
 	}
 }
 

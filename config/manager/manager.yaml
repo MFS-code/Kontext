@@ -29,6 +29,11 @@ spec:
             secretName: webhook-server-cert
             optional: true
             defaultMode: 0400
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: tls.crt
       containers:
         - name: manager
           image: controller:latest
