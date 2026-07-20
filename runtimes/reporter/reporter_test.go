@@ -76,7 +76,7 @@ func TestEnvelopeFromPrefixedCandidate(t *testing.T) {
 	valid := CapturedResult{
 		Found: true,
 		Data: []byte(
-			`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":{"ok":true}}}`,
+			`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":{"ok":true}},"futureField":true}`,
 		),
 	}
 	envelope := envelopeFromCapture(CaptureFormatKontextEnvelope, valid, 0)
@@ -91,6 +91,8 @@ func TestEnvelopeFromPrefixedCandidate(t *testing.T) {
 		{name: "missing"},
 		{name: "truncated", captured: CapturedResult{Found: true, Truncated: true, Data: []byte(`{}`)}},
 		{name: "malformed", captured: CapturedResult{Found: true, Data: []byte(`{"apiVersion":`)}},
+		{name: "empty", captured: CapturedResult{Found: true}},
+		{name: "plain text", captured: CapturedResult{Found: true, Data: []byte(`old result`)}},
 		{name: "legacy", captured: CapturedResult{Found: true, Data: []byte(`{"result":"old"}`)}},
 	}
 	for _, test := range tests {

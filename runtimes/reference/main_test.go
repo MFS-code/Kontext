@@ -66,6 +66,12 @@ func TestRunEmitsFailureEnvelopeForInvalidConfiguration(t *testing.T) {
 	if !strings.Contains(stderr.String(), "KONTEXT_MODEL is required") {
 		t.Fatalf("expected actionable stderr, got %q", stderr.String())
 	}
+	if got := strings.Count(stdout.String(), `"type":"error"`); got != 1 {
+		t.Fatalf("expected one terminal error event, got %d: %s", got, stdout.String())
+	}
+	if got := strings.Count(stdout.String(), resultv1alpha1.EnvelopeLinePrefix); got != 1 {
+		t.Fatalf("expected one terminal envelope, got %d: %s", got, stdout.String())
+	}
 }
 
 func resultLine(t *testing.T, output string) resultv1alpha1.Envelope {
@@ -75,14 +81,14 @@ func resultLine(t *testing.T, output string) resultv1alpha1.Envelope {
 		if !found {
 			continue
 		}
-		parsed, err := resultv1alpha1.Parse(string(payload))
+		envelope, legacy, err := resultv1alpha1.Parse(string(payload))
 		if err != nil {
 			t.Fatalf("parse result line: %v", err)
 		}
-		if parsed.Envelope == nil {
+		if legacy {
 			t.Fatalf("result line was not a versioned envelope")
 		}
-		return *parsed.Envelope
+		return envelope
 	}
 	t.Fatalf("result line not found in %q", output)
 	return resultv1alpha1.Envelope{}

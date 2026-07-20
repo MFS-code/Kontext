@@ -25,7 +25,7 @@ func TestReadKnowledgeReadsAndBoundsMountedFile(t *testing.T) {
 	); err != nil {
 		t.Fatalf("write knowledge: %v", err)
 	}
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed:          []string{tools.NameReadKnowledge},
 		KnowledgeRoot:    root,
 		MaxCapturedBytes: 16,
@@ -65,7 +65,7 @@ func TestReadKnowledgeTruncatesAtUTF8Boundary(t *testing.T) {
 	); err != nil {
 		t.Fatalf("write knowledge: %v", err)
 	}
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed:          []string{tools.NameReadKnowledge},
 		KnowledgeRoot:    root,
 		MaxCapturedBytes: 20,
@@ -106,7 +106,7 @@ func TestReadKnowledgeRejectsTraversalAndEscapingSymlinks(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, "link.txt")); err != nil {
 		t.Fatalf("create symlink: %v", err)
 	}
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed:       []string{tools.NameReadKnowledge},
 		KnowledgeRoot: root,
 	})
@@ -136,7 +136,7 @@ func TestReadKnowledgeRejectsTraversalAndEscapingSymlinks(t *testing.T) {
 }
 
 func TestReadKnowledgeRejectsUnknownArguments(t *testing.T) {
-	registry, err := tools.New(tools.Config{
+	registry, err := tools.NewWithContext(context.Background(), tools.Config{
 		Allowed:       []string{tools.NameReadKnowledge},
 		KnowledgeRoot: t.TempDir(),
 	})

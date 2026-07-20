@@ -1,5 +1,11 @@
 // Package v1alpha1 defines the versioned result contract shared by Kontext
 // runtimes, reporters, and the control plane.
+//
+// Result envelopes are forward-compatible at the top level: parsers ignore
+// unknown top-level fields while validating every known field. Runtime- or
+// provider-specific data belongs under Extensions and must use namespaced
+// keys. Parse also normalizes the transitional legacy JSON and plain-text wire
+// formats into the current Envelope shape.
 package v1alpha1
 
 import (

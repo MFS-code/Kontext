@@ -20,7 +20,7 @@ import (
 
 func TestRunnerCompletesFakeConversation(t *testing.T) {
 	emitter := &recordingEmitter{}
-	runner := engine.Runner{Emitter: emitter}
+	runner := runnerWithoutTools(emitter)
 	result := runner.Run(context.Background(), baseConfig())
 
 	if result.ExitCode != 0 || result.Envelope.Outcome != resultv1alpha1.OutcomeSucceeded {
@@ -44,6 +44,133 @@ func TestRunnerCompletesFakeConversation(t *testing.T) {
 	}
 }
 
+func TestRunnerRequiresContextAwareToolResolver(t *testing.T) {
+	emitter := &recordingEmitter{}
+	result := (engine.Runner{Emitter: emitter}).Run(context.Background(), baseConfig())
+
+	if result.ExitCode == 0 || result.Envelope.Error == nil {
+		t.Fatalf("expected resolver configuration failure, got %#v", result)
+	}
+	if result.Envelope.Error.Code != "invalid_tool_configuration" ||
+		result.Envelope.Error.Message != "tool resolver is required" {
+		t.Fatalf("unexpected resolver failure %#v", result.Envelope.Error)
+	}
+	if got := emitter.count(events.TypeError); got != 1 {
+		t.Fatalf("expected one terminal error event, got %d", got)
+	}
+}
+
+func TestRunnerClosesEveryResolvedExecutorExactlyOnce(t *testing.T) {
+	tests := []struct {
+		name           string
+		returnExecutor bool
+		resolverError  error
+		wantExitCode   int
+		wantCloseCalls int
+	}{
+		{
+			name:           "executor and error",
+			returnExecutor: true,
+			resolverError:  errors.New("resolve failed"),
+			wantExitCode:   1,
+			wantCloseCalls: 1,
+		},
+		{
+			name:           "nil and error",
+			resolverError:  errors.New("resolve failed"),
+			wantExitCode:   1,
+			wantCloseCalls: 0,
+		},
+		{
+			name:           "successful executor",
+			returnExecutor: true,
+			wantExitCode:   0,
+			wantCloseCalls: 1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			executor := &closingToolExecutor{
+				close: func(context.Context) error { return nil },
+			}
+			runner := engine.Runner{
+				Emitter: &recordingEmitter{},
+				ResolveToolsContext: func(
+					context.Context,
+					config.Config,
+				) (engine.ToolExecutor, error) {
+					if !test.returnExecutor {
+						return nil, test.resolverError
+					}
+					return executor, test.resolverError
+				},
+			}
+
+			result := runner.Run(context.Background(), baseConfig())
+			if result.ExitCode != test.wantExitCode {
+				t.Fatalf("exit code=%d, want %d; result=%#v", result.ExitCode, test.wantExitCode, result)
+			}
+			if executor.closeCalls != test.wantCloseCalls {
+				t.Fatalf("close calls=%d, want %d", executor.closeCalls, test.wantCloseCalls)
+			}
+			if test.resolverError != nil &&
+				(result.Envelope.Error == nil ||
+					result.Envelope.Error.Code != "invalid_tool_configuration" ||
+					result.Envelope.Error.Message != test.resolverError.Error()) {
+				t.Fatalf("resolver error was not preserved: %#v", result.Envelope.Error)
+			}
+		})
+	}
+}
+
+func TestRunnerReportsCleanupAfterResolverFailure(t *testing.T) {
+	emitter := &dataRecordingEmitter{}
+	executor := &closingToolExecutor{
+		close: func(context.Context) error {
+			return errors.New("close failed")
+		},
+	}
+	runner := engine.Runner{
+		Emitter: emitter,
+		ResolveToolsContext: func(
+			context.Context,
+			config.Config,
+		) (engine.ToolExecutor, error) {
+			return executor, errors.New("resolve failed")
+		},
+	}
+
+	result := runner.Run(context.Background(), baseConfig())
+	if result.Envelope.Error == nil ||
+		result.Envelope.Error.Code != "invalid_tool_configuration" ||
+		result.Envelope.Error.Message != "resolve failed" {
+		t.Fatalf("cleanup replaced resolver failure: %#v", result.Envelope.Error)
+	}
+	if executor.closeCalls != 1 {
+		t.Fatalf("close calls=%d, want 1", executor.closeCalls)
+	}
+
+	var errorCodes []string
+	for _, event := range emitter.events {
+		switch event.eventType {
+		case events.TypeError:
+			data, ok := event.data.(map[string]any)
+			if !ok {
+				t.Fatalf("unexpected error event data %#v", event.data)
+			}
+			code, _ := data["code"].(string)
+			errorCodes = append(errorCodes, code)
+		case events.TypeOutput:
+			t.Fatal("resolver failure emitted terminal output")
+		}
+	}
+	if len(errorCodes) != 2 ||
+		errorCodes[0] != "invalid_tool_configuration" ||
+		errorCodes[1] != "tool_cleanup_failed" {
+		t.Fatalf("unexpected error event ordering %#v", errorCodes)
+	}
+}
+
 func TestRunnerNormalizesProviderFailures(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -57,7 +184,7 @@ func TestRunnerNormalizesProviderFailures(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			runtimeConfig := baseConfig()
 			runtimeConfig.FakeScenario = test.scenario
-			result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(
+			result := runnerWithoutTools(&recordingEmitter{}).Run(
 				context.Background(),
 				runtimeConfig,
 			)
@@ -112,7 +239,7 @@ func TestRunnerDoesNotTreatIncompleteStopReasonsAsSuccess(t *testing.T) {
 func TestRunnerRejectsUnsupportedProvider(t *testing.T) {
 	runtimeConfig := baseConfig()
 	runtimeConfig.Provider = "unknown"
-	result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(
+	result := runnerWithoutTools(&recordingEmitter{}).Run(
 		context.Background(),
 		runtimeConfig,
 	)
@@ -124,7 +251,7 @@ func TestRunnerRejectsUnsupportedProvider(t *testing.T) {
 func TestRunnerDistinguishesInvalidProviderConfiguration(t *testing.T) {
 	runtimeConfig := baseConfig()
 	runtimeConfig.FakeScenario = "unknown"
-	result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(
+	result := runnerWithoutTools(&recordingEmitter{}).Run(
 		context.Background(),
 		runtimeConfig,
 	)
@@ -139,7 +266,7 @@ func TestRunnerReportsMissingProviderCredentials(t *testing.T) {
 		t.Run(providerName, func(t *testing.T) {
 			runtimeConfig := baseConfig()
 			runtimeConfig.Provider = providerName
-			result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(
+			result := runnerWithoutTools(&recordingEmitter{}).Run(
 				context.Background(),
 				runtimeConfig,
 			)
@@ -199,7 +326,7 @@ func TestRunnerExecutesToolCallsAndReturnsResultsToProvider(t *testing.T) {
 		Resolve: func(config.Config) (provider.Provider, error) {
 			return selectedProvider, nil
 		},
-		ResolveTools: func(config.Config) (engine.ToolExecutor, error) {
+		ResolveToolsContext: func(context.Context, config.Config) (engine.ToolExecutor, error) {
 			return executor, nil
 		},
 	}
@@ -288,6 +415,31 @@ func TestRunnerCleanupFailureDoesNotReplaceExistingFailure(t *testing.T) {
 	}
 	if executor.closeCalls != 1 {
 		t.Fatalf("expected one cleanup call, got %d", executor.closeCalls)
+	}
+}
+
+func TestRunnerClosesToolsBeforeEmittingFinalOutput(t *testing.T) {
+	closed := false
+	executor := &closingToolExecutor{
+		staticToolExecutor: *lookupExecutor(runtimeapi.ToolResult{}),
+		close: func(context.Context) error {
+			closed = true
+			return nil
+		},
+	}
+	runner := runnerWithTools(
+		&scriptedProvider{responses: []runtimeapi.CompletionResponse{finalResponse("done")}},
+		executor,
+	)
+	runner.Emitter = emitterFunc(func(eventType events.Type, _ any) {
+		if eventType == events.TypeOutput && !closed {
+			t.Fatal("final output emitted before tool cleanup")
+		}
+	})
+
+	result := runner.Run(context.Background(), baseConfig())
+	if result.ExitCode != 0 || !closed {
+		t.Fatalf("cleanup ordering failed: result=%#v closed=%t", result, closed)
 	}
 }
 
@@ -441,6 +593,52 @@ func TestRunnerEnforcesTurnAndToolCallLimits(t *testing.T) {
 		}
 		if len(executor.calls) != 1 {
 			t.Fatalf("oversized second batch changed call count to %d", len(executor.calls))
+		}
+	})
+}
+
+func TestRunnerPreservesTokenBudgetBoundarySemantics(t *testing.T) {
+	const budget = int64(10)
+
+	t.Run("terminal response may equal budget", func(t *testing.T) {
+		response := finalResponse("done")
+		response.Usage.TotalTokens = int64Pointer(budget)
+		result := runnerWithTools(
+			&scriptedProvider{responses: []runtimeapi.CompletionResponse{response}},
+			lookupExecutor(runtimeapi.ToolResult{}),
+		).Run(context.Background(), configWithTokenBudget(budget))
+		if result.ExitCode != 0 {
+			t.Fatalf("exact-budget terminal response failed: %#v", result.Envelope.Error)
+		}
+	})
+
+	t.Run("tool follow-up requires remaining budget", func(t *testing.T) {
+		response := toolCallResponse("call-1")
+		response.Usage.TotalTokens = int64Pointer(budget)
+		executor := lookupExecutor(runtimeapi.ToolResult{Content: "ok"})
+		result := runnerWithTools(
+			&scriptedProvider{responses: []runtimeapi.CompletionResponse{response}},
+			executor,
+		).Run(context.Background(), configWithTokenBudget(budget))
+		if result.Envelope.Error == nil ||
+			result.Envelope.Error.Code != "token_limit_exceeded" {
+			t.Fatalf("unexpected exact-budget tool result %#v", result.Envelope.Error)
+		}
+		if len(executor.calls) != 0 {
+			t.Fatalf("tool executed without remaining token budget")
+		}
+	})
+
+	t.Run("response over budget fails", func(t *testing.T) {
+		response := finalResponse("done")
+		response.Usage.TotalTokens = int64Pointer(budget + 1)
+		result := runnerWithTools(
+			&scriptedProvider{responses: []runtimeapi.CompletionResponse{response}},
+			lookupExecutor(runtimeapi.ToolResult{}),
+		).Run(context.Background(), configWithTokenBudget(budget))
+		if result.Envelope.Error == nil ||
+			result.Envelope.Error.Code != "token_limit_exceeded" {
+			t.Fatalf("unexpected over-budget result %#v", result.Envelope.Error)
 		}
 	})
 }
@@ -626,6 +824,36 @@ func TestRunnerBoundsToolOutputAndReturnsToolErrors(t *testing.T) {
 			t.Fatalf("tool error was not returned: %#v", results)
 		}
 	})
+
+	t.Run("cumulative output is checked between calls", func(t *testing.T) {
+		response := toolCallResponse("call-1")
+		response.Message.Content = append(
+			response.Message.Content,
+			runtimeapi.ContentBlock{
+				Type: runtimeapi.ContentTypeToolCall,
+				ToolCall: &runtimeapi.ToolCall{
+					ID:        "call-2",
+					Name:      "lookup",
+					Arguments: json.RawMessage(`{}`),
+				},
+			},
+		)
+		executor := lookupExecutor(runtimeapi.ToolResult{Content: "ok"})
+		runtimeConfig := baseConfig()
+		totalOutput := int64(2)
+		runtimeConfig.MaxTotalToolOutputBytes = &totalOutput
+		result := runnerWithTools(
+			&scriptedProvider{responses: []runtimeapi.CompletionResponse{response}},
+			executor,
+		).Run(context.Background(), runtimeConfig)
+		if result.Envelope.Error == nil ||
+			result.Envelope.Error.Code != "tool_output_limit_exceeded" {
+			t.Fatalf("unexpected cumulative output result %#v", result.Envelope.Error)
+		}
+		if len(executor.calls) != 1 {
+			t.Fatalf("expected one call before output exhaustion, got %d", len(executor.calls))
+		}
+	})
 }
 
 func TestRunnerSaturatesCumulativeUsageWithoutOverflow(t *testing.T) {
@@ -692,7 +920,7 @@ func TestRunnerHasNoImplicitWallclockDeadline(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(ctx, runtimeConfig)
+	result := runnerWithoutTools(&recordingEmitter{}).Run(ctx, runtimeConfig)
 	if result.ExitCode != 0 {
 		t.Fatalf("delay should succeed without configured wallclock: %#v", result.Envelope.Error)
 	}
@@ -707,7 +935,7 @@ func TestRunnerLeavesWallclockAuthorityWithController(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(ctx, runtimeConfig)
+	result := runnerWithoutTools(&recordingEmitter{}).Run(ctx, runtimeConfig)
 	if result.ExitCode != 0 {
 		t.Fatalf("runtime must not race controller wallclock enforcement: %#v", result.Envelope.Error)
 	}
@@ -721,7 +949,7 @@ func TestRunnerHandlesParentDeadlineAndCancellation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 		defer cancel()
 
-		result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(
+		result := runnerWithoutTools(&recordingEmitter{}).Run(
 			ctx,
 			runtimeConfig,
 		)
@@ -737,7 +965,7 @@ func TestRunnerHandlesParentDeadlineAndCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		result := (engine.Runner{Emitter: &recordingEmitter{}}).Run(ctx, runtimeConfig)
+		result := runnerWithoutTools(&recordingEmitter{}).Run(ctx, runtimeConfig)
 		if result.Envelope.Error == nil || result.Envelope.Error.Code != "cancelled" {
 			t.Fatalf("unexpected cancellation result %#v", result.Envelope.Error)
 		}
@@ -755,6 +983,16 @@ func baseConfig() config.Config {
 	}
 }
 
+func configWithTokenBudget(budget int64) config.Config {
+	runtimeConfig := baseConfig()
+	runtimeConfig.TokenBudget = &budget
+	return runtimeConfig
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
+}
+
 func runnerWithTools(
 	selectedProvider provider.Provider,
 	executor engine.ToolExecutor,
@@ -764,8 +1002,20 @@ func runnerWithTools(
 		Resolve: func(config.Config) (provider.Provider, error) {
 			return selectedProvider, nil
 		},
-		ResolveTools: func(config.Config) (engine.ToolExecutor, error) {
+		ResolveToolsContext: func(context.Context, config.Config) (engine.ToolExecutor, error) {
 			return executor, nil
+		},
+	}
+}
+
+func runnerWithoutTools(emitter engine.Emitter) engine.Runner {
+	return engine.Runner{
+		Emitter: emitter,
+		ResolveToolsContext: func(
+			context.Context,
+			config.Config,
+		) (engine.ToolExecutor, error) {
+			return &staticToolExecutor{}, nil
 		},
 	}
 }
@@ -829,6 +1079,8 @@ type recordedEvent struct {
 	data      any
 }
 
+type emitterFunc func(events.Type, any)
+
 type scriptedProvider struct {
 	responses []runtimeapi.CompletionResponse
 	requests  []runtimeapi.CompletionRequest
@@ -883,8 +1135,16 @@ func (executor *staticToolExecutor) Execute(
 	return result, executor.err
 }
 
+func (executor *staticToolExecutor) Close(context.Context) error {
+	return nil
+}
+
 func (emitter *recordingEmitter) Emit(eventType events.Type, _ any) {
 	emitter.types = append(emitter.types, eventType)
+}
+
+func (emit emitterFunc) Emit(eventType events.Type, data any) {
+	emit(eventType, data)
 }
 
 func (emitter *dataRecordingEmitter) Emit(eventType events.Type, data any) {
@@ -905,10 +1165,15 @@ func (emitter *dataRecordingEmitter) first(eventType events.Type) map[string]any
 }
 
 func (emitter *recordingEmitter) has(eventType events.Type) bool {
+	return emitter.count(eventType) > 0
+}
+
+func (emitter *recordingEmitter) count(eventType events.Type) int {
+	var count int
 	for _, candidate := range emitter.types {
 		if candidate == eventType {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
 }

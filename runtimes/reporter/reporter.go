@@ -93,14 +93,14 @@ func envelopeFromPrefixedCandidate(captured CapturedResult) resultv1alpha1.Envel
 		return failureEnvelope("result_invalid", "prefixed Kontext result exceeded the capture limit")
 	}
 
-	parsed, err := resultv1alpha1.Parse(string(captured.Data))
+	envelope, err := resultv1alpha1.ParseVersioned(string(captured.Data))
+	if errors.Is(err, resultv1alpha1.ErrVersionedEnvelopeRequired) {
+		return failureEnvelope("result_invalid", "prefixed Kontext result must be a versioned envelope")
+	}
 	if err != nil {
 		return failureEnvelope("result_invalid", fmt.Sprintf("invalid prefixed Kontext result: %v", err))
 	}
-	if parsed.Envelope == nil {
-		return failureEnvelope("result_invalid", "prefixed Kontext result must be a versioned envelope")
-	}
-	return *parsed.Envelope
+	return envelope
 }
 
 func failureEnvelope(code string, message string) resultv1alpha1.Envelope {

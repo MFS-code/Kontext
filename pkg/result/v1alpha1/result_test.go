@@ -2,6 +2,7 @@ package v1alpha1_test
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -17,11 +18,11 @@ func TestParseVersionedEnvelopeWithArbitraryJSONOutput(t *testing.T) {
 		"extensions":{"anthropic.com/request":{"region":"us-east-1"}}
 	}`
 
-	parsed, err := resultv1alpha1.Parse(message)
+	parsed, legacy, err := resultv1alpha1.Parse(message)
 	if err != nil {
 		t.Fatalf("parse envelope: %v", err)
 	}
-	if parsed.Envelope == nil || parsed.Legacy {
+	if legacy {
 		t.Fatalf("expected versioned envelope, got %#v", parsed)
 	}
 	if got := resultv1alpha1.ProjectLegacyResult(parsed.Output); got != `{"answer":42,"items":[true,null]}` {
@@ -42,11 +43,11 @@ func TestParseVersionedEnvelopeWithArbitraryJSONOutput(t *testing.T) {
 }
 
 func TestParseLegacyPayload(t *testing.T) {
-	parsed, err := resultv1alpha1.Parse(`{"result":"done","tokensUsed":0,"dollarsUsed":1.5}`)
+	parsed, legacy, err := resultv1alpha1.Parse(`{"result":"done","tokensUsed":0,"dollarsUsed":1.5}`)
 	if err != nil {
 		t.Fatalf("parse legacy payload: %v", err)
 	}
-	if !parsed.Legacy || parsed.Envelope != nil {
+	if !legacy || parsed.APIVersion != resultv1alpha1.APIVersion {
 		t.Fatalf("expected legacy payload, got %#v", parsed)
 	}
 	if got := resultv1alpha1.ProjectLegacyResult(parsed.Output); got != "done" {
@@ -61,9 +62,12 @@ func TestParseLegacyPayload(t *testing.T) {
 }
 
 func TestParseLegacyPayloadWithoutUsageLeavesUsageAbsent(t *testing.T) {
-	parsed, err := resultv1alpha1.Parse(`{"result":"done"}`)
+	parsed, legacy, err := resultv1alpha1.Parse(`{"result":"done"}`)
 	if err != nil {
 		t.Fatalf("parse legacy payload: %v", err)
+	}
+	if !legacy {
+		t.Fatal("expected legacy wire format")
 	}
 	if parsed.Outcome != resultv1alpha1.OutcomeSucceeded {
 		t.Fatalf("expected explicit successful outcome, got %q", parsed.Outcome)
@@ -74,9 +78,12 @@ func TestParseLegacyPayloadWithoutUsageLeavesUsageAbsent(t *testing.T) {
 }
 
 func TestParseLegacyErrorPreservesExitCodeAuthority(t *testing.T) {
-	parsed, err := resultv1alpha1.Parse(`{"result":"done","error":"informational warning"}`)
+	parsed, legacy, err := resultv1alpha1.Parse(`{"result":"done","error":"informational warning"}`)
 	if err != nil {
 		t.Fatalf("parse legacy payload: %v", err)
+	}
+	if !legacy {
+		t.Fatal("expected legacy wire format")
 	}
 	if parsed.Outcome != resultv1alpha1.OutcomeSucceeded {
 		t.Fatalf("legacy error must not override a successful process exit, got %q", parsed.Outcome)
@@ -87,15 +94,85 @@ func TestParseLegacyErrorPreservesExitCodeAuthority(t *testing.T) {
 }
 
 func TestParsePlainText(t *testing.T) {
-	parsed, err := resultv1alpha1.Parse("plain answer")
+	parsed, legacy, err := resultv1alpha1.Parse("plain answer")
 	if err != nil {
 		t.Fatalf("parse plain text: %v", err)
+	}
+	if !legacy {
+		t.Fatal("expected plain text to be reported as legacy wire format")
 	}
 	if parsed.Outcome != resultv1alpha1.OutcomeSucceeded {
 		t.Fatalf("expected explicit successful outcome, got %q", parsed.Outcome)
 	}
 	if got := resultv1alpha1.ProjectLegacyResult(parsed.Output); got != "plain answer" {
 		t.Fatalf("expected plain answer, got %q", got)
+	}
+}
+
+func TestParseEmptyMessageSynthesizesSuccessfulEnvelope(t *testing.T) {
+	for _, message := range []string{"", " \t\r\n "} {
+		t.Run(message, func(t *testing.T) {
+			envelope, legacy, err := resultv1alpha1.Parse(message)
+			if err != nil {
+				t.Fatalf("parse empty message: %v", err)
+			}
+			if legacy {
+				t.Fatal("empty message must not be reported as a legacy wire payload")
+			}
+			if envelope.APIVersion != resultv1alpha1.APIVersion ||
+				envelope.Outcome != resultv1alpha1.OutcomeSucceeded {
+				t.Fatalf("unexpected empty-message envelope %#v", envelope)
+			}
+			if envelope.Output != nil || envelope.Usage != nil || envelope.Error != nil {
+				t.Fatalf("empty success must not invent result data: %#v", envelope)
+			}
+		})
+	}
+}
+
+func TestParseVersionedEnvelopeToleratesUnknownTopLevelFields(t *testing.T) {
+	envelope, legacy, err := resultv1alpha1.Parse(`{
+		"apiVersion":"kontext.dev/result/v1alpha1",
+		"outcome":"Succeeded",
+		"futureField":{"nested":true}
+	}`)
+	if err != nil {
+		t.Fatalf("parse forward-compatible envelope: %v", err)
+	}
+	if legacy || envelope.Outcome != resultv1alpha1.OutcomeSucceeded {
+		t.Fatalf("unexpected parsed envelope %#v legacy=%v", envelope, legacy)
+	}
+}
+
+func TestParseVersionedRequiresVersionedWirePayload(t *testing.T) {
+	for name, message := range map[string]string{
+		"empty":       "",
+		"whitespace":  " \t\r\n ",
+		"plain text":  "plain answer",
+		"legacy JSON": `{"result":"done"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := resultv1alpha1.ParseVersioned(message); !errors.Is(err, resultv1alpha1.ErrVersionedEnvelopeRequired) {
+				t.Fatalf("expected versioned-envelope sentinel, got %v", err)
+			}
+		})
+	}
+
+	envelope, err := resultv1alpha1.ParseVersioned(`{
+		"apiVersion":"kontext.dev/result/v1alpha1",
+		"outcome":"Succeeded",
+		"futureField":true
+	}`)
+	if err != nil {
+		t.Fatalf("parse versioned envelope: %v", err)
+	}
+	if envelope.Outcome != resultv1alpha1.OutcomeSucceeded {
+		t.Fatalf("unexpected versioned envelope %#v", envelope)
+	}
+
+	if _, err := resultv1alpha1.ParseVersioned(`{"apiVersion":`); err == nil ||
+		errors.Is(err, resultv1alpha1.ErrVersionedEnvelopeRequired) {
+		t.Fatalf("expected underlying malformed-payload error, got %v", err)
 	}
 }
 
@@ -106,7 +183,7 @@ func TestParseRejectsMalformedAndPartiallyWrittenPayloads(t *testing.T) {
 	}
 	for _, message := range cases {
 		t.Run(message, func(t *testing.T) {
-			if _, err := resultv1alpha1.Parse(message); err == nil {
+			if _, _, err := resultv1alpha1.Parse(message); err == nil {
 				t.Fatalf("expected malformed payload error")
 			}
 		})
@@ -114,14 +191,20 @@ func TestParseRejectsMalformedAndPartiallyWrittenPayloads(t *testing.T) {
 }
 
 func TestParseAcceptsSuccessfulAndFailedOutcomes(t *testing.T) {
-	success, err := resultv1alpha1.Parse(`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded"}`)
+	success, legacy, err := resultv1alpha1.Parse(`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded"}`)
 	if err != nil || success.Outcome != resultv1alpha1.OutcomeSucceeded {
 		t.Fatalf("unexpected success result %#v, error %v", success, err)
 	}
+	if legacy {
+		t.Fatal("versioned success was reported as legacy")
+	}
 
-	failure, err := resultv1alpha1.Parse(`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Failed","error":{"code":"provider_error","message":"unavailable","retryable":true}}`)
+	failure, legacy, err := resultv1alpha1.Parse(`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Failed","error":{"code":"provider_error","message":"unavailable","retryable":true}}`)
 	if err != nil {
 		t.Fatalf("parse failed outcome: %v", err)
+	}
+	if legacy {
+		t.Fatal("versioned failure was reported as legacy")
 	}
 	if failure.Outcome != resultv1alpha1.OutcomeFailed || failure.Error == nil || failure.Error.Code != "provider_error" {
 		t.Fatalf("unexpected failed result %#v", failure)
@@ -137,10 +220,11 @@ func TestParseRejectsInvalidEnvelope(t *testing.T) {
 		`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":`,
 		`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","usage":{"reasoningTokens":-1}}`,
 		`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","usage":{"outputTokens":4,"reasoningTokens":5}}`,
+		`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","extensions":{"unnamespaced":true}}`,
 	}
 	for _, message := range cases {
 		t.Run(message, func(t *testing.T) {
-			if _, err := resultv1alpha1.Parse(message); err == nil {
+			if _, _, err := resultv1alpha1.Parse(message); err == nil {
 				t.Fatalf("expected invalid envelope error")
 			}
 		})
@@ -178,19 +262,22 @@ func TestCompactProducesValidBoundedEnvelope(t *testing.T) {
 	if !json.Valid(compacted) {
 		t.Fatalf("compacted envelope is invalid JSON: %s", compacted)
 	}
-	parsed, err := resultv1alpha1.Parse(string(compacted))
+	parsed, legacy, err := resultv1alpha1.Parse(string(compacted))
 	if err != nil {
 		t.Fatalf("parse compacted envelope: %v", err)
 	}
-	if parsed.Envelope.Truncation == nil || !parsed.Envelope.Truncation.OutputTruncated {
-		t.Fatalf("expected explicit output truncation, got %#v", parsed.Envelope.Truncation)
+	if legacy {
+		t.Fatal("compacted envelope was reported as legacy")
+	}
+	if parsed.Truncation == nil || !parsed.Truncation.OutputTruncated {
+		t.Fatalf("expected explicit output truncation, got %#v", parsed.Truncation)
 	}
 	marker := resultv1alpha1.TruncatedOutput()
-	if parsed.Envelope.Output == nil ||
-		parsed.Envelope.Output.MediaType != resultv1alpha1.TruncatedOutputMediaType ||
-		parsed.Envelope.Output.MediaType != marker.MediaType ||
-		string(parsed.Envelope.Output.Value) != string(marker.Value) {
-		t.Fatalf("compaction did not use the shared truncation marker: %#v", parsed.Envelope.Output)
+	if parsed.Output == nil ||
+		parsed.Output.MediaType != resultv1alpha1.TruncatedOutputMediaType ||
+		parsed.Output.MediaType != marker.MediaType ||
+		string(parsed.Output.Value) != string(marker.Value) {
+		t.Fatalf("compaction did not use the shared truncation marker: %#v", parsed.Output)
 	}
 }
 

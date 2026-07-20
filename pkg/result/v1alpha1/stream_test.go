@@ -30,11 +30,11 @@ func TestWriteEnvelopeLineRoundTripsThroughExtract(t *testing.T) {
 	if !found {
 		t.Fatalf("payload not recognized in %q", line)
 	}
-	parsed, err := resultv1alpha1.Parse(string(payload))
+	parsed, legacy, err := resultv1alpha1.Parse(string(payload))
 	if err != nil {
 		t.Fatalf("parse payload: %v", err)
 	}
-	if parsed.Envelope == nil || parsed.Envelope.Outcome != resultv1alpha1.OutcomeFailed {
+	if legacy || parsed.Outcome != resultv1alpha1.OutcomeFailed {
 		t.Fatalf("unexpected parsed result %#v", parsed)
 	}
 }

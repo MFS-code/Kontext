@@ -1,17 +1,19 @@
 package engine_test
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
+	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/engine"
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
-func TestSuccessPreservesStructuredUsageAndOpaqueModel(t *testing.T) {
+func TestSuccessUsesExplicitCumulativeUsageAndOpaqueModel(t *testing.T) {
 	zero := int64(0)
-	outputTokens := int64(4)
-	reasoningTokens := int64(3)
+	outputTokens := int64(14)
+	reasoningTokens := int64(7)
 	response := runtimeapi.CompletionResponse{
 		Message: runtimeapi.Message{
 			Role: runtimeapi.RoleAssistant,
@@ -19,16 +21,16 @@ func TestSuccessPreservesStructuredUsageAndOpaqueModel(t *testing.T) {
 				{Type: runtimeapi.ContentTypeText, Text: "answer"},
 			},
 		},
-		Usage: runtimeapi.Usage{
-			InputTokens:     &zero,
-			OutputTokens:    &outputTokens,
-			ReasoningTokens: &reasoningTokens,
-		},
 		StopReason: runtimeapi.StopReasonEndTurn,
 		RequestID:  "request-1",
 	}
+	cumulativeUsage := runtimeapi.Usage{
+		InputTokens:     &zero,
+		OutputTokens:    &outputTokens,
+		ReasoningTokens: &reasoningTokens,
+	}
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	envelope := engine.Success(response, engine.Metadata{
+	envelope := engine.Success(response.Message, cumulativeUsage, engine.Metadata{
 		Provider:    "fake",
 		Model:       "vendor/model@2026:beta",
 		RequestID:   response.RequestID,
@@ -49,14 +51,18 @@ func TestSuccessPreservesStructuredUsageAndOpaqueModel(t *testing.T) {
 	if envelope.Usage.TotalTokens != nil {
 		t.Fatalf("missing total tokens must remain absent: %#v", envelope.Usage)
 	}
-	if envelope.Usage.ReasoningTokens == nil || *envelope.Usage.ReasoningTokens != 3 {
+	if envelope.Usage.OutputTokens == nil || *envelope.Usage.OutputTokens != 14 ||
+		envelope.Usage.ReasoningTokens == nil || *envelope.Usage.ReasoningTokens != 7 {
 		t.Fatalf("reasoning tokens were lost: %#v", envelope.Usage)
 	}
 }
 
-func TestFailureBuildsValidatedFailureEnvelope(t *testing.T) {
+func TestEmitFailureBuildsValidatedFailureEnvelope(t *testing.T) {
 	started := time.Now().UTC()
-	envelope := engine.Failure(
+	var output bytes.Buffer
+	if err := engine.EmitFailure(
+		&output,
+		nil,
 		"provider_error",
 		"unavailable",
 		nil,
@@ -66,7 +72,17 @@ func TestFailureBuildsValidatedFailureEnvelope(t *testing.T) {
 			StartedAt:   started,
 			CompletedAt: started,
 		},
-	)
+	); err != nil {
+		t.Fatalf("emit failure: %v", err)
+	}
+	payload, found := resultv1alpha1.ExtractEnvelopePayload(output.Bytes())
+	if !found {
+		t.Fatalf("failure envelope not found in %q", output.String())
+	}
+	envelope, err := resultv1alpha1.ParseVersioned(string(payload))
+	if err != nil {
+		t.Fatalf("parse failure envelope: %v", err)
+	}
 	if err := envelope.Validate(); err != nil {
 		t.Fatalf("validate envelope: %v", err)
 	}
