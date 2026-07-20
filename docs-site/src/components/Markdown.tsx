@@ -17,7 +17,11 @@ const components: Components = {
       return <Link to={href}>{children}</Link>;
     }
     return (
-      <a href={href} rel={href?.startsWith("http") ? "noreferrer" : undefined}>
+      <a
+        href={href}
+        target={href?.startsWith("http") ? "_blank" : undefined}
+        rel={href?.startsWith("http") ? "noreferrer noopener" : undefined}
+      >
         {children}
       </a>
     );
