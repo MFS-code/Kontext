@@ -12,6 +12,11 @@ const (
 	commandWaitDelay = time.Second
 )
 
+type terminationOperations struct {
+	signal func(int, os.Signal) error
+	kill   func(int) error
+}
+
 // Prepare configures command so its descendants can be signaled as one unit.
 // CommandContext commands also receive bounded pipe cleanup and group-aware
 // cancellation. Plain commands keep Cancel nil so custom supervisors can wait
@@ -69,11 +74,25 @@ func Terminate(
 		grace = 0
 	}
 
-	_ = Signal(processGroupID, gracefulTerminationSignal())
-
 	timer := time.NewTimer(grace)
 	defer timer.Stop()
+	return terminate(
+		ctx,
+		processGroupID,
+		done,
+		timer.C,
+		terminationOperations{signal: Signal, kill: Kill},
+	)
+}
 
+func terminate(
+	ctx context.Context,
+	processGroupID int,
+	done <-chan error,
+	graceExpired <-chan time.Time,
+	operations terminationOperations,
+) error {
+	_ = operations.signal(processGroupID, gracefulTerminationSignal())
 	var (
 		contextErr error
 		waitErr    error
@@ -85,12 +104,12 @@ func Terminate(
 			waitErr = err
 		}
 		waited = true
-	case <-timer.C:
+	case <-graceExpired:
 	case <-ctx.Done():
 		contextErr = ctx.Err()
 	}
 
-	killErr := Kill(processGroupID)
+	killErr := operations.kill(processGroupID)
 	if !waited && done != nil && contextErr == nil {
 		select {
 		case err, open := <-done:

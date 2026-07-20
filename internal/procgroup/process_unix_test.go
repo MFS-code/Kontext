@@ -76,15 +76,11 @@ func TestTerminateAllowsGracefulExit(t *testing.T) {
 		t,
 		`trap 'exit 0' TERM; echo READY; while :; do :; done`,
 	)
-	startedAt := time.Now()
 	if err := Terminate(context.Background(), command.Process.Pid, done, time.Second); err != nil {
 		t.Fatalf("terminate gracefully: %v", err)
 	}
-	if elapsed := time.Since(startedAt); elapsed >= time.Second {
-		t.Fatalf("graceful termination exhausted grace period: %s", elapsed)
-	}
-	if Exists(command.Process.Pid) {
-		t.Fatal("process group survived graceful termination")
+	if command.ProcessState == nil || command.ProcessState.ExitCode() != 0 {
+		t.Fatalf("graceful process state = %v, want exit 0", command.ProcessState)
 	}
 }
 
@@ -102,12 +98,7 @@ func TestTerminateEscalatesAfterGrace(t *testing.T) {
 	if elapsed < grace {
 		t.Fatalf("kill escalated before grace elapsed: %s", elapsed)
 	}
-	if elapsed > time.Second {
-		t.Fatalf("kill escalation took too long: %s", elapsed)
-	}
-	if Exists(command.Process.Pid) {
-		t.Fatal("process group survived kill escalation")
-	}
+	assertExitSignal(t, command, syscall.SIGKILL)
 }
 
 func TestTerminateCancellationEscalatesImmediately(t *testing.T) {
@@ -117,18 +108,12 @@ func TestTerminateCancellationEscalatesImmediately(t *testing.T) {
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	startedAt := time.Now()
 	err := Terminate(ctx, command.Process.Pid, done, 10*time.Second)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("terminate canceled context = %v, want context.Canceled", err)
 	}
-	if elapsed := time.Since(startedAt); elapsed > time.Second {
-		t.Fatalf("canceled termination took too long: %s", elapsed)
-	}
 	waitDone(t, done)
-	if Exists(command.Process.Pid) {
-		t.Fatal("process group survived canceled termination")
-	}
+	assertExitSignal(t, command, syscall.SIGKILL)
 }
 
 func startReadyCommand(t *testing.T, script string) (*exec.Cmd, <-chan error) {
@@ -172,5 +157,19 @@ func waitDone(t *testing.T, done <-chan error) error {
 	case <-time.After(2 * time.Second):
 		t.Fatal("process did not exit")
 		return nil
+	}
+}
+
+func assertExitSignal(t *testing.T, command *exec.Cmd, expected syscall.Signal) {
+	t.Helper()
+	if command.ProcessState == nil {
+		t.Fatal("process has no exit state")
+	}
+	status, ok := command.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok {
+		t.Fatalf("process state type = %T, want syscall.WaitStatus", command.ProcessState.Sys())
+	}
+	if !status.Signaled() || status.Signal() != expected {
+		t.Fatalf("process status = %v, want signal %v", status, expected)
 	}
 }

@@ -7,6 +7,7 @@ WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
 
+COPY internal/ internal/
 COPY pkg/result/ pkg/result/
 COPY pkg/event/ pkg/event/
 COPY runtimes/reporter/ runtimes/reporter/
