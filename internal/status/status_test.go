@@ -39,6 +39,30 @@ func TestObservePodPlainTextTermination(t *testing.T) {
 	}
 }
 
+func TestObservePodEmptyTerminationIsExplicitSuccess(t *testing.T) {
+	pod := &corev1.Pod{
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: podbuilder.RuntimeContainerName,
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						ExitCode: 0,
+						Message:  " \t\n",
+					},
+				},
+			}},
+		},
+	}
+
+	observation := status.ObservePod(pod)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("expected Succeeded, got %s", observation.Phase)
+	}
+	if observation.Result != "" || observation.Output != nil || observation.Usage != nil {
+		t.Fatalf("empty success invented status data: %#v", observation)
+	}
+}
+
 func TestObservePodMalformedTerminationOnSuccessFails(t *testing.T) {
 	exitCode := int32(0)
 	pod := &corev1.Pod{

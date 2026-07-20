@@ -92,13 +92,13 @@ func runtimeContainerStatus(pod *corev1.Pod) *corev1.ContainerStatus {
 
 func observationFromTermination(terminated *corev1.ContainerStateTerminated) PodObservation {
 	message := strings.TrimSpace(terminated.Message)
-	parsed, parseErr := resultv1alpha1.Parse(message)
+	envelope, _, parseErr := resultv1alpha1.Parse(message)
 	if parseErr != nil {
 		parseErr = fmt.Errorf("parse termination payload: %w", parseErr)
 	}
-	output := outputStatus(parsed)
-	usage := usageStatus(parsed)
-	legacyResult := resultv1alpha1.ProjectLegacyResult(parsed.Output)
+	output := outputStatus(envelope)
+	usage := usageStatus(envelope)
+	legacyResult := resultv1alpha1.ProjectLegacyResult(envelope.Output)
 
 	if terminated.ExitCode == 0 {
 		if parseErr != nil {
@@ -110,10 +110,10 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 				Message: fmt.Sprintf("Agent run exited 0 but the termination payload was malformed: %v", parseErr),
 			}
 		}
-		if parsed.Outcome == resultv1alpha1.OutcomeFailed {
+		if envelope.Outcome == resultv1alpha1.OutcomeFailed {
 			message := "Agent runtime reported a failed outcome."
-			if parsed.Error != nil {
-				message = fmt.Sprintf("%s %s", message, parsed.Error.Message)
+			if envelope.Error != nil {
+				message = fmt.Sprintf("%s %s", message, envelope.Error.Message)
 			}
 			return PodObservation{
 				Phase:   kontextv1alpha1.AgentRunPhaseFailed,
@@ -133,8 +133,8 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 	}
 
 	message = fmt.Sprintf("Agent run exited with code %d.", terminated.ExitCode)
-	if parsed.Error != nil {
-		message = fmt.Sprintf("%s %s", message, parsed.Error.Message)
+	if envelope.Error != nil {
+		message = fmt.Sprintf("%s %s", message, envelope.Error.Message)
 	}
 	if parseErr != nil {
 		message = fmt.Sprintf("%s (malformed termination payload: %v)", message, parseErr)
@@ -150,26 +150,26 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 	}
 }
 
-func outputStatus(parsed resultv1alpha1.ParsedResult) *kontextv1alpha1.OutputStatus {
-	if parsed.Output == nil {
+func outputStatus(envelope resultv1alpha1.Envelope) *kontextv1alpha1.OutputStatus {
+	if envelope.Output == nil {
 		return nil
 	}
 	return &kontextv1alpha1.OutputStatus{
-		MediaType: parsed.Output.MediaType,
+		MediaType: envelope.Output.MediaType,
 		Value: runtime.RawExtension{
-			Raw: append([]byte(nil), parsed.Output.Value...),
+			Raw: append([]byte(nil), envelope.Output.Value...),
 		},
 	}
 }
 
-func usageStatus(parsed resultv1alpha1.ParsedResult) *kontextv1alpha1.UsageStatus {
-	if parsed.Usage == nil {
+func usageStatus(envelope resultv1alpha1.Envelope) *kontextv1alpha1.UsageStatus {
+	if envelope.Usage == nil {
 		return nil
 	}
 	return &kontextv1alpha1.UsageStatus{
-		Tokens:       parsed.Usage.TotalTokens,
-		InputTokens:  parsed.Usage.InputTokens,
-		OutputTokens: parsed.Usage.OutputTokens,
-		Dollars:      parsed.Usage.Dollars,
+		Tokens:       envelope.Usage.TotalTokens,
+		InputTokens:  envelope.Usage.InputTokens,
+		OutputTokens: envelope.Usage.OutputTokens,
+		Dollars:      envelope.Usage.Dollars,
 	}
 }
