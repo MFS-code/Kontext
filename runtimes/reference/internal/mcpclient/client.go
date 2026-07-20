@@ -16,8 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
+	"github.com/MFS-code/Kontext/internal/tooloutput"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -384,7 +384,7 @@ func (current *server) call(
 			Content:   normalizeErr.Message,
 		}, nil
 	}
-	content, truncated := boundContent(content, maxCapturedBytes)
+	content, truncated := tooloutput.Bound(content, maxCapturedBytes)
 	return Result{
 		Content:   content,
 		IsError:   response.IsError,
@@ -929,7 +929,7 @@ func newRedactor(values []string) redactor {
 }
 
 func (redactor redactor) clean(value string) string {
-	return truncateUTF8(redactor.replace(value), maxExternalErrorBytes)
+	return tooloutput.TruncateUTF8(redactor.replace(value), maxExternalErrorBytes)
 }
 
 func (redactor redactor) replace(value string) string {
@@ -1062,47 +1062,4 @@ func waitForMCPProcessGroup(ctx context.Context, processGroupID int, limit time.
 		case <-ticker.C:
 		}
 	}
-}
-
-func boundContent(value string, maxBytes int64) (string, bool) {
-	if int64(len(value)) <= maxBytes {
-		return value, false
-	}
-	if !json.Valid([]byte(value)) {
-		return truncateUTF8(value, maxBytes), true
-	}
-	const emptyPartial = `{"partial":""}`
-	if maxBytes < int64(len(emptyPartial)) {
-		return "{}", true
-	}
-	low, high := 0, len(value)
-	best := emptyPartial
-	for low <= high {
-		middle := low + (high-low)/2
-		prefix := truncateUTF8(value, int64(middle))
-		encoded, _ := json.Marshal(struct {
-			Partial string `json:"partial"`
-		}{Partial: prefix})
-		if int64(len(encoded)) <= maxBytes {
-			best = string(encoded)
-			low = middle + 1
-		} else {
-			high = middle - 1
-		}
-	}
-	return best, true
-}
-
-func truncateUTF8(value string, maxBytes int64) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	if int64(len(value)) <= maxBytes {
-		return value
-	}
-	end := int(maxBytes)
-	for end > 0 && !utf8.ValidString(value[:end]) {
-		end--
-	}
-	return value[:end]
 }

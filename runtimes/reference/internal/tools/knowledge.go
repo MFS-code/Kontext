@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/MFS-code/Kontext/internal/tooloutput"
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
 
@@ -135,32 +136,29 @@ func (tool *knowledgeTool) Execute(
 			Message: fmt.Sprintf("read knowledge file: %v", err),
 		}
 	}
-	truncated := int64(len(data)) > tool.maxBytes
-	if truncated {
-		end := int(tool.maxBytes)
-		minimum := end - (utf8.UTFMax - 1)
-		if minimum < 0 {
-			minimum = 0
-		}
-		for end > minimum && !utf8.Valid(data[:end]) {
-			end--
-		}
-		if !utf8.Valid(data[:end]) {
-			return outcome{}, &Error{
-				Code:    "knowledge_invalid_encoding",
-				Message: "knowledge file must contain UTF-8 text",
-			}
-		}
-		data = data[:end]
-	}
-	if !utf8.Valid(data) {
+	oversized := int64(len(data)) > tool.maxBytes
+	if !oversized && !utf8.Valid(data) {
 		return outcome{}, &Error{
 			Code:    "knowledge_invalid_encoding",
 			Message: "knowledge file must contain UTF-8 text",
 		}
 	}
+	if oversized {
+		prefix := tooloutput.TruncateUTF8(string(data), tool.maxBytes)
+		minimum := tool.maxBytes - (utf8.UTFMax - 1)
+		if minimum < 0 {
+			minimum = 0
+		}
+		if int64(len(prefix)) < minimum {
+			return outcome{}, &Error{
+				Code:    "knowledge_invalid_encoding",
+				Message: "knowledge file must contain UTF-8 text",
+			}
+		}
+	}
+	content, truncated := tooloutput.Bound(string(data), tool.maxBytes)
 	return outcome{
-		Content:   string(data),
+		Content:   content,
 		Truncated: truncated,
 	}, nil
 }

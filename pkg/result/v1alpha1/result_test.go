@@ -185,6 +185,13 @@ func TestCompactProducesValidBoundedEnvelope(t *testing.T) {
 	if parsed.Envelope.Truncation == nil || !parsed.Envelope.Truncation.OutputTruncated {
 		t.Fatalf("expected explicit output truncation, got %#v", parsed.Envelope.Truncation)
 	}
+	marker := resultv1alpha1.TruncatedOutput()
+	if parsed.Envelope.Output == nil ||
+		parsed.Envelope.Output.MediaType != resultv1alpha1.TruncatedOutputMediaType ||
+		parsed.Envelope.Output.MediaType != marker.MediaType ||
+		string(parsed.Envelope.Output.Value) != string(marker.Value) {
+		t.Fatalf("compaction did not use the shared truncation marker: %#v", parsed.Envelope.Output)
+	}
 }
 
 func TestCompactLeavesSmallEnvelopeUnchanged(t *testing.T) {

@@ -382,6 +382,17 @@ run by themselves. Only a successful terminal provider response without tool
 calls becomes final output. Cancellation, execution failures, or reaching a
 configured limit before final output fail the run.
 
+When tool content exceeds an effective positive byte limit, the runtime sets
+the tool result's `truncated` field to `true` and normally replaces `content`
+with `{"partial":"<UTF-8 prefix>"}`. The prefix is chosen so the complete
+encoded envelope, including JSON escaping and envelope overhead, does not
+exceed the limit. If the limit is too small for that envelope, the runtime
+returns the deterministic minimal JSON value `0` at one byte or `{}` when at
+least two bytes fit. Thus every positively bounded truncated result is valid
+UTF-8, valid JSON, and no larger than its effective limit. Providers preserve
+this bounded JSON as the tool-result content string alongside the explicit
+truncation metadata.
+
 The reference runtime emits versioned JSONL lifecycle, usage, tool, output, and
 error events to stdout. It retains conversation state only in memory for one
 run and does not provide retries, planning, persistent memory, retrieval,

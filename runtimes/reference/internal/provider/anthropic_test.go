@@ -307,6 +307,7 @@ func TestAnthropicSerializesToolsCallsAndResults(t *testing.T) {
 			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
 	}
+	const boundedContent = `{"partial":"{\"status\":"}`
 	request.Messages = append(request.Messages,
 		runtimeapi.Message{
 			Role: runtimeapi.RoleAssistant,
@@ -329,7 +330,7 @@ func TestAnthropicSerializesToolsCallsAndResults(t *testing.T) {
 					ToolResult: &runtimeapi.ToolResult{
 						CallID:    "call-1",
 						Name:      "lookup",
-						Content:   `{"partial":"{\"status\":"}`,
+						Content:   boundedContent,
 						Truncated: true,
 					},
 				},
@@ -361,7 +362,9 @@ func TestAnthropicSerializesToolsCallsAndResults(t *testing.T) {
 	); err != nil {
 		t.Fatalf("decode tool result: %v", err)
 	}
-	if !toolResult.Truncated || !json.Valid([]byte(toolResult.Content)) {
+	if !toolResult.Truncated ||
+		toolResult.Content != boundedContent ||
+		!json.Valid([]byte(toolResult.Content)) {
 		t.Fatalf("invalid truncated tool result %#v", toolResult)
 	}
 }

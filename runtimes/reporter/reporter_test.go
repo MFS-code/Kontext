@@ -63,8 +63,11 @@ func TestEnvelopeFromLastLine(t *testing.T) {
 		truncated.Truncation.OriginalBytes != 8192 {
 		t.Fatalf("expected explicit truncation metadata, got %#v", truncated.Truncation)
 	}
-	if truncated.Output == nil || truncated.Output.MediaType != truncatedOutputMediaType ||
-		string(truncated.Output.Value) != truncatedOutputJSON {
+	marker := resultv1alpha1.TruncatedOutput()
+	if truncated.Output == nil ||
+		truncated.Output.MediaType != resultv1alpha1.TruncatedOutputMediaType ||
+		truncated.Output.MediaType != marker.MediaType ||
+		string(truncated.Output.Value) != string(marker.Value) {
 		t.Fatalf("unexpected truncated output %#v", truncated.Output)
 	}
 }
