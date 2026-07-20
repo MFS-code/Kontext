@@ -143,6 +143,20 @@ func (logs *staticLogs) Fetch(context.Context, string, string, string) (LogColle
 	}, logs.err
 }
 
+type contextInspectingLogs struct {
+	contextErr  error
+	hadDeadline bool
+}
+
+func (logs *contextInspectingLogs) Fetch(
+	ctx context.Context,
+	_, _, _ string,
+) (LogCollection, error) {
+	logs.contextErr = ctx.Err()
+	_, logs.hadDeadline = ctx.Deadline()
+	return LogCollection{}, nil
+}
+
 type orderingJudge struct {
 	t      *testing.T
 	called bool
@@ -156,6 +170,20 @@ func (judge *orderingJudge) Evaluate(
 	if len(observation.Grades) == 0 {
 		judge.t.Fatal("judge ran before deterministic graders")
 	}
+	return JudgeResult{Configured: true, Pass: true, Score: 1, Rationale: "ok"}, nil
+}
+
+type contextInspectingJudge struct {
+	contextErr  error
+	hadDeadline bool
+}
+
+func (judge *contextInspectingJudge) Evaluate(
+	ctx context.Context,
+	_ JudgeObservation,
+) (JudgeResult, error) {
+	judge.contextErr = ctx.Err()
+	_, judge.hadDeadline = ctx.Deadline()
 	return JudgeResult{Configured: true, Pass: true, Score: 1, Rationale: "ok"}, nil
 }
 
@@ -329,9 +357,9 @@ func (blockingJudge) Evaluate(
 
 type ambiguousCreateClient struct {
 	client.Client
-	unowned            bool
-	probeNotFoundCount int
-	deletes            int
+	unowned bool
+	gets    int
+	deletes int
 }
 
 func (cluster *ambiguousCreateClient) Create(
@@ -355,13 +383,7 @@ func (cluster *ambiguousCreateClient) Get(
 	object client.Object,
 	options ...client.GetOption,
 ) error {
-	if _, ok := object.(*kontextv1alpha1.AgentRun); ok && cluster.probeNotFoundCount > 0 {
-		cluster.probeNotFoundCount--
-		return apierrors.NewNotFound(
-			schema.GroupResource{Group: "kontext.dev", Resource: "agentruns"},
-			key.Name,
-		)
-	}
+	cluster.gets++
 	return cluster.Client.Get(ctx, key, object, options...)
 }
 

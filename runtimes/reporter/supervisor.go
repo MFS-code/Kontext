@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -30,7 +29,6 @@ type ChildResult struct {
 }
 
 func runChild(
-	ctx context.Context,
 	command []string,
 	stdout io.Writer,
 	stderr io.Writer,
@@ -77,7 +75,7 @@ func runChild(
 	signalErrors := &errorRecorder{}
 	go func() {
 		defer close(forwardingDone)
-		forwardSignals(ctx, signals, processGroupID, done, signalErrors)
+		forwardSignals(signals, processGroupID, done, signalErrors)
 	}()
 
 	status, waitErr := waitForMainProcess(processGroupID)
@@ -155,9 +153,7 @@ func channelErrors(errorsChannel <-chan error) []error {
 type streamForwarder struct {
 	sink    io.Writer
 	capture io.Writer
-
-	mu  sync.Mutex
-	err error
+	errorRecorder
 }
 
 func newStreamForwarder(sink io.Writer, capture io.Writer) *streamForwarder {
@@ -169,23 +165,13 @@ func (forwarder *streamForwarder) Write(data []byte) (int, error) {
 		_, _ = forwarder.capture.Write(data)
 	}
 
-	forwarder.mu.Lock()
-	defer forwarder.mu.Unlock()
-	if forwarder.err == nil {
-		if err := writeAll(forwarder.sink, data); err != nil {
-			forwarder.err = err
-		}
+	if forwarder.Err() == nil {
+		forwarder.Set(writeAll(forwarder.sink, data))
 	}
 
 	// Always report the input as consumed so os/exec continues draining the
 	// child's pipe even if the log destination fails.
 	return len(data), nil
-}
-
-func (forwarder *streamForwarder) Err() error {
-	forwarder.mu.Lock()
-	defer forwarder.mu.Unlock()
-	return forwarder.err
 }
 
 func writeAll(writer io.Writer, data []byte) error {
@@ -203,13 +189,11 @@ func writeAll(writer io.Writer, data []byte) error {
 }
 
 func forwardSignals(
-	ctx context.Context,
 	signals <-chan os.Signal,
 	processGroupID int,
 	done <-chan struct{},
 	recorder *errorRecorder,
 ) {
-	contextDone := ctx.Done()
 	for {
 		select {
 		case <-done:
@@ -222,11 +206,6 @@ func forwardSignals(
 			if err := forwardSignal(processGroupID, signal); err != nil {
 				recorder.Set(fmt.Errorf("forward signal %v: %w", signal, err))
 			}
-		case <-contextDone:
-			if err := procgroup.Signal(processGroupID, syscall.SIGTERM); err != nil {
-				recorder.Set(fmt.Errorf("forward context cancellation: %w", err))
-			}
-			contextDone = nil
 		}
 	}
 }

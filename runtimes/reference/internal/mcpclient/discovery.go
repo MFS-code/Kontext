@@ -46,7 +46,7 @@ func discoverTools(
 			return nil, fmt.Errorf("discover tools: %w", err)
 		}
 		if len(discovered) >= maxDiscoveredTools {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code: "mcp_discovery_limit_exceeded",
 				Message: fmt.Sprintf(
 					"MCP server %q exposes more than %d tools",
@@ -56,7 +56,7 @@ func discoverTools(
 			}
 		}
 		if tool == nil || !mcpToolNamePattern.MatchString(tool.Name) {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code: "mcp_invalid_tool_definition",
 				Message: fmt.Sprintf(
 					"MCP server %q returned a tool name outside the 1..128 [A-Za-z0-9_.-]+ constraint",
@@ -65,13 +65,13 @@ func discoverTools(
 			}
 		}
 		if redactor.containsSensitive(tool.Name) {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code:    "mcp_invalid_tool_definition",
 				Message: fmt.Sprintf("MCP server %q returned a tool name containing a resolved sensitive value", serverName),
 			}
 		}
 		if _, duplicate := seen[tool.Name]; duplicate {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code:    "mcp_invalid_tool_definition",
 				Message: fmt.Sprintf("MCP server %q returned duplicate tool %q", serverName, tool.Name),
 			}
@@ -93,13 +93,13 @@ func discoverTools(
 		}
 		rawSchema, marshalErr := json.Marshal(tool.InputSchema)
 		if marshalErr != nil {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code:    "mcp_invalid_tool_definition",
 				Message: fmt.Sprintf("MCP server %q tool %q schema cannot be encoded", serverName, tool.Name),
 			}
 		}
 		if redactor.containsSensitive(string(rawSchema)) {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code: "mcp_invalid_tool_definition",
 				Message: fmt.Sprintf(
 					"MCP server %q tool %q schema contains a resolved sensitive value",
@@ -119,7 +119,7 @@ func discoverTools(
 		}
 		schema, resolvedSchema, err := normalizeSchema(tool.InputSchema)
 		if err != nil {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code:    "mcp_invalid_tool_definition",
 				Message: fmt.Sprintf("MCP server %q tool %q: %v", serverName, tool.Name, err),
 			}
@@ -145,7 +145,7 @@ func discoverTools(
 		}
 		totalDefinitionBytes += definitionBytes
 		if totalDefinitionBytes > maxTotalToolDefinitionBytes {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code: "mcp_discovery_limit_exceeded",
 				Message: fmt.Sprintf(
 					"MCP server %q tool definitions exceed the %d-byte total limit",
@@ -200,8 +200,8 @@ func discoveryLimitError(
 	part string,
 	actual int,
 	limit int,
-) *Error {
-	return &Error{
+) *runtimeapi.CodedError {
+	return &runtimeapi.CodedError{
 		Code: "mcp_discovery_limit_exceeded",
 		Message: fmt.Sprintf(
 			"MCP server %q tool %q %s is %d bytes; limit is %d bytes",

@@ -48,23 +48,23 @@ func (tool *knowledgeTool) Definition() runtimeapi.ToolDefinition {
 func (tool *knowledgeTool) Execute(
 	ctx context.Context,
 	rawArguments []byte,
-) (outcome, error) {
+) (runtimeapi.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
-		return outcome{}, err
+		return runtimeapi.ToolResult{}, err
 	}
 	var arguments readKnowledgeArguments
 	if err := decodeArguments(rawArguments, &arguments); err != nil {
-		return outcome{}, err
+		return runtimeapi.ToolResult{}, err
 	}
 	requested := strings.TrimSpace(arguments.Path)
 	if requested == "" {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "invalid_tool_arguments",
 			Message: "path must be a non-empty file path",
 		}
 	}
 	if filepath.IsAbs(requested) {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_path_denied",
 			Message: "path must be relative to /kontext/knowledge",
 		}
@@ -72,7 +72,7 @@ func (tool *knowledgeTool) Execute(
 	cleaned := filepath.Clean(requested)
 	if cleaned == "." || cleaned == ".." ||
 		strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_path_denied",
 			Message: "path must remain inside /kontext/knowledge",
 		}
@@ -80,7 +80,7 @@ func (tool *knowledgeTool) Execute(
 
 	resolvedRoot, err := filepath.EvalSymlinks(tool.root)
 	if err != nil {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_unavailable",
 			Message: fmt.Sprintf("knowledge directory is unavailable: %v", err),
 		}
@@ -88,12 +88,12 @@ func (tool *knowledgeTool) Execute(
 	resolvedPath, err := filepath.EvalSymlinks(filepath.Join(resolvedRoot, cleaned))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return outcome{}, &Error{
+			return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 				Code:    "knowledge_not_found",
 				Message: fmt.Sprintf("knowledge file %q does not exist", requested),
 			}
 		}
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_read_failed",
 			Message: fmt.Sprintf("resolve knowledge file: %v", err),
 		}
@@ -101,7 +101,7 @@ func (tool *knowledgeTool) Execute(
 	relative, err := filepath.Rel(resolvedRoot, resolvedPath)
 	if err != nil || relative == ".." ||
 		strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_path_denied",
 			Message: "resolved path leaves /kontext/knowledge",
 		}
@@ -109,7 +109,7 @@ func (tool *knowledgeTool) Execute(
 
 	file, err := os.Open(resolvedPath)
 	if err != nil {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_read_failed",
 			Message: fmt.Sprintf("open knowledge file: %v", err),
 		}
@@ -117,13 +117,13 @@ func (tool *knowledgeTool) Execute(
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_read_failed",
 			Message: fmt.Sprintf("inspect knowledge file: %v", err),
 		}
 	}
 	if !info.Mode().IsRegular() {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_path_denied",
 			Message: "path must identify a regular file",
 		}
@@ -131,14 +131,14 @@ func (tool *knowledgeTool) Execute(
 
 	data, err := io.ReadAll(io.LimitReader(file, tool.maxBytes+utf8.UTFMax))
 	if err != nil {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_read_failed",
 			Message: fmt.Sprintf("read knowledge file: %v", err),
 		}
 	}
 	oversized := int64(len(data)) > tool.maxBytes
 	if !oversized && !utf8.Valid(data) {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "knowledge_invalid_encoding",
 			Message: "knowledge file must contain UTF-8 text",
 		}
@@ -150,14 +150,14 @@ func (tool *knowledgeTool) Execute(
 			minimum = 0
 		}
 		if int64(len(prefix)) < minimum {
-			return outcome{}, &Error{
+			return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 				Code:    "knowledge_invalid_encoding",
 				Message: "knowledge file must contain UTF-8 text",
 			}
 		}
 	}
 	content, truncated := tooloutput.Bound(string(data), tool.maxBytes)
-	return outcome{
+	return runtimeapi.ToolResult{
 		Content:   content,
 		Truncated: truncated,
 	}, nil
@@ -167,14 +167,14 @@ func decodeArguments(raw []byte, destination any) error {
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
-		return &Error{
+		return &runtimeapi.CodedError{
 			Code:    "invalid_tool_arguments",
 			Message: fmt.Sprintf("invalid tool arguments: %v", err),
 		}
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return &Error{
+		return &runtimeapi.CodedError{
 			Code:    "invalid_tool_arguments",
 			Message: "tool arguments contain trailing data",
 		}

@@ -303,6 +303,7 @@ func TestSnapshotFieldCoverage(t *testing.T) {
 		"Goal",
 		"KnowledgeConfigMapRef",
 		"Model",
+		"Parameters",
 		"Provider",
 		"Runtime",
 		"SecretRef",

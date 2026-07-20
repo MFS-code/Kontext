@@ -28,6 +28,63 @@ type httpResult struct {
 	Body       []byte
 }
 
+type providerErrorResponse struct {
+	RequestID string `json:"request_id"`
+	Error     struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func completeJSON[Response any](
+	ctx context.Context,
+	client HTTPClient,
+	endpoint string,
+	headers http.Header,
+	payload any,
+	providerName string,
+	requestIDHeader string,
+	useBodyRequestID bool,
+	normalize func(Response, string) (runtimeapi.CompletionResponse, error),
+) (runtimeapi.CompletionResponse, error) {
+	result, err := sendJSON(ctx, client, endpoint, headers, payload)
+	if err != nil {
+		return runtimeapi.CompletionResponse{}, err
+	}
+
+	responseRequestID := requestID(result.Header, requestIDHeader)
+	if result.StatusCode < http.StatusOK || result.StatusCode >= http.StatusMultipleChoices {
+		var failure providerErrorResponse
+		_ = json.Unmarshal(result.Body, &failure)
+		if useBodyRequestID && responseRequestID == "" {
+			responseRequestID = strings.TrimSpace(failure.RequestID)
+		}
+		return runtimeapi.CompletionResponse{}, providerHTTPError(
+			providerName,
+			result.StatusCode,
+			failure.Error.Message,
+			responseRequestID,
+		)
+	}
+
+	var response Response
+	if err := json.Unmarshal(result.Body, &response); err != nil {
+		return runtimeapi.CompletionResponse{}, invalidResponse(
+			fmt.Sprintf("%s returned malformed JSON: %v", providerName, err),
+			result.StatusCode,
+			responseRequestID,
+		)
+	}
+	normalized, err := normalize(response, responseRequestID)
+	if err != nil {
+		return runtimeapi.CompletionResponse{}, invalidResponse(
+			fmt.Sprintf("%s returned an invalid response: %v", providerName, err),
+			result.StatusCode,
+			responseRequestID,
+		)
+	}
+	return normalized, nil
+}
+
 func sendJSON(
 	ctx context.Context,
 	client HTTPClient,

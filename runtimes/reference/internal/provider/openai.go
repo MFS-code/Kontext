@@ -74,40 +74,17 @@ func (openAI *OpenAI) Complete(
 	}
 	headers := make(http.Header)
 	headers.Set("Authorization", "Bearer "+openAI.apiKey)
-	result, err := sendJSON(ctx, openAI.client, openAI.endpoint, headers, payload)
-	if err != nil {
-		return runtimeapi.CompletionResponse{}, err
-	}
-
-	responseRequestID := requestID(result.Header, "x-request-id")
-	if result.StatusCode < http.StatusOK || result.StatusCode >= http.StatusMultipleChoices {
-		var failure openAIErrorResponse
-		_ = json.Unmarshal(result.Body, &failure)
-		return runtimeapi.CompletionResponse{}, providerHTTPError(
-			openAI.name,
-			result.StatusCode,
-			failure.Error.Message,
-			responseRequestID,
-		)
-	}
-
-	var response openAIResponse
-	if err := json.Unmarshal(result.Body, &response); err != nil {
-		return runtimeapi.CompletionResponse{}, invalidResponse(
-			fmt.Sprintf("%s returned malformed JSON: %v", openAI.name, err),
-			result.StatusCode,
-			responseRequestID,
-		)
-	}
-	normalized, err := normalizeOpenAIResponse(response, responseRequestID)
-	if err != nil {
-		return runtimeapi.CompletionResponse{}, invalidResponse(
-			fmt.Sprintf("%s returned an invalid response: %v", openAI.name, err),
-			result.StatusCode,
-			responseRequestID,
-		)
-	}
-	return normalized, nil
+	return completeJSON(
+		ctx,
+		openAI.client,
+		openAI.endpoint,
+		headers,
+		payload,
+		openAI.name,
+		"x-request-id",
+		false,
+		normalizeOpenAIResponse,
+	)
 }
 
 type openAIRequestPayload struct {
@@ -143,18 +120,16 @@ type openAIToolDefinition struct {
 }
 
 func openAIRequest(request runtimeapi.CompletionRequest) (openAIRequestPayload, error) {
+	if err := validateToolDefinitions(request.Tools); err != nil {
+		return openAIRequestPayload{}, err
+	}
 	payload := openAIRequestPayload{
 		Model:               request.Model,
 		Messages:            make([]openAIRequestMessage, 0, len(request.Messages)),
 		MaxCompletionTokens: request.MaxTokens,
 		Tools:               make([]openAIToolDefinition, 0, len(request.Tools)),
 	}
-	for index, definition := range request.Tools {
-		if strings.TrimSpace(definition.Name) == "" ||
-			strings.TrimSpace(definition.Description) == "" ||
-			!json.Valid(definition.InputSchema) {
-			return openAIRequestPayload{}, fmt.Errorf("tool definition %d is invalid", index)
-		}
+	for _, definition := range request.Tools {
 		normalized := openAIToolDefinition{Type: "function"}
 		normalized.Function.Name = definition.Name
 		normalized.Function.Description = definition.Description
@@ -165,14 +140,8 @@ func openAIRequest(request runtimeapi.CompletionRequest) (openAIRequestPayload, 
 		payload.Tools = append(payload.Tools, normalized)
 	}
 	for index, message := range request.Messages {
-		if message.Role != runtimeapi.RoleUser &&
-			message.Role != runtimeapi.RoleAssistant &&
-			message.Role != runtimeapi.RoleTool {
-			return openAIRequestPayload{}, fmt.Errorf(
-				"message %d has unsupported role %q",
-				index,
-				message.Role,
-			)
+		if err := validateMessage(index, message); err != nil {
+			return openAIRequestPayload{}, err
 		}
 		if message.Role == runtimeapi.RoleTool {
 			for blockIndex, block := range message.Content {
@@ -264,12 +233,6 @@ type openAIUsage struct {
 
 type openAICompletionTokenDetails struct {
 	ReasoningTokens *int64 `json:"reasoning_tokens"`
-}
-
-type openAIErrorResponse struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
 }
 
 func normalizeOpenAIResponse(

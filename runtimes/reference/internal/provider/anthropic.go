@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	runtimeapi "github.com/MFS-code/Kontext/runtimes/reference/internal/runtimeapi"
 )
@@ -70,43 +69,17 @@ func (anthropic *Anthropic) Complete(
 	headers := make(http.Header)
 	headers.Set("x-api-key", anthropic.apiKey)
 	headers.Set("anthropic-version", anthropicVersion)
-	result, err := sendJSON(ctx, anthropic.client, anthropic.endpoint, headers, payload)
-	if err != nil {
-		return runtimeapi.CompletionResponse{}, err
-	}
-
-	responseRequestID := requestID(result.Header, "request-id")
-	if result.StatusCode < http.StatusOK || result.StatusCode >= http.StatusMultipleChoices {
-		var failure anthropicErrorResponse
-		_ = json.Unmarshal(result.Body, &failure)
-		if responseRequestID == "" {
-			responseRequestID = strings.TrimSpace(failure.RequestID)
-		}
-		return runtimeapi.CompletionResponse{}, providerHTTPError(
-			"anthropic",
-			result.StatusCode,
-			failure.Error.Message,
-			responseRequestID,
-		)
-	}
-
-	var response anthropicResponse
-	if err := json.Unmarshal(result.Body, &response); err != nil {
-		return runtimeapi.CompletionResponse{}, invalidResponse(
-			fmt.Sprintf("anthropic returned malformed JSON: %v", err),
-			result.StatusCode,
-			responseRequestID,
-		)
-	}
-	normalized, err := normalizeAnthropicResponse(response, responseRequestID)
-	if err != nil {
-		return runtimeapi.CompletionResponse{}, invalidResponse(
-			fmt.Sprintf("anthropic returned an invalid response: %v", err),
-			result.StatusCode,
-			responseRequestID,
-		)
-	}
-	return normalized, nil
+	return completeJSON(
+		ctx,
+		anthropic.client,
+		anthropic.endpoint,
+		headers,
+		payload,
+		"anthropic",
+		"request-id",
+		true,
+		normalizeAnthropicResponse,
+	)
 }
 
 type anthropicRequestPayload struct {
@@ -139,6 +112,9 @@ type anthropicToolDefinition struct {
 }
 
 func anthropicRequest(request runtimeapi.CompletionRequest) (anthropicRequestPayload, error) {
+	if err := validateToolDefinitions(request.Tools); err != nil {
+		return anthropicRequestPayload{}, err
+	}
 	maxTokens := anthropicDefaultMaxTokens
 	if request.MaxTokens != nil {
 		maxTokens = *request.MaxTokens
@@ -149,12 +125,7 @@ func anthropicRequest(request runtimeapi.CompletionRequest) (anthropicRequestPay
 		Messages:  make([]anthropicRequestMessage, 0, len(request.Messages)),
 		Tools:     make([]anthropicToolDefinition, 0, len(request.Tools)),
 	}
-	for index, definition := range request.Tools {
-		if strings.TrimSpace(definition.Name) == "" ||
-			strings.TrimSpace(definition.Description) == "" ||
-			!json.Valid(definition.InputSchema) {
-			return anthropicRequestPayload{}, fmt.Errorf("tool definition %d is invalid", index)
-		}
+	for _, definition := range request.Tools {
 		payload.Tools = append(payload.Tools, anthropicToolDefinition{
 			Name:        definition.Name,
 			Description: definition.Description,
@@ -162,14 +133,8 @@ func anthropicRequest(request runtimeapi.CompletionRequest) (anthropicRequestPay
 		})
 	}
 	for messageIndex, message := range request.Messages {
-		if message.Role != runtimeapi.RoleUser &&
-			message.Role != runtimeapi.RoleAssistant &&
-			message.Role != runtimeapi.RoleTool {
-			return anthropicRequestPayload{}, fmt.Errorf(
-				"message %d has unsupported role %q",
-				messageIndex,
-				message.Role,
-			)
+		if err := validateMessage(messageIndex, message); err != nil {
+			return anthropicRequestPayload{}, err
 		}
 		role := string(message.Role)
 		if message.Role == runtimeapi.RoleTool {
@@ -253,13 +218,6 @@ type anthropicResponseContent struct {
 type anthropicUsage struct {
 	InputTokens  *int64 `json:"input_tokens"`
 	OutputTokens *int64 `json:"output_tokens"`
-}
-
-type anthropicErrorResponse struct {
-	RequestID string `json:"request_id"`
-	Error     struct {
-		Message string `json:"message"`
-	} `json:"error"`
 }
 
 func normalizeAnthropicResponse(

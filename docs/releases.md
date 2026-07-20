@@ -39,8 +39,12 @@ a classic `PACKAGES_TOKEN` repository secret with `write:packages`; the
 workflow uses it only for the visibility operation. Publication fails before a
 GitHub release is created if anonymous access cannot be verified.
 
-The unmaintained `runtimes/python-anthropic` migration example is not
-published.
+## Release checklist
+
+- [ ] Bump the documented release version in `README.md`, `SECURITY.md`,
+  `docs/quickstart.md`, `docs/releases.md`, `docs/service-workload.md`,
+  `website/index.html`, `deploy/examples/v1alpha1/README.md`, and
+  `.github/ISSUE_TEMPLATE/bug_report.yml`.
 
 ## Install
 

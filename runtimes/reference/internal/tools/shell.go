@@ -70,40 +70,40 @@ func (tool *shellTool) Definition() runtimeapi.ToolDefinition {
 func (tool *shellTool) Execute(
 	ctx context.Context,
 	rawArguments []byte,
-) (outcome, error) {
+) (runtimeapi.ToolResult, error) {
 	var arguments shellArguments
 	if err := decodeArguments(rawArguments, &arguments); err != nil {
-		return outcome{}, err
+		return runtimeapi.ToolResult{}, err
 	}
 	if strings.TrimSpace(arguments.Command) == "" ||
 		strings.ContainsRune(arguments.Command, '\x00') {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "invalid_tool_arguments",
 			Message: "command must be a non-empty string without NUL bytes",
 		}
 	}
 	if !filepath.IsAbs(arguments.WorkingDirectory) {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "invalid_tool_arguments",
 			Message: "working_directory must be absolute",
 		}
 	}
 	info, err := os.Stat(arguments.WorkingDirectory)
 	if err != nil {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "shell_working_directory_invalid",
 			Message: fmt.Sprintf("inspect working directory: %v", err),
 		}
 	}
 	if !info.IsDir() {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "shell_working_directory_invalid",
 			Message: "working_directory must identify a directory",
 		}
 	}
 	environment, err := filteredEnvironment(arguments.Environment)
 	if err != nil {
-		return outcome{}, err
+		return runtimeapi.ToolResult{}, err
 	}
 
 	captureBudget := &captureBudget{remaining: tool.maxBytes}
@@ -120,7 +120,7 @@ func (tool *shellTool) Execute(
 	command.Stderr = io.MultiWriter(stderrStream, stderrCapture)
 	procgroup.Prepare(command)
 	if err := command.Start(); err != nil {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "shell_start_failed",
 			Message: fmt.Sprintf("start shell command: %v", err),
 		}
@@ -140,7 +140,7 @@ func (tool *shellTool) Execute(
 			done,
 			shellTerminationGrace,
 		)
-		return outcome{}, ctx.Err()
+		return runtimeapi.ToolResult{}, ctx.Err()
 	}
 	_ = procgroup.Kill(command.Process.Pid)
 
@@ -148,7 +148,7 @@ func (tool *shellTool) Execute(
 	if waitErr != nil {
 		var exitError *exec.ExitError
 		if !errors.As(waitErr, &exitError) {
-			return outcome{}, &Error{
+			return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 				Code:    "shell_wait_failed",
 				Message: fmt.Sprintf("wait for shell command: %v", waitErr),
 			}
@@ -161,12 +161,12 @@ func (tool *shellTool) Execute(
 		Stderr:   stderrCapture.String(),
 	})
 	if err != nil {
-		return outcome{}, &Error{
+		return runtimeapi.ToolResult{}, &runtimeapi.CodedError{
 			Code:    "shell_output_failed",
 			Message: fmt.Sprintf("encode shell output: %v", err),
 		}
 	}
-	result := outcome{
+	result := runtimeapi.ToolResult{
 		Content:   string(encoded),
 		Truncated: stdoutCapture.Truncated() || stderrCapture.Truncated(),
 	}
@@ -186,19 +186,19 @@ func filteredEnvironment(requested map[string]string) ([]string, error) {
 	}
 	for name, value := range requested {
 		if !environmentNamePattern.MatchString(name) {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code:    "shell_environment_denied",
 				Message: fmt.Sprintf("environment variable name %q is invalid", name),
 			}
 		}
 		if sensitiveEnvironmentName(name) {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code:    "shell_environment_denied",
 				Message: fmt.Sprintf("environment variable %q is reserved or sensitive", name),
 			}
 		}
 		if strings.ContainsRune(value, '\x00') {
-			return nil, &Error{
+			return nil, &runtimeapi.CodedError{
 				Code:    "shell_environment_denied",
 				Message: fmt.Sprintf("environment variable %q contains a NUL byte", name),
 			}

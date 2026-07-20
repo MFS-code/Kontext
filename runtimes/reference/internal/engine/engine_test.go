@@ -67,6 +67,7 @@ func TestRunnerClosesEveryResolvedExecutorExactlyOnce(t *testing.T) {
 		resolverError  error
 		wantExitCode   int
 		wantCloseCalls int
+		wantErrorCode  string
 	}{
 		{
 			name:           "executor and error",
@@ -74,12 +75,17 @@ func TestRunnerClosesEveryResolvedExecutorExactlyOnce(t *testing.T) {
 			resolverError:  errors.New("resolve failed"),
 			wantExitCode:   1,
 			wantCloseCalls: 1,
+			wantErrorCode:  "invalid_tool_configuration",
 		},
 		{
-			name:           "nil and error",
-			resolverError:  errors.New("resolve failed"),
+			name: "nil and coded error",
+			resolverError: &runtimeapi.CodedError{
+				Code:    "unknown_tool",
+				Message: "resolve failed",
+			},
 			wantExitCode:   1,
 			wantCloseCalls: 0,
+			wantErrorCode:  "unknown_tool",
 		},
 		{
 			name:           "successful executor",
@@ -115,7 +121,7 @@ func TestRunnerClosesEveryResolvedExecutorExactlyOnce(t *testing.T) {
 			}
 			if test.resolverError != nil &&
 				(result.Envelope.Error == nil ||
-					result.Envelope.Error.Code != "invalid_tool_configuration" ||
+					result.Envelope.Error.Code != test.wantErrorCode ||
 					result.Envelope.Error.Message != test.resolverError.Error()) {
 				t.Fatalf("resolver error was not preserved: %#v", result.Envelope.Error)
 			}

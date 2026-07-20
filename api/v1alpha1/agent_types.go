@@ -18,15 +18,17 @@ const (
 )
 
 // AgentSpec defines the desired state of Agent.
-// +kubebuilder:validation:XValidation:rule="self.mode == 'Scheduled' ? has(self.schedule) && self.goal.size() > 0 : !has(self.schedule)",message="schedule and a concrete goal are required only in Scheduled mode"
-// +kubebuilder:validation:XValidation:rule="self.mode == 'Service' ? self.goal.size() > 0 : true",message="Service mode requires a concrete goal"
-// +kubebuilder:validation:XValidation:rule="self.mode == 'Service' ? true : !has(self.backoff)",message="backoff is supported only in Service mode"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Task' ? has(self.goal) != has(self.goalTemplate) : has(self.goal) && !has(self.goalTemplate)",message="Task agents require exactly one of goal or goalTemplate; Service and Scheduled agents require goal and forbid goalTemplate"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Scheduled' ? has(self.schedule) : !has(self.schedule)",message="schedule is required only for Scheduled agents"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Service' || !has(self.backoff)",message="backoff is only valid for Service agents"
 type AgentSpec struct {
 	Mode AgentMode `json:"mode"`
 
 	Runtime RuntimeSpec `json:"runtime"`
 
-	Goal         string `json:"goal,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	Goal string `json:"goal,omitempty"`
+	// +kubebuilder:validation:MinLength=1
 	GoalTemplate string `json:"goalTemplate,omitempty"`
 
 	Provider string `json:"provider,omitempty"`

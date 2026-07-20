@@ -166,6 +166,13 @@ func (in *AgentRunSpec) DeepCopyInto(out *AgentRunSpec) {
 		*out = new(AgentRef)
 		**out = **in
 	}
+	if in.Parameters != nil {
+		in, out := &in.Parameters, &out.Parameters
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	if in.Tools != nil {
 		in, out := &in.Tools, &out.Tools
 		*out = make([]string, len(*in))

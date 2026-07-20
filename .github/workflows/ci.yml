@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -176,49 +175,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build operator image
-        uses: ./.github/actions/build-image
+      - name: Build kind images
+        uses: ./.github/actions/build-core-images
         with:
-          context: .
-          tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
-          cache-scope: operator
-          load: "true"
-
-      - name: Build echo runtime image
-        uses: ./.github/actions/build-image
-        with:
-          context: runtimes/echo
-          dockerfile: runtimes/echo/Dockerfile
-          tags: ${{ env.KONTEXT_ECHO_IMAGE }}
-          cache-scope: echo
-          load: "true"
-
-      - name: Build reusable reporter image
-        uses: ./.github/actions/build-image
-        with:
-          context: .
-          dockerfile: runtimes/reporter/Dockerfile
-          tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
-          cache-scope: reporter
-          load: "true"
-
-      - name: Build model-agnostic reference runtime image
-        uses: ./.github/actions/build-image
-        with:
-          context: .
-          dockerfile: runtimes/reference/Dockerfile
-          tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
-          cache-scope: reference
-          load: "true"
-
-      - name: Build stdout-capture fixture image
-        uses: ./.github/actions/build-image
-        with:
-          context: runtimes/stdout-fixture
-          dockerfile: runtimes/stdout-fixture/Dockerfile
-          tags: ${{ env.KONTEXT_STDOUT_FIXTURE_IMAGE }}
-          cache-scope: stdout-fixture
-          load: "true"
+          image-set: full
+          cache-scope: ""
 
       - name: Create kind cluster
         uses: helm/kind-action@v1
@@ -248,17 +209,12 @@ jobs:
           include-hidden-files: true
           retention-days: 5
 
-      - name: Collect diagnostics on failure
+      - name: Preserve diagnostics
         if: failure()
-        run: ./scripts/collect-kind-diagnostics.sh "${KONTEXT_DIAG_DIR}"
-
-      - name: Upload diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/kind-diagnostics
         with:
-          name: kind-diagnostics-${{ github.run_id }}
-          path: ${{ env.KONTEXT_DIAG_DIR }}
-          if-no-files-found: ignore
+          diagnostics-dir: ${{ env.KONTEXT_DIAG_DIR }}
+          artifact-name: kind-diagnostics-${{ github.run_id }}
 
       - name: Delete kind cluster
         if: always()
@@ -285,42 +241,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build operator image
-        uses: ./.github/actions/build-image
+      - name: Build NetworkPolicy images
+        uses: ./.github/actions/build-core-images
         with:
-          context: .
-          tags: ${{ env.KONTEXT_OPERATOR_IMAGE }}
-          cache-scope: network-policy-operator
-          load: "true"
-
-      - name: Build reusable reporter image
-        uses: ./.github/actions/build-image
-        with:
-          context: .
-          dockerfile: runtimes/reporter/Dockerfile
-          tags: ${{ env.KONTEXT_REPORTER_IMAGE }}
-          cache-scope: network-policy-reporter
-          load: "true"
-
-      - name: Build model-agnostic reference runtime image
-        uses: ./.github/actions/build-image
-        with:
-          context: .
-          dockerfile: runtimes/reference/Dockerfile
-          tags: ${{ env.KONTEXT_REFERENCE_IMAGE }}
-          cache-scope: network-policy-reference
-          load: "true"
+          image-set: network-policy
+          cache-scope: network-policy-
 
       - name: Run Calico NetworkPolicy acceptance
         run: ./scripts/e2e-kind-network-policy.sh
 
-      - name: Upload diagnostics
+      - name: Preserve diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/kind-diagnostics
         with:
-          name: network-policy-diagnostics-${{ github.run_id }}
-          path: ${{ env.KONTEXT_DIAG_DIR }}
-          if-no-files-found: ignore
+          diagnostics-dir: ${{ env.KONTEXT_DIAG_DIR }}
+          artifact-name: network-policy-diagnostics-${{ github.run_id }}
+          collect: "false"
 
       - name: Delete kind cluster
         if: always()

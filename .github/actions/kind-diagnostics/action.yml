@@ -1,0 +1,52 @@
+name: Preserve kind diagnostics
+description: Collect and upload diagnostics from a failed kind job
+
+inputs:
+  diagnostics-dir:
+    description: Directory containing the diagnostics artifact
+    required: true
+  artifact-name:
+    description: Name of the uploaded diagnostics artifact
+    required: true
+  collect:
+    description: Collect standard diagnostics before uploading
+    required: false
+    default: "true"
+  redact-workloads:
+    description: Remove workload details that may contain provider data
+    required: false
+    default: "false"
+  retention-days:
+    description: Number of days to retain the artifact (0 uses the repository default)
+    required: false
+    default: "0"
+
+runs:
+  using: composite
+  steps:
+    - name: Collect kind diagnostics
+      if: ${{ always() && inputs.collect == 'true' }}
+      shell: bash
+      env:
+        DIAGNOSTICS_DIR: ${{ inputs.diagnostics-dir }}
+      run: ./scripts/collect-kind-diagnostics.sh "${DIAGNOSTICS_DIR}"
+
+    - name: Redact workload diagnostics
+      if: ${{ always() && inputs.redact-workloads == 'true' }}
+      shell: bash
+      env:
+        DIAGNOSTICS_DIR: ${{ inputs.diagnostics-dir }}
+      run: |
+        rm -f \
+          "${DIAGNOSTICS_DIR}/agent-workloads.txt" \
+          "${DIAGNOSTICS_DIR}/kontext-resources.txt" \
+          "${DIAGNOSTICS_DIR}/workload-overview.txt"
+
+    - name: Upload kind diagnostics
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.diagnostics-dir }}
+        if-no-files-found: ignore
+        retention-days: ${{ inputs.retention-days }}

@@ -109,7 +109,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	runner := Runner{
 		Client: controllerClient,
-		Logs:   KubernetesLogFetcher{Client: clientset},
+		Logs:   NewKubernetesLogFetcher(clientset),
 		Options: RunnerOptions{
 			Namespace: namespace,
 			KeepRuns:  keepRuns,
