@@ -247,17 +247,20 @@ type Record struct {
 }
 
 type Summary struct {
-	APIVersion        string                 `json:"apiVersion"`
-	Suite             string                 `json:"suite"`
-	StartedAt         time.Time              `json:"startedAt"`
-	CompletedAt       time.Time              `json:"completedAt"`
-	Total             int                    `json:"total"`
-	Passed            int                    `json:"passed"`
-	Failed            int                    `json:"failed"`
-	Assertions        []SuiteAssertionResult `json:"assertions,omitempty"`
-	AssertionFailures int                    `json:"assertionFailures"`
-	Pass              bool                   `json:"pass"`
-	RecordPath        string                 `json:"recordPath"`
+	APIVersion           string                 `json:"apiVersion"`
+	Suite                string                 `json:"suite"`
+	StartedAt            time.Time              `json:"startedAt"`
+	CompletedAt          time.Time              `json:"completedAt"`
+	ExpectedTotal        int                    `json:"expectedTotal"`
+	Total                int                    `json:"total"`
+	Passed               int                    `json:"passed"`
+	Failed               int                    `json:"failed"`
+	CollectionErrorCount int                    `json:"collectionErrorCount"`
+	CollectionErrorCases []string               `json:"collectionErrorCases,omitempty"`
+	Assertions           []SuiteAssertionResult `json:"assertions,omitempty"`
+	AssertionFailures    int                    `json:"assertionFailures"`
+	Pass                 bool                   `json:"pass"`
+	RecordPath           string                 `json:"recordPath"`
 }
 
 func podExitCode(pod *corev1.Pod) *int32 {

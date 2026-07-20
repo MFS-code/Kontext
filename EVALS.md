@@ -102,8 +102,9 @@ The JSONL record contains only explicitly requested status/model output,
 projected envelope fields, collection errors, and bounded event metadata rather
 than raw logs or `status.message`. The runner never automatically reads Pod
 environments or Secret values. Optional usage fields retain the distinction
-between missing and measured zero. A summary JSON file reports case totals,
-each suite assertion result, an overall pass flag, and the record path.
+between missing and measured zero. A summary JSON file reports expected and
+actual case totals, collection-error counts and affected cases, each suite
+assertion result, an overall pass flag, and the record path.
 
 Artifact collection remains least-privilege. Suite assertions can request
 `statusResult`, `statusOutput`, `statusUsage`, or `podExitCode` for their

@@ -30,7 +30,7 @@ func TestWriteOutputsProducesJSONLAndSummary(t *testing.T) {
 		Message: "field mismatch",
 	}}
 	now := time.Now().UTC()
-	summary := BuildSummary("s", now, now, records, assertions, recordPath)
+	summary := BuildSummary("s", 2, now, now, records, assertions, recordPath)
 	if err := WriteOutputs(recordPath, summaryPath, records, summary); err != nil {
 		t.Fatalf("WriteOutputs: %v", err)
 	}
@@ -50,6 +50,7 @@ func TestWriteOutputsProducesJSONLAndSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.Total != 2 ||
+		decoded.ExpectedTotal != 2 ||
 		decoded.Passed != 1 ||
 		decoded.Failed != 1 ||
 		decoded.AssertionFailures != 1 ||
@@ -69,10 +70,11 @@ func TestWriteOutputsProducesJSONLAndSummary(t *testing.T) {
 	}
 }
 
-func TestBuildSummaryWithoutAssertionsRemainsPassing(t *testing.T) {
+func TestBuildSummaryHappyPathWithoutAssertions(t *testing.T) {
 	now := time.Now().UTC()
 	summary := BuildSummary(
 		"legacy-suite",
+		1,
 		now,
 		now,
 		[]Record{{CaseID: "case", Pass: true}},
@@ -90,6 +92,100 @@ func TestBuildSummaryWithoutAssertionsRemainsPassing(t *testing.T) {
 	}
 	if bytes.Contains(encoded, []byte(`"assertions"`)) {
 		t.Fatalf("empty assertions should be omitted: %s", encoded)
+	}
+}
+
+func TestBuildSummaryRequiresExactRecordCount(t *testing.T) {
+	now := time.Now().UTC()
+	passingRecords := []Record{
+		{CaseID: "a", Pass: true},
+		{CaseID: "b", Pass: true},
+	}
+	for name, test := range map[string]struct {
+		expected int
+		records  []Record
+		wantPass bool
+	}{
+		"exact": {
+			expected: 2,
+			records:  passingRecords,
+			wantPass: true,
+		},
+		"missing": {
+			expected: 2,
+			records:  passingRecords[:1],
+		},
+		"extra": {
+			expected: 1,
+			records:  passingRecords,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			summary := BuildSummary(
+				"suite",
+				test.expected,
+				now,
+				now,
+				test.records,
+				nil,
+				"records.jsonl",
+			)
+			if summary.Pass != test.wantPass ||
+				summary.ExpectedTotal != test.expected ||
+				summary.Total != len(test.records) {
+				t.Fatalf("unexpected count summary: %#v", summary)
+			}
+		})
+	}
+}
+
+func TestBuildSummaryFailsPassingRecordWithCollectionErrors(t *testing.T) {
+	now := time.Now().UTC()
+	summary := BuildSummary(
+		"suite",
+		1,
+		now,
+		now,
+		[]Record{{
+			CaseID:           "case-a",
+			Pass:             true,
+			CollectionErrors: []string{"fetch logs", "decode event"},
+		}},
+		nil,
+		"records.jsonl",
+	)
+	if summary.Pass ||
+		summary.Passed != 1 ||
+		summary.Failed != 0 ||
+		summary.CollectionErrorCount != 2 ||
+		len(summary.CollectionErrorCases) != 1 ||
+		summary.CollectionErrorCases[0] != "case-a" {
+		t.Fatalf("collection errors did not fail summary: %#v", summary)
+	}
+}
+
+func TestBuildSummaryCombinesCollectionAndAssertionFailures(t *testing.T) {
+	now := time.Now().UTC()
+	summary := BuildSummary(
+		"suite",
+		1,
+		now,
+		now,
+		[]Record{{
+			CaseID:           "case-a",
+			Pass:             true,
+			CollectionErrors: []string{"incomplete artifacts"},
+		}},
+		[]SuiteAssertionResult{
+			{Type: SuiteAssertionFieldsEqual, Pass: false},
+			{Type: SuiteAssertionForbiddenMarkers, Pass: false},
+		},
+		"records.jsonl",
+	)
+	if summary.Pass ||
+		summary.CollectionErrorCount != 1 ||
+		summary.AssertionFailures != 2 {
+		t.Fatalf("combined failures were not preserved: %#v", summary)
 	}
 }
 

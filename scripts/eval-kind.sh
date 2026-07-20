@@ -100,9 +100,11 @@ echo "==> validating machine-readable evaluation summary"
 jq -e '
   .apiVersion == "kontext.dev/eval/v1alpha1"
   and .suite == "keyless"
-  and .total == 10
-  and .passed == 10
+  and .expectedTotal == .total
+  and .total > 0
+  and .passed == .total
   and .failed == 0
+  and .collectionErrorCount == 0
   and .assertionFailures == 0
   and .pass == true
   and ((.assertions // []) | all(.pass == true))

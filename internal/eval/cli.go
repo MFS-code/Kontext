@@ -121,6 +121,7 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	completedAt := time.Now().UTC()
 	summary := BuildSummary(
 		suite.Metadata.Name,
+		len(suite.Spec.Cases),
 		startedAt,
 		completedAt,
 		records,
@@ -133,11 +134,13 @@ func Execute(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(
 		stdout,
-		"suite=%s total=%d passed=%d failed=%d assertionFailures=%d records=%s summary=%s\n",
+		"suite=%s expected=%d total=%d passed=%d failed=%d collectionErrors=%d assertionFailures=%d records=%s summary=%s\n",
 		summary.Suite,
+		summary.ExpectedTotal,
 		summary.Total,
 		summary.Passed,
 		summary.Failed,
+		summary.CollectionErrorCount,
 		summary.AssertionFailures,
 		recordPath,
 		summaryPath,
