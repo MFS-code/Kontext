@@ -33,7 +33,7 @@ mise exec node@22 -- npm install
 mise exec node@22 -- npm run dev
 ```
 
-Navigation still comes from root [`docs.json`](../docs.json). Markdown stays the
+Navigation still comes from root [`docs-nav.json`](../docs-nav.json). Markdown stays the
 source of truth under `docs/` and `SPEC.md`.
 
 ## DNS checklist
