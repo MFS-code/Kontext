@@ -15,13 +15,22 @@ const (
 
 // AgentRef links an AgentRun to its owning Agent.
 type AgentRef struct {
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 }
 
-// AgentRunSpec defines the desired state of AgentRun.
+// AgentRunSpec defines the desired state of AgentRun. Persisted specs are
+// always complete. A future CREATE mutating webhook may decode a sparse Task
+// request into this type, but it must resolve the required execution fields
+// before API-server schema validation and persistence.
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="AgentRun spec is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.agentRef) || !has(self.parameters)",message="parameters require agentRef"
+// +kubebuilder:validation:XValidation:rule="has(self.goal) && has(self.model) && has(self.runtime)",message="persisted AgentRun spec must contain a complete execution snapshot"
 type AgentRunSpec struct {
 	AgentRef *AgentRef `json:"agentRef,omitempty"`
+
+	// Parameters are retained with a resolved Task snapshot for auditability.
+	Parameters map[string]string `json:"parameters,omitempty"`
 
 	// +kubebuilder:validation:MinLength=1
 	Goal string `json:"goal"`

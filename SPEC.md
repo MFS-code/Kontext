@@ -26,7 +26,7 @@ API group/version: `kontext.dev/v1alpha1` (alpha on purpose — the shape is all
 | Kontext                  | Core Kubernetes analogue | Behavior                                                                               |
 | ------------------------ | ------------------------ | -------------------------------------------------------------------------------------- |
 | `Agent` mode `Service`   | `Deployment`             | Always-on. Controller keeps one live `AgentRun`; re-casts on exit/failure.             |
-| `Agent` mode `Task`      | reusable template        | Reserved in the schema. The controller reports `UnsupportedMode`; create a standalone `AgentRun` for one-shot work. |
+| `Agent` mode `Task`      | reusable task template   | Creating the Agent does not execute it. A user creates a named, sparse `AgentRun` referencing it to trigger work. |
 | `Agent` mode `Scheduled` | `CronJob`                | Reserved in the schema. The controller reports `UnsupportedMode` and does not schedule runs. |
 | `AgentRun`               | `Pod` / `Job`            | The single execution unit. Owns one Pod. Holds `status.result`, usage, immutable spec. |
 
@@ -50,8 +50,8 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `runtime.args`       | []string                              | no  |                                                                |
 | `runtime.result`     | object                                | no  | Optional stdout result capture policy.                         |
 | `runtime.securityContext` | restricted security context     | no  | Portable non-root, capability-drop, filesystem, and seccomp settings. |
-| `goal`               | string                                | no* | Default/persistent goal. Required for `Service`/`Scheduled`.   |
-| `goalTemplate`       | string                                | no  | Parameterized goal for templated runs (`Task`).                |
+| `goal`               | string                                | no* | Concrete goal. Required for `Service`/`Scheduled`; exactly one of `goal` or `goalTemplate` is required for `Task`. |
+| `goalTemplate`       | string                                | no  | Parameterized goal for `Task`; forbidden in other modes.       |
 | `provider`           | string                                | no  | Default `anthropic`.                                           |
 | `model`              | string                                | yes |                                                                |
 | `tools`              | []string                              | no  | Declared tool allowlist (semantics live in the runtime image). |
@@ -76,7 +76,7 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `conditions`         | []Condition | `Ready`, `Progressing`.              |
 | `currentRunName`     | string      | `Service`: the live run.             |
 | `lastRunName`        | string      | `Task`/`Scheduled`: most recent run. |
-| `runsCreated`        | int         | Counter.                             |
+| `runsCreated`        | int         | Mode-specific observed run count.   |
 | `restarts`           | int         | `Service`: re-cast count.            |
 | `observedGeneration` | int         |                                      |
 
@@ -92,7 +92,8 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 
 | Field                | Type     | Req | Notes                                            |
 | -------------------- | -------- | --- | ------------------------------------------------ |
-| `agentRef.name`      | string   | no  | Owning `Agent`. Omitted = standalone ad-hoc run. |
+| `agentRef.name`      | string   | no  | Owning `Agent`. With Task CREATE admission installed, a user-created reference is an explicit execution trigger. Omitted = standalone ad-hoc run. |
+| `parameters`         | map[string]string | no | Immutable Task invocation parameters retained with the resolved snapshot. Requires `agentRef`. |
 | `goal`               | string   | yes | Concrete, fully-resolved goal.                   |
 | `provider`           | string   | no  | Resolved from Agent at creation.                 |
 | `model`              | string   | yes |                                                  |
@@ -109,7 +110,61 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 | `runtime.securityContext` | restricted security context | no | Portable non-root, capability-drop, filesystem, and seccomp settings. |
 
 
-When created from an `Agent`, the controller snapshots/resolves these fields so the run does not drift if the `Agent` changes later.
+When created from an `Agent`, execution fields are snapshotted so the run does
+not drift if the `Agent` changes later. Service and future Scheduled
+controllers continue to create fully resolved runs. Standalone runs continue
+to provide a complete execution spec directly.
+
+### Task invocation and resolution
+
+Creating a Task `Agent` never starts work. Once Task CREATE admission is
+installed, a user explicitly triggers it by submitting a user-named
+`AgentRun` whose `spec.agentRef.name` names that Task Agent. Runs may be
+submitted concurrently; there is no generated-name or single-active-run
+restriction.
+
+A Task invocation request is sparse: it may contain only `agentRef` and
+optional `parameters`. Kubernetes
+[invokes mutating admission first](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/)
+and then validates the final object against the CRD. Future CREATE admission
+therefore receives the sparse request, resolves it in memory, and returns the
+complete immutable execution snapshot that the API server validates and
+stores. The persisted `AgentRun.spec` always includes `goal`, `model`, and
+`runtime.image`; an unresolved sparse object is never valid stored state.
+Without the Task webhook infrastructure and mutator from #83/#84, the API
+server rejects the sparse request as missing required fields.
+
+Resolution copies runtime, provider, model, tools, budget, service account,
+Secret reference, knowledge ConfigMap reference, and environment from the
+Agent. The concrete goal is copied from `goal` or rendered from
+`goalTemplate`. These execution fields are locked: an invocation request that
+supplies any of them is rejected, even when the supplied value would match the
+template. Users needing execution overrides create a standalone `AgentRun` or
+a separate Agent definition.
+
+A Task Agent configures exactly one of `goal` or `goalTemplate`. A static
+`goal` accepts no parameters. A template uses only ASCII identifier
+placeholders matching `[A-Za-z_][A-Za-z0-9_]*`:
+
+- `${name}` inserts the exact string value of parameter `name`.
+- `$${name}` emits the literal text `${name}` and does not consume a parameter.
+- Substitution is one pass: parameter values are never interpreted as
+  templates.
+- Repeated placeholders reuse the same parameter. Empty, Unicode, and
+  multiline values are valid.
+- Malformed placeholders, missing parameters, and supplied-but-unused
+  parameters reject the invocation. Missing and unused names are reported in
+  sorted order.
+
+Resolution is all-or-nothing and does not mutate either input object. Copied
+maps, slices, pointers, and nested values are isolated from later mutation.
+Provider defaults and aliases are normalized while the execution snapshot is
+built, once at this boundary.
+
+The pure resolver in `internal/runfactory` defines these semantics for future
+admission code. This version does not register a webhook, so sparse Task
+CREATE requests remain schema-invalid and cannot reach the AgentRun
+controller.
 
 ### `status`
 
@@ -136,7 +191,17 @@ provider did not measure it; a present zero means it measured zero.
 
 ### Ownership
 
-`AgentRun` created from an `Agent` carries an owner reference to it → standard GC cascade. Standalone `AgentRun`s are allowed for ad-hoc execution, demos, and direct task dispatch.
+`AgentRun` created from or resolved against an `Agent` carries an owner
+reference to it → standard GC cascade. Standalone `AgentRun`s are allowed for
+ad-hoc execution, demos, and direct task dispatch.
+
+For Task Agents, `status.lastRunName` is the newest retained owned Task run by
+creation time. `status.runsCreated` is the exact number of currently retained
+owned Task runs, not a lifetime counter. Deleting an owned run can therefore
+decrease `runsCreated` and can move or clear `lastRunName`. These Task meanings
+do not change the existing Service status semantics. Task status
+reconciliation is intentionally deferred; this section defines the contract
+it must implement.
 
 ### Contract evolution policy
 
