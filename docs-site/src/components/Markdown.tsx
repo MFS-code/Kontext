@@ -1,7 +1,15 @@
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import json from "highlight.js/lib/languages/json";
+import yaml from "highlight.js/lib/languages/yaml";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Link } from "react-router-dom";
 import type { Components } from "react-markdown";
+
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("json", json);
+hljs.registerLanguage("yaml", yaml);
 
 type MarkdownProps = {
   source: string;
@@ -9,6 +17,23 @@ type MarkdownProps = {
 
 function isInternalPath(href: string): boolean {
   return href.startsWith("/") && !href.startsWith("//");
+}
+
+function highlightLanguage(className: string | undefined): string | undefined {
+  const language = className?.match(/^language-(\S+)$/)?.[1];
+  switch (language) {
+    case "bash":
+    case "sh":
+    case "shell":
+      return "bash";
+    case "json":
+      return "json";
+    case "yaml":
+    case "yml":
+      return "yaml";
+    default:
+      return undefined;
+  }
 }
 
 const components: Components = {
@@ -34,6 +59,17 @@ const components: Components = {
         <code className="inline-code" {...props}>
           {children}
         </code>
+      );
+    }
+    const language = highlightLanguage(className);
+    if (language) {
+      const highlighted = hljs.highlight(text, { language }).value;
+      return (
+        <code
+          className={`${className ?? ""} hljs`.trim()}
+          dangerouslySetInnerHTML={{ __html: highlighted }}
+          {...props}
+        />
       );
     }
     return (
