@@ -182,6 +182,12 @@ func TestResolveTaskReportsStableErrors(t *testing.T) {
 		wantText   string
 	}{
 		{
+			name:     "nil invocation",
+			agent:    taskAgent("task", "goal", ""),
+			wantCode: runfactory.ErrorMissingAgent,
+			wantText: `Task resolution failed [MissingAgent]: Agent "" was not found`,
+		},
+		{
 			name:       "nil Agent",
 			invocation: taskInvocation("run", "missing", nil),
 			wantCode:   runfactory.ErrorMissingAgent,
@@ -213,24 +219,26 @@ func TestResolveTaskReportsStableErrors(t *testing.T) {
 		},
 		{
 			name:       "sorted missing parameters",
-			agent:      taskAgent("task", "${z} ${a}", ""),
+			agent:      taskAgent("task", "", "${z} ${a}"),
 			invocation: taskInvocation("run", "task", nil),
-			wantCode:   runfactory.ErrorInvalidTemplate,
-			wantText:   `Task resolution failed [InvalidTemplate]: Task Agent must configure exactly one of goal or goalTemplate`,
+			wantCode:   runfactory.ErrorMissingParameters,
+			wantText:   `Task resolution failed [MissingParameters]: missing parameters: a, z`,
 		},
 		{
-			name:       "sorted conflicting fields",
-			agent:      taskAgent("task", "goal", ""),
-			invocation: taskInvocation("run", "task", nil),
-			wantCode:   runfactory.ErrorConflictingFields,
-			wantText:   `Task resolution failed [ConflictingFields]: invocation supplies locked fields: env, tools`,
+			name:  "sorted conflicting fields",
+			agent: taskAgent("task", "goal", ""),
+			invocation: &kontextv1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: "run", Namespace: "default"},
+				Spec: kontextv1alpha1.AgentRunSpec{
+					AgentRef: &kontextv1alpha1.AgentRef{Name: "task"},
+					Tools:    []string{},
+					Env:      []kontextv1alpha1.EnvVar{},
+				},
+			},
+			wantCode: runfactory.ErrorConflictingFields,
+			wantText: `Task resolution failed [ConflictingFields]: invocation supplies locked fields: env, tools`,
 		},
 	}
-	tests[4].agent = taskAgent("task", "", "${z} ${a}")
-	tests[4].wantCode = runfactory.ErrorMissingParameters
-	tests[4].wantText = `Task resolution failed [MissingParameters]: missing parameters: a, z`
-	tests[5].invocation.Spec.Tools = []string{}
-	tests[5].invocation.Spec.Env = []kontextv1alpha1.EnvVar{}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

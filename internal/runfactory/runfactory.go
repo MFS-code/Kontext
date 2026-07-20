@@ -105,8 +105,12 @@ func ResolveTask(
 	invocation *kontextv1alpha1.AgentRun,
 	scheme *runtime.Scheme,
 ) (*kontextv1alpha1.AgentRun, error) {
+	if invocation == nil {
+		return nil, &ResolutionError{Code: ErrorMissingAgent}
+	}
+
 	referenceName := ""
-	if invocation != nil && invocation.Spec.AgentRef != nil {
+	if invocation.Spec.AgentRef != nil {
 		referenceName = invocation.Spec.AgentRef.Name
 	}
 	if agent == nil || referenceName == "" || referenceName != agent.Name ||
