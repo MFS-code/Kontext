@@ -178,6 +178,34 @@ func TestPromotionRetriesWhenRegistrationChanges(t *testing.T) {
 	}
 }
 
+func TestServingRenewalPreservesStagedCARotation(t *testing.T) {
+	ctx := context.Background()
+	clock := &testClock{now: time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)}
+	k8sClient := newFakeClient(t)
+	lifecycle := NewLifecycle(k8sClient, &Store{}, testOptions(clock))
+	if err := lifecycle.Ensure(ctx); err != nil {
+		t.Fatalf("bootstrap lifecycle: %v", err)
+	}
+	secret := getSecret(t, k8sClient)
+	next, err := lifecycle.generate(secret.Data[CACertKey])
+	if err != nil {
+		t.Fatalf("generate staged certificates: %v", err)
+	}
+	if err := lifecycle.stageNext(ctx, secret, next); err != nil {
+		t.Fatalf("stage CA rotation: %v", err)
+	}
+
+	clock.Advance(91 * time.Minute)
+	if _, err := lifecycle.ensureSecret(ctx); err != nil {
+		t.Fatalf("renew serving certificate with staged CA: %v", err)
+	}
+	renewed := getSecret(t, k8sClient)
+	if !bytes.Equal(renewed.Data[nextCAKey], next.CACert) ||
+		!bytes.Equal(renewed.Data[nextTLSKey], next.TLSCert) {
+		t.Fatal("serving renewal discarded staged CA rotation")
+	}
+}
+
 func TestTwoLifecycleReplicasConverge(t *testing.T) {
 	ctx := context.Background()
 	clock := &testClock{now: time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)}
@@ -190,17 +218,17 @@ func TestTwoLifecycleReplicasConverge(t *testing.T) {
 	}
 
 	var wait sync.WaitGroup
-	errors := make(chan error, len(lifecycles))
+	results := make(chan error, len(lifecycles))
 	for _, lifecycle := range lifecycles {
 		wait.Add(1)
 		go func(current *Lifecycle) {
 			defer wait.Done()
-			errors <- current.Ensure(ctx)
+			results <- current.Ensure(ctx)
 		}(lifecycle)
 	}
 	wait.Wait()
-	close(errors)
-	for err := range errors {
+	close(results)
+	for err := range results {
 		if err != nil {
 			t.Fatalf("concurrent bootstrap: %v", err)
 		}

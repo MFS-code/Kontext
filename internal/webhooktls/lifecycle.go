@@ -246,7 +246,12 @@ func (l *Lifecycle) ensureSecret(ctx context.Context) (*corev1.Secret, error) {
 			if renewErr != nil {
 				return renewErr
 			}
-			secret.Data = secretData(renewed)
+			if secret.Data == nil {
+				secret.Data = map[string][]byte{}
+			}
+			for key, value := range secretData(renewed) {
+				secret.Data[key] = value
+			}
 			if updateErr := l.client.Update(ctx, &secret); updateErr != nil {
 				return updateErr
 			}
