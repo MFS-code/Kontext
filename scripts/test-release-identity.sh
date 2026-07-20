@@ -11,17 +11,41 @@ fail() {
   exit 1
 }
 
+assert_workflow_registry_owner() {
+  local file="$1"
+  local expected='echo "registry_owner=${KONTEXT_REGISTRY_OWNER}" >>"${GITHUB_OUTPUT}"'
+  local assignments=0
+  local line
+  local trimmed
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    case "${trimmed}" in
+      'echo "registry_owner='*)
+        assignments=$((assignments + 1))
+        [[ "${trimmed}" == "${expected}" ]] ||
+          fail "${file} has an unexpected registry_owner output assignment"
+        ;;
+    esac
+  done <"${file}"
+  [[ "${assignments}" -eq 1 ]] ||
+    fail "${file} must assign registry_owner exactly once"
+}
+
+# Re-sourcing must preserve the original readonly identity without aborting.
+source "${ROOT_DIR}/scripts/lib/common.sh"
 [[ "${KONTEXT_GITHUB_REPOSITORY}" == "MFS-code/Kontext" ]] ||
   fail "unexpected GitHub repository ${KONTEXT_GITHUB_REPOSITORY}"
 [[ "${KONTEXT_IMAGE_REPOSITORY}" == "ghcr.io/mfs-code" ]] ||
   fail "unexpected image repository ${KONTEXT_IMAGE_REPOSITORY}"
+if (KONTEXT_GITHUB_OWNER="other-owner") 2>/dev/null; then
+  fail "canonical identity is mutable after re-sourcing"
+fi
 
 workflow="${ROOT_DIR}/.github/workflows/release.yml"
 grep -Fq "source scripts/lib/common.sh" "${workflow}" ||
   fail "release workflow does not source common identity"
-if grep -Fq "GITHUB_REPOSITORY_OWNER" "${workflow}"; then
-  fail "release workflow still derives the registry owner"
-fi
+assert_workflow_registry_owner "${workflow}"
 
 for script in \
   "${ROOT_DIR}/scripts/render-release-manifest.sh" \
@@ -39,6 +63,13 @@ cleanup() {
   rm -rf "${tmp_dir}"
 }
 trap cleanup EXIT
+
+workflow_with_comment="${tmp_dir}/release-with-comment.yml"
+cp "${workflow}" "${workflow_with_comment}"
+printf '%s\n' \
+  "# GITHUB_REPOSITORY_OWNER is intentionally not used for release images." \
+  >>"${workflow_with_comment}"
+assert_workflow_registry_owner "${workflow_with_comment}"
 
 cat >"${tmp_dir}/kubectl" <<'EOF'
 #!/usr/bin/env bash
@@ -64,9 +95,20 @@ grep -Fq "$(kontext_image kontext-operator)@sha256:" "${tmp_dir}/install.yaml" |
 grep -Fq "$(kontext_image kontext-reporter)@sha256:" "${tmp_dir}/install.yaml" ||
   fail "rendered manifest lacks canonical reporter image"
 
-jq \
-  '(.images[] | select(.name == "operator").immutableReference) |= sub("ghcr.io/mfs-code"; "ghcr.io/other-owner")' \
+jq --arg wrong_repository "ghcr.io/other-owner" \
+  '(.images[] | select(.name == "operator").immutableReference) |=
+    (. as $reference | $wrong_repository + "/" + ($reference | split("/") | last))' \
   "${metadata}" >"${tmp_dir}/wrong-owner.json"
+operator_suffix="$(
+  jq -er '.images[] | select(.name == "operator").immutableReference | split("/") | last' \
+    "${metadata}"
+)"
+wrong_operator_reference="$(
+  jq -er '.images[] | select(.name == "operator").immutableReference' \
+    "${tmp_dir}/wrong-owner.json"
+)"
+[[ "${wrong_operator_reference}" == "ghcr.io/other-owner/${operator_suffix}" ]] ||
+  fail "wrong-owner fixture was not updated structurally"
 if PATH="${tmp_dir}:${PATH}" \
   "${ROOT_DIR}/scripts/render-release-manifest.sh" "${tmp_dir}/wrong-owner.json" \
   >"${tmp_dir}/wrong-owner.yaml" 2>/dev/null; then

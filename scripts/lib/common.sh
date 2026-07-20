@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Shared, release-relevant Kontext repository and registry identity.
 
+if [[ "${_KONTEXT_COMMON_LOADED:-}" == "true" ]]; then
+  return 0
+fi
+readonly _KONTEXT_COMMON_LOADED="true"
+
 readonly KONTEXT_GITHUB_OWNER="MFS-code"
 readonly KONTEXT_REPOSITORY_NAME="Kontext"
 readonly KONTEXT_GITHUB_REPOSITORY="${KONTEXT_GITHUB_OWNER}/${KONTEXT_REPOSITORY_NAME}"
