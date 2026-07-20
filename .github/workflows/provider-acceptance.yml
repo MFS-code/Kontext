@@ -41,6 +41,7 @@ jobs:
       KIND_CLUSTER_NAME: provider-acceptance
       KONTEXT_ACCEPTANCE_NAMESPACE: provider-acceptance
       KONTEXT_ACCEPTANCE_SCENARIO: ${{ inputs.scenario }}
+      # The NetworkPolicy e2e job exercises this focused install path without provider credentials.
       KONTEXT_KIND_IMAGE_SET: network-policy
       KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
       KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
