@@ -75,10 +75,10 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | -------------------- | ----------- | ------------------------------------ |
 | `conditions`         | []Condition | `Ready`, `Progressing`.              |
 | `currentRunName`     | string      | `Service`: the live run.             |
-| `lastRunName`        | string      | `Task`/`Scheduled`: most recent run. |
+| `lastRunName`        | string      | `Scheduled`: newest retained owned run; empty when all children are pruned. |
 | `runsCreated`        | int         | Counter.                             |
 | `restarts`           | int         | `Service`: re-cast count.            |
-| `lastScheduleTime`   | timestamp   | `Scheduled`: latest slot that minted a run. |
+| `lastScheduleTime`   | timestamp   | `Scheduled`: latest observed slot that minted a run; retained after child pruning. |
 | `nextScheduleTime`   | timestamp   | `Scheduled`: next slot the controller will evaluate. |
 | `observedGeneration` | int         |                                      |
 

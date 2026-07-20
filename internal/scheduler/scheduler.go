@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -23,7 +24,10 @@ const (
 	truncatedAgentNameHashCharacters = 8
 )
 
-var standardParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+var (
+	standardParser          = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	embeddedTimeZonePattern = regexp.MustCompile(`(^|[[:space:]])(CRON_TZ|TZ)=`)
+)
 
 // Clock is the portion of a clock required by scheduling reconciliation.
 type Clock interface {
@@ -56,10 +60,8 @@ func Parse(spec *kontextv1alpha1.ScheduleSpec) (Policy, error) {
 	}
 
 	expression := strings.TrimSpace(spec.Expression)
-	for _, field := range strings.Fields(expression) {
-		if strings.HasPrefix(field, "TZ=") || strings.HasPrefix(field, "CRON_TZ=") {
-			return Policy{}, fmt.Errorf("schedule.expression must not contain TZ or CRON_TZ")
-		}
+	if embeddedTimeZonePattern.MatchString(expression) {
+		return Policy{}, fmt.Errorf("schedule.expression must not contain TZ or CRON_TZ")
 	}
 
 	timeZoneName := spec.TimeZone

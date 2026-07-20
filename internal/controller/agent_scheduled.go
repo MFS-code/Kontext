@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -16,13 +15,9 @@ import (
 	"github.com/MFS-code/Kontext/internal/conditions"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
 	"github.com/MFS-code/Kontext/internal/runfactory"
+	"github.com/MFS-code/Kontext/internal/scheduledrun"
 	"github.com/MFS-code/Kontext/internal/scheduler"
 	"github.com/MFS-code/Kontext/internal/status"
-)
-
-const (
-	scheduledSlotAnnotation     = "kontext.dev/scheduled-slot"
-	scheduledSequenceAnnotation = "kontext.dev/scheduled-sequence"
 )
 
 func (r *AgentReconciler) reconcileScheduled(
@@ -30,9 +25,14 @@ func (r *AgentReconciler) reconcileScheduled(
 	agent *kontextv1alpha1.Agent,
 ) (ctrl.Result, error) {
 	now := r.now()
+	runs, err := r.observeScheduledRuns(ctx, agent)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	policy, err := scheduler.Parse(agent.Spec.Schedule)
 	if err != nil {
-		nextStatus := scheduledBaseStatus(agent, nil)
+		nextStatus := scheduledBaseStatus(agent, &runs)
 		nextStatus.ObservedGeneration = agent.Generation
 		return ctrl.Result{}, r.setAgentStatus(ctx, agent, nextStatus, metav1.Condition{
 			Type:    conditions.Ready,
@@ -47,11 +47,8 @@ func (r *AgentReconciler) reconcileScheduled(
 		})
 	}
 
-	runs, err := r.observeScheduledRuns(ctx, agent)
+	runs, err = r.pruneScheduledHistory(ctx, policy, runs)
 	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if err := r.pruneScheduledHistory(ctx, policy, runs.items); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -125,7 +122,7 @@ func (r *AgentReconciler) reconcileScheduled(
 
 	runName := scheduler.RunName(agent.Name, due)
 	if existing := runs.bySlot[due.UTC().Format(time.RFC3339)]; existing != nil {
-		recoverScheduledRunStatus(&nextStatus, existing, due)
+		recoverScheduledRunStatus(&nextStatus, existing, due, runs.latestDue)
 		if err := r.setScheduledCreatedStatus(ctx, agent, nextStatus, existing.Name, due); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -153,10 +150,7 @@ func (r *AgentReconciler) reconcileScheduled(
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	run.Annotations = map[string]string{
-		scheduledSlotAnnotation:     due.UTC().Format(time.RFC3339),
-		scheduledSequenceAnnotation: strconv.FormatInt(int64(sequence), 10),
-	}
+	scheduledrun.SetMetadata(run, due, sequence)
 
 	if err := r.Create(ctx, run); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
@@ -169,7 +163,7 @@ func (r *AgentReconciler) reconcileScheduled(
 		if existing == nil {
 			return ctrl.Result{Requeue: true}, nil
 		}
-		recoverScheduledRunStatus(&nextStatus, existing, due)
+		recoverScheduledRunStatus(&nextStatus, existing, due, runs.latestDue)
 		if nextStatus.RunsCreated < sequence {
 			nextStatus.RunsCreated = sequence
 		}
@@ -211,28 +205,37 @@ func (r *AgentReconciler) observeScheduledRuns(
 		return observedScheduledRuns{}, err
 	}
 
-	observed := observedScheduledRuns{
-		bySlot: make(map[string]*kontextv1alpha1.AgentRun),
-	}
-	sort.Slice(children.Items, func(i, j int) bool {
-		return children.Items[i].Name < children.Items[j].Name
-	})
+	owned := make([]kontextv1alpha1.AgentRun, 0, len(children.Items))
 	for i := range children.Items {
 		run := &children.Items[i]
 		if !metav1.IsControlledBy(run, agent) {
 			continue
 		}
-		observed.items = append(observed.items, *run.DeepCopy())
+		owned = append(owned, *run.DeepCopy())
+	}
+	return summarizeScheduledRuns(owned), nil
+}
+
+func summarizeScheduledRuns(items []kontextv1alpha1.AgentRun) observedScheduledRuns {
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+	observed := observedScheduledRuns{
+		items:  items,
+		bySlot: make(map[string]*kontextv1alpha1.AgentRun),
+	}
+	for i := range observed.items {
+		run := &observed.items[i]
 		if !status.IsTerminalPhase(run.Status.Phase) {
 			observed.hasActive = true
 		}
 
-		sequence, err := strconv.ParseInt(run.Annotations[scheduledSequenceAnnotation], 10, 32)
-		if err == nil && sequence > int64(observed.maxCount) {
-			observed.maxCount = int32(sequence)
+		sequence, ok := scheduledrun.Sequence(run)
+		if ok && sequence > observed.maxCount {
+			observed.maxCount = sequence
 		}
-		slot, err := time.Parse(time.RFC3339, run.Annotations[scheduledSlotAnnotation])
-		if err != nil {
+		slot, ok := scheduledrun.Slot(run)
+		if !ok {
 			continue
 		}
 		slotKey := slot.UTC().Format(time.RFC3339)
@@ -243,7 +246,7 @@ func (r *AgentReconciler) observeScheduledRuns(
 			observed.latestDue = slot
 		}
 	}
-	return observed, nil
+	return observed
 }
 
 func scheduledBaseStatus(
@@ -251,7 +254,6 @@ func scheduledBaseStatus(
 	runs *observedScheduledRuns,
 ) kontextv1alpha1.AgentStatus {
 	next := kontextv1alpha1.AgentStatus{
-		LastRunName:        agent.Status.LastRunName,
 		RunsCreated:        agent.Status.RunsCreated,
 		LastScheduleTime:   agent.Status.LastScheduleTime,
 		NextScheduleTime:   agent.Status.NextScheduleTime,
@@ -263,10 +265,13 @@ func scheduledBaseStatus(
 	if runs.maxCount > next.RunsCreated {
 		next.RunsCreated = runs.maxCount
 	}
-	if runs.latest != nil &&
-		(next.LastScheduleTime == nil || runs.latestDue.After(next.LastScheduleTime.Time)) {
+	// LastRunName is a live reference to the newest retained child, while
+	// LastScheduleTime is historical progress and may outlive a pruned child.
+	if runs.latest != nil {
 		next.LastRunName = runs.latest.Name
-		next.LastScheduleTime = timePtr(runs.latestDue)
+		if next.LastScheduleTime == nil || runs.latestDue.After(next.LastScheduleTime.Time) {
+			next.LastScheduleTime = timePtr(runs.latestDue)
+		}
 	}
 	return next
 }
@@ -275,13 +280,15 @@ func recoverScheduledRunStatus(
 	next *kontextv1alpha1.AgentStatus,
 	run *kontextv1alpha1.AgentRun,
 	slot time.Time,
+	latestRetainedSlot time.Time,
 ) {
-	if sequence, err := strconv.ParseInt(run.Annotations[scheduledSequenceAnnotation], 10, 32); err == nil &&
-		sequence > int64(next.RunsCreated) {
-		next.RunsCreated = int32(sequence)
+	if sequence, ok := scheduledrun.Sequence(run); ok && sequence > next.RunsCreated {
+		next.RunsCreated = sequence
 	}
-	if next.LastScheduleTime == nil || !slot.Before(next.LastScheduleTime.Time) {
+	if latestRetainedSlot.IsZero() || !slot.Before(latestRetainedSlot) {
 		next.LastRunName = run.Name
+	}
+	if next.LastScheduleTime == nil || slot.After(next.LastScheduleTime.Time) {
 		next.LastScheduleTime = timePtr(slot)
 	}
 }
@@ -312,7 +319,7 @@ func (r *AgentReconciler) verifyScheduledRun(
 		return nil, err
 	}
 	if !metav1.IsControlledBy(&existing, agent) ||
-		existing.Annotations[scheduledSlotAnnotation] != slot.UTC().Format(time.RFC3339) {
+		!scheduledrun.RepresentsSlot(&existing, slot) {
 		return nil, fmt.Errorf(
 			"scheduled run name collision: AgentRun %s/%s does not represent slot %s for Agent %s/%s",
 			existing.Namespace,
@@ -328,12 +335,12 @@ func (r *AgentReconciler) verifyScheduledRun(
 func (r *AgentReconciler) pruneScheduledHistory(
 	ctx context.Context,
 	policy scheduler.Policy,
-	runs []kontextv1alpha1.AgentRun,
-) error {
+	runs observedScheduledRuns,
+) (observedScheduledRuns, error) {
 	successful := make([]*kontextv1alpha1.AgentRun, 0)
 	failed := make([]*kontextv1alpha1.AgentRun, 0)
-	for i := range runs {
-		run := &runs[i]
+	for i := range runs.items {
+		run := &runs.items[i]
 		switch run.Status.Phase {
 		case kontextv1alpha1.AgentRunPhaseSucceeded:
 			successful = append(successful, run)
@@ -341,16 +348,37 @@ func (r *AgentReconciler) pruneScheduledHistory(
 			failed = append(failed, run)
 		}
 	}
-	if err := r.pruneScheduledGroup(ctx, successful, policy.SuccessfulRunsHistoryLimit); err != nil {
-		return err
+	deleted := make(map[string]struct{})
+	if err := r.pruneScheduledGroup(
+		ctx,
+		successful,
+		policy.SuccessfulRunsHistoryLimit,
+		deleted,
+	); err != nil {
+		return observedScheduledRuns{}, err
 	}
-	return r.pruneScheduledGroup(ctx, failed, policy.FailedRunsHistoryLimit)
+	if err := r.pruneScheduledGroup(ctx, failed, policy.FailedRunsHistoryLimit, deleted); err != nil {
+		return observedScheduledRuns{}, err
+	}
+
+	retained := make([]kontextv1alpha1.AgentRun, 0, len(runs.items)-len(deleted))
+	for i := range runs.items {
+		if _, wasDeleted := deleted[runs.items[i].Name]; !wasDeleted {
+			retained = append(retained, runs.items[i])
+		}
+	}
+	observed := summarizeScheduledRuns(retained)
+	if runs.maxCount > observed.maxCount {
+		observed.maxCount = runs.maxCount
+	}
+	return observed, nil
 }
 
 func (r *AgentReconciler) pruneScheduledGroup(
 	ctx context.Context,
 	runs []*kontextv1alpha1.AgentRun,
 	limit int32,
+	deleted map[string]struct{},
 ) error {
 	sort.Slice(runs, func(i, j int) bool {
 		iTime := scheduledRunSortTime(runs[i])
@@ -364,12 +392,13 @@ func (r *AgentReconciler) pruneScheduledGroup(
 		if err := r.Delete(ctx, runs[i]); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("prune completed scheduled run %s/%s: %w", runs[i].Namespace, runs[i].Name, err)
 		}
+		deleted[runs[i].Name] = struct{}{}
 	}
 	return nil
 }
 
 func scheduledRunSortTime(run *kontextv1alpha1.AgentRun) time.Time {
-	if slot, err := time.Parse(time.RFC3339, run.Annotations[scheduledSlotAnnotation]); err == nil {
+	if slot, ok := scheduledrun.Slot(run); ok {
 		return slot
 	}
 	if run.Status.CompletionTime != nil {

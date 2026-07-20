@@ -40,6 +40,9 @@ changes converge on the same object. Schedule edits and resume operations
 anchor at the current time and wait for a future slot instead of backfilling.
 `status.lastScheduleTime` and `status.nextScheduleTime` expose scheduler
 progress; `currentRunName`, `restarts`, and backoff apply only to Service mode.
+`status.lastRunName` points to the newest retained scheduled child and is
+cleared when history limits prune every child. `lastScheduleTime` remains the
+historical latest observed slot even after that child is pruned.
 
 ## Status and logs
 

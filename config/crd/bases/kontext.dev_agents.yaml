@@ -269,9 +269,7 @@ spec:
                 x-kubernetes-validations:
                 - message: time zones must be configured with schedule.timeZone, not
                     inside schedule.expression
-                  rule: '!self.expression.startsWith(''TZ='') && !self.expression.startsWith(''CRON_TZ='')
-                    && !self.expression.contains('' TZ='') && !self.expression.contains(''
-                    CRON_TZ='')'
+                  rule: '!self.expression.matches(''(^|[[:space:]])(CRON_TZ|TZ)='')'
               secretRef:
                 description: SecretRef references a Kubernetes Secret with provider
                   credentials.

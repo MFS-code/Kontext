@@ -3,7 +3,6 @@ package controller_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -19,12 +18,8 @@ import (
 	"github.com/MFS-code/Kontext/internal/conditions"
 	"github.com/MFS-code/Kontext/internal/controller"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
+	"github.com/MFS-code/Kontext/internal/scheduledrun"
 	"github.com/MFS-code/Kontext/internal/scheduler"
-)
-
-const (
-	testScheduledSlotAnnotation     = "kontext.dev/scheduled-slot"
-	testScheduledSequenceAnnotation = "kontext.dev/scheduled-sequence"
 )
 
 type fakeClock struct {
@@ -91,9 +86,13 @@ func TestScheduledFirstFutureFireAndStatus(t *testing.T) {
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: wantRunName, Namespace: agent.Namespace}, &run); err != nil {
 		t.Fatalf("get scheduled run: %v", err)
 	}
+	slot, slotOK := scheduledrun.Slot(&run)
+	sequence, sequenceOK := scheduledrun.Sequence(&run)
 	if run.Spec.Goal != agent.Spec.Goal ||
-		run.Annotations[testScheduledSlotAnnotation] != "2026-07-20T12:01:00Z" ||
-		run.Annotations[testScheduledSequenceAnnotation] != "1" ||
+		!slotOK ||
+		!slot.Equal(time.Date(2026, time.July, 20, 12, 1, 0, 0, time.UTC)) ||
+		!sequenceOK ||
+		sequence != 1 ||
 		!metav1.IsControlledBy(&run, agent) {
 		t.Fatalf("scheduled snapshot metadata is incomplete: %#v", run)
 	}
@@ -116,7 +115,12 @@ func TestScheduledLatestWithinDeadlineAndNoBackfill(t *testing.T) {
 	clock.Set(time.Date(2026, time.July, 20, 12, 5, 20, 0, time.UTC))
 	reconcileScheduled(ctx, t, reconciler, agent)
 	runs := listOwnedRuns(ctx, t, agent)
-	if len(runs) != 1 || runs[0].Annotations[testScheduledSlotAnnotation] != "2026-07-20T12:05:00Z" {
+	if len(runs) != 1 {
+		t.Fatalf("expected one latest due slot, got %#v", runs)
+	}
+	slot, slotOK := scheduledrun.Slot(&runs[0])
+	if !slotOK ||
+		!slot.Equal(time.Date(2026, time.July, 20, 12, 5, 0, 0, time.UTC)) {
 		t.Fatalf("expected only latest due slot, got %#v", runs)
 	}
 
@@ -381,6 +385,101 @@ func TestScheduledHistoryPruningAndActivePreservation(t *testing.T) {
 	assertRunExists(t, ctx, agent.Namespace, "prune-success-new", false)
 	assertRunExists(t, ctx, agent.Namespace, "prune-failed-new", false)
 	assertRunExists(t, ctx, agent.Namespace, "prune-active", true)
+	updated = getAgent(ctx, t, agent)
+	if updated.Status.LastRunName != "prune-active" {
+		t.Fatalf("lastRunName = %q, want newest retained active run", updated.Status.LastRunName)
+	}
+	assertLastRunReferencesExisting(t, ctx, updated)
+}
+
+func TestScheduledHistoryPruningSelfCorrectsLastRunReference(t *testing.T) {
+	t.Run("AllTerminalRunsPruned", func(t *testing.T) {
+		ctx := context.Background()
+		clock := &fakeClock{now: time.Date(2026, time.July, 20, 12, 30, 0, 0, time.UTC)}
+		zero := int32(0)
+		agent := createScheduledAgent(ctx, t, "scheduled-prune-all", "0 * * * *", &kontextv1alpha1.ScheduleSpec{
+			Expression:                 "0 * * * *",
+			ConcurrencyPolicy:          kontextv1alpha1.ConcurrencyPolicyAllow,
+			Suspend:                    true,
+			SuccessfulRunsHistoryLimit: &zero,
+			FailedRunsHistoryLimit:     &zero,
+		})
+		slot := time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC)
+		createScheduledChild(
+			ctx,
+			t,
+			agent,
+			"prune-all-terminal",
+			slot.Format(time.RFC3339),
+			1,
+			kontextv1alpha1.AgentRunPhaseSucceeded,
+		)
+		seedScheduledStatus(ctx, t, agent, "prune-all-terminal", slot, 1)
+
+		reconciler := newScheduledReconciler(clock)
+		for range 20 {
+			reconcileScheduled(ctx, t, reconciler, agent)
+			updated := getAgent(ctx, t, agent)
+			if updated.Status.LastRunName != "" {
+				t.Fatalf("all-pruned lastRunName stayed stale: %#v", updated.Status)
+			}
+			assertTime(t, updated.Status.LastScheduleTime, slot)
+			if updated.Status.RunsCreated != 1 {
+				t.Fatalf("all-pruned runsCreated regressed: %#v", updated.Status)
+			}
+		}
+		assertRunExists(t, ctx, agent.Namespace, "prune-all-terminal", false)
+	})
+
+	t.Run("NewerTerminalPrunedOlderActiveRetained", func(t *testing.T) {
+		ctx := context.Background()
+		clock := &fakeClock{now: time.Date(2026, time.July, 20, 12, 30, 0, 0, time.UTC)}
+		zero := int32(0)
+		agent := createScheduledAgent(ctx, t, "scheduled-prune-mixed", "0 * * * *", &kontextv1alpha1.ScheduleSpec{
+			Expression:                 "0 * * * *",
+			ConcurrencyPolicy:          kontextv1alpha1.ConcurrencyPolicyAllow,
+			Suspend:                    true,
+			SuccessfulRunsHistoryLimit: &zero,
+			FailedRunsHistoryLimit:     &zero,
+		})
+		activeSlot := time.Date(2026, time.July, 20, 10, 0, 0, 0, time.UTC)
+		terminalSlot := time.Date(2026, time.July, 20, 11, 0, 0, 0, time.UTC)
+		createScheduledChild(
+			ctx,
+			t,
+			agent,
+			"prune-mixed-active",
+			activeSlot.Format(time.RFC3339),
+			1,
+			kontextv1alpha1.AgentRunPhaseRunning,
+		)
+		createScheduledChild(
+			ctx,
+			t,
+			agent,
+			"prune-mixed-terminal",
+			terminalSlot.Format(time.RFC3339),
+			2,
+			kontextv1alpha1.AgentRunPhaseSucceeded,
+		)
+		seedScheduledStatus(ctx, t, agent, "prune-mixed-terminal", terminalSlot, 2)
+
+		reconciler := newScheduledReconciler(clock)
+		for range 20 {
+			reconcileScheduled(ctx, t, reconciler, agent)
+			updated := getAgent(ctx, t, agent)
+			if updated.Status.LastRunName != "prune-mixed-active" {
+				t.Fatalf("mixed lastRunName did not self-correct: %#v", updated.Status)
+			}
+			assertTime(t, updated.Status.LastScheduleTime, terminalSlot)
+			if updated.Status.RunsCreated != 2 {
+				t.Fatalf("mixed runsCreated regressed: %#v", updated.Status)
+			}
+			assertLastRunReferencesExisting(t, ctx, updated)
+		}
+		assertRunExists(t, ctx, agent.Namespace, "prune-mixed-terminal", false)
+		assertRunExists(t, ctx, agent.Namespace, "prune-mixed-active", true)
+	})
 }
 
 func TestScheduledDefaultsModeValidationAndInvalidPolicyCondition(t *testing.T) {
@@ -420,17 +519,36 @@ func TestScheduledDefaultsModeValidationAndInvalidPolicyCondition(t *testing.T) 
 	if err := k8sClient.Create(ctx, serviceWithoutGoal); err == nil {
 		t.Fatal("Service Agent without a concrete goal was admitted")
 	}
-	for _, invalidExpression := range []string{
-		"0 0 0 1 1 1",
-		"CRON_TZ=UTC 0 * * * *",
+	for _, test := range []struct {
+		name       string
+		expression string
+	}{
+		{name: "six-fields", expression: "0 0 0 1 1 1"},
+		{name: "space-leading-cron-tz", expression: "CRON_TZ=UTC 0 * * * *"},
+		{name: "tab-leading-tz", expression: "\tTZ=UTC * * * *"},
+		{name: "tab-embedded-tz", expression: "*\tTZ=UTC * * *"},
+		{name: "newline-leading-cron-tz", expression: "\nCRON_TZ=UTC * * * *"},
+		{name: "newline-embedded-cron-tz", expression: "*\nCRON_TZ=UTC * * *"},
 	} {
 		invalid := newScheduledAgent(
-			"scheduled-invalid-expression-"+fmt.Sprintf("%d", len(invalidExpression)),
-			invalidExpression,
+			"scheduled-invalid-"+test.name,
+			test.expression,
 			nil,
 		)
 		if err := k8sClient.Create(ctx, invalid); err == nil {
-			t.Fatalf("invalid expression %q was admitted", invalidExpression)
+			t.Fatalf("invalid expression %q was admitted", test.expression)
+		}
+	}
+	for _, test := range []struct {
+		name       string
+		expression string
+	}{
+		{name: "tabs", expression: "*\t*\t*\t*\t*"},
+		{name: "newlines", expression: "*\n*\n*\n*\n*"},
+	} {
+		valid := newScheduledAgent("scheduled-valid-whitespace-"+test.name, test.expression, nil)
+		if err := k8sClient.Create(ctx, valid); err != nil {
+			t.Fatalf("valid whitespace expression %q was rejected: %v", test.expression, err)
 		}
 	}
 
@@ -543,6 +661,43 @@ func getAgent(ctx context.Context, t *testing.T, agent *kontextv1alpha1.Agent) *
 	return &updated
 }
 
+func seedScheduledStatus(
+	ctx context.Context,
+	t *testing.T,
+	agent *kontextv1alpha1.Agent,
+	lastRunName string,
+	lastScheduleTime time.Time,
+	runsCreated int32,
+) {
+	t.Helper()
+	updated := getAgent(ctx, t, agent)
+	if err := updateAgentStatus(ctx, updated, kontextv1alpha1.AgentStatus{
+		LastRunName:        lastRunName,
+		LastScheduleTime:   timePtrForTest(lastScheduleTime),
+		RunsCreated:        runsCreated,
+		ObservedGeneration: updated.Generation,
+	}); err != nil {
+		t.Fatalf("seed Scheduled Agent status: %v", err)
+	}
+}
+
+func assertLastRunReferencesExisting(
+	t *testing.T,
+	ctx context.Context,
+	agent *kontextv1alpha1.Agent,
+) {
+	t.Helper()
+	if agent.Status.LastRunName == "" {
+		return
+	}
+	assertRunExists(t, ctx, agent.Namespace, agent.Status.LastRunName, true)
+}
+
+func timePtrForTest(value time.Time) *metav1.Time {
+	result := metav1.NewTime(value.UTC())
+	return &result
+}
+
 func createScheduledChild(
 	ctx context.Context,
 	t *testing.T,
@@ -558,10 +713,6 @@ func createScheduledChild(
 			Name:      name,
 			Namespace: agent.Namespace,
 			Labels:    map[string]string{podbuilder.LabelAgentName: agent.Name},
-			Annotations: map[string]string{
-				testScheduledSlotAnnotation:     slot,
-				testScheduledSequenceAnnotation: fmt.Sprintf("%d", sequence),
-			},
 		},
 		Spec: kontextv1alpha1.AgentRunSpec{
 			AgentRef: &kontextv1alpha1.AgentRef{Name: agent.Name},
@@ -571,11 +722,38 @@ func createScheduledChild(
 			Runtime:  echoRuntimeSpec(),
 		},
 	}
+	scheduledSlot, err := time.Parse(time.RFC3339, slot)
+	if err != nil {
+		t.Fatalf("parse scheduled child slot: %v", err)
+	}
+	scheduledrun.SetMetadata(run, scheduledSlot, sequence)
+	assertScheduledMetadata(t, run, scheduledSlot, sequence)
 	createOwnedAgentRun(ctx, t, agent, run)
 	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
 		Phase: phase,
 	}); err != nil {
 		t.Fatalf("update scheduled child status: %v", err)
+	}
+}
+
+func assertScheduledMetadata(
+	t *testing.T,
+	run *kontextv1alpha1.AgentRun,
+	wantSlot time.Time,
+	wantSequence int32,
+) {
+	t.Helper()
+	slot, slotOK := scheduledrun.Slot(run)
+	sequence, sequenceOK := scheduledrun.Sequence(run)
+	if !slotOK || !slot.Equal(wantSlot) || !sequenceOK || sequence != wantSequence {
+		t.Fatalf(
+			"scheduled metadata guard failed: slot=%s/%t sequence=%d/%t annotations=%#v",
+			slot,
+			slotOK,
+			sequence,
+			sequenceOK,
+			run.Annotations,
+		)
 	}
 }
 

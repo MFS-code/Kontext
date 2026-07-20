@@ -32,17 +32,26 @@ func TestParseAppliesDefaultsAndStandardFiveFieldSemantics(t *testing.T) {
 		t.Fatalf("next slot = %s, want %s", got, want)
 	}
 
-	for _, expression := range []string{
-		"0 0 1 1",
-		"0 0 0 1 1 1",
-		"@hourly",
-		"61 * * * *",
-		"CRON_TZ=Europe/Paris 0 * * * *",
-		"TZ=UTC 0 * * * *",
+	for _, test := range []struct {
+		name       string
+		expression string
+	}{
+		{name: "four fields", expression: "0 0 1 1"},
+		{name: "six fields", expression: "0 0 0 1 1 1"},
+		{name: "descriptor", expression: "@hourly"},
+		{name: "range", expression: "61 * * * *"},
+		{name: "leading CRON_TZ", expression: "CRON_TZ=Europe/Paris 0 * * * *"},
+		{name: "leading TZ", expression: "TZ=UTC 0 * * * *"},
+		{name: "leading tab TZ", expression: "\tTZ=UTC * * * *"},
+		{name: "embedded tab TZ", expression: "*\tTZ=UTC * * *"},
+		{name: "leading newline CRON_TZ", expression: "\nCRON_TZ=UTC * * * *"},
+		{name: "embedded newline CRON_TZ", expression: "*\nCRON_TZ=UTC * * *"},
+		{name: "embedded carriage return TZ", expression: "*\rTZ=UTC * * *"},
+		{name: "embedded form feed CRON_TZ", expression: "*\fCRON_TZ=UTC * * *"},
 	} {
-		t.Run(expression, func(t *testing.T) {
-			if _, err := scheduler.Parse(&kontextv1alpha1.ScheduleSpec{Expression: expression}); err == nil {
-				t.Fatalf("expected %q to be rejected", expression)
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := scheduler.Parse(&kontextv1alpha1.ScheduleSpec{Expression: test.expression}); err == nil {
+				t.Fatalf("expected %q to be rejected", test.expression)
 			}
 		})
 	}

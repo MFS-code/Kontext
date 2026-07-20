@@ -53,7 +53,7 @@ type AgentSpec struct {
 type AgentMode string
 
 // ScheduleSpec controls Scheduled-mode run creation.
-// +kubebuilder:validation:XValidation:rule="!self.expression.startsWith('TZ=') && !self.expression.startsWith('CRON_TZ=') && !self.expression.contains(' TZ=') && !self.expression.contains(' CRON_TZ=')",message="time zones must be configured with schedule.timeZone, not inside schedule.expression"
+// +kubebuilder:validation:XValidation:rule="!self.expression.matches('(^|[[:space:]])(CRON_TZ|TZ)=')",message="time zones must be configured with schedule.timeZone, not inside schedule.expression"
 type ScheduleSpec struct {
 	// Expression is a standard five-field cron expression.
 	// +kubebuilder:validation:MinLength=1
