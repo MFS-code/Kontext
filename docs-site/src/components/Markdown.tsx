@@ -51,7 +51,7 @@ const components: Components = {
       </a>
     );
   },
-  code({ className, children, ...props }) {
+  code({ className, children, node: _node, ...props }) {
     const text = String(children).replace(/\n$/, "");
     const isBlock = Boolean(className) || text.includes("\n");
     if (!isBlock) {
