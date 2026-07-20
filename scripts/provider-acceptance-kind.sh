@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "missing required command: $1" >&2
-    exit 1
-  fi
-}
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+ROOT_DIR="$(repo_root)"
 
 provider="${KONTEXT_PROVIDER:?KONTEXT_PROVIDER is required}"
 model="${KONTEXT_MODEL:?KONTEXT_MODEL is required}"
@@ -32,7 +29,7 @@ run_attempt="${GITHUB_RUN_ATTEMPT:-1}"
 need jq
 
 if [[ -z "${commit_sha}" ]]; then
-  commit_sha="$(git -C "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+  commit_sha="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || printf 'unknown')"
 fi
 
 write_acceptance_record() {
@@ -274,34 +271,15 @@ render_run_manifest | kubectl apply -f - >/dev/null
 
 failure_stage="wait_for_terminal_phase"
 echo "==> waiting for AgentRun success"
-phase=""
-for _ in $(seq 1 75); do
+if ! wait_for_run_phase "${run_name}" Succeeded "${namespace}" 150 2; then
   phase="$(
     kubectl get agentrun "${run_name}" \
       --namespace "${namespace}" \
       -o jsonpath='{.status.phase}' 2>/dev/null || true
   )"
-  case "${phase}" in
-    Succeeded)
-      break
-      ;;
-    Failed | BudgetExceeded)
-      echo "AgentRun reached terminal phase ${phase}" >&2
-      exit 1
-      ;;
-    "" | Pending | Running) ;;
-    *)
-      echo "AgentRun reached unexpected phase ${phase}" >&2
-      exit 1
-      ;;
-  esac
-  sleep 2
-done
-
-if [[ "${phase}" != "Succeeded" ]]; then
-  echo "timed out waiting for AgentRun; last phase=${phase}" >&2
   exit 1
 fi
+phase="Succeeded"
 
 run_json="$(
   kubectl get agentrun "${run_name}" \

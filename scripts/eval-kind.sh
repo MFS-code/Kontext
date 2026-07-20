@@ -3,7 +3,9 @@
 # cluster. The script reuses the images loaded by scripts/install-go-kind.sh.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+ROOT_DIR="$(repo_root)"
 EVAL_NAMESPACE="${KONTEXT_EVAL_NAMESPACE:-kontext-eval}"
 EVAL_DIR="${KONTEXT_EVAL_DIR:-${ROOT_DIR}/eval-results/kind}"
 RECORDS="${EVAL_DIR}/keyless.jsonl"
@@ -11,13 +13,6 @@ SUMMARY="${EVAL_DIR}/keyless.summary.json"
 MARKER="${EVAL_DIR}/not-run.json"
 SERVICE_AGENT="echo-service"
 APPLY_EXAMPLE="${ROOT_DIR}/scripts/apply-example.sh"
-
-need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "missing required command: $1" >&2
-    exit 1
-  fi
-}
 
 wait_for_service() {
   local previous_run="${1:-}"
@@ -67,9 +62,7 @@ cleanup() {
   return "${status}"
 }
 
-need go
-need jq
-need kubectl
+need go jq kubectl
 trap cleanup EXIT
 
 mkdir -p "${EVAL_DIR}"
