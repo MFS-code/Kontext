@@ -12,6 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/MFS-code/Kontext/internal/environment"
 	"github.com/MFS-code/Kontext/internal/procgroup"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
 )
@@ -164,4 +165,8 @@ func (reader *lineValidatingReadCloser) Close() error {
 		reader.closeErr = reader.closer.Close()
 	})
 	return reader.closeErr
+}
+
+func sortedEnvironment(values map[string]string) []string {
+	return environment.Sorted(values)
 }

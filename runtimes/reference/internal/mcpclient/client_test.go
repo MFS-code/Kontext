@@ -630,7 +630,7 @@ func TestResolvedValuesAreRedactedAcrossStderrWrites(t *testing.T) {
 
 func TestStructuredContentRedactionPreservesJSONSyntax(t *testing.T) {
 	secrets := []string{"quote\"\nsecret", `":`, "[]"}
-	content, resultErr := normalizeResult(&mcp.CallToolResult{
+	content, truncated, resultErr := normalizeResult(&mcp.CallToolResult{
 		StructuredContent: map[string]any{
 			"quoted": "prefix quote\"\nsecret suffix",
 			"short":  "[]",
@@ -643,6 +643,9 @@ func TestStructuredContentRedactionPreservesJSONSyntax(t *testing.T) {
 	}, newRedactor(secrets))
 	if resultErr != nil {
 		t.Fatalf("normalize structured content: %v", resultErr)
+	}
+	if truncated {
+		t.Fatal("small structured content was unexpectedly truncated")
 	}
 	if !json.Valid([]byte(content)) {
 		t.Fatalf("redaction corrupted JSON syntax: %q", content)
