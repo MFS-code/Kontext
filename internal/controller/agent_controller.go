@@ -18,6 +18,7 @@ import (
 	"github.com/MFS-code/Kontext/internal/conditions"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
 	"github.com/MFS-code/Kontext/internal/runfactory"
+	"github.com/MFS-code/Kontext/internal/scheduler"
 	"github.com/MFS-code/Kontext/internal/status"
 )
 
@@ -32,6 +33,7 @@ type AgentReconciler struct {
 	client.Client
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
+	Clock     scheduler.Clock
 }
 
 // +kubebuilder:rbac:groups=kontext.dev,resources=agents,verbs=get;list;watch;create;update;patch;delete
@@ -47,7 +49,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	switch agent.Spec.Mode {
 	case kontextv1alpha1.AgentModeService:
 		return r.reconcileService(ctx, &agent)
-	case kontextv1alpha1.AgentModeTask, kontextv1alpha1.AgentModeScheduled:
+	case kontextv1alpha1.AgentModeScheduled:
+		return r.reconcileScheduled(ctx, &agent)
+	case kontextv1alpha1.AgentModeTask:
 		return ctrl.Result{}, r.setAgentStatus(ctx, &agent, agent.Status, conditions.UnsupportedMode(string(agent.Spec.Mode))...)
 	default:
 		return ctrl.Result{}, r.setAgentStatus(ctx, &agent, agent.Status, conditions.InvalidMode(string(agent.Spec.Mode))...)
@@ -287,6 +291,9 @@ func (r *AgentReconciler) setAgentStatus(
 	updates ...metav1.Condition,
 ) error {
 	next.Conditions = agent.Status.Conditions
+	for i := range updates {
+		updates[i].LastTransitionTime = metav1.NewTime(r.now())
+	}
 	setStatusConditions(&next.Conditions, agent.Generation, updates...)
 	if err := patchStatus(ctx, r.Client, agent, func() {
 		agent.Status = next
@@ -294,6 +301,13 @@ func (r *AgentReconciler) setAgentStatus(
 		return err
 	}
 	return nil
+}
+
+func (r *AgentReconciler) now() time.Time {
+	if r.Clock != nil {
+		return r.Clock.Now()
+	}
+	return time.Now()
 }
 
 // SetupWithManager sets up the Manager.

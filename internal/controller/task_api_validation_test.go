@@ -38,12 +38,17 @@ func TestTaskAgentAPIValidation(t *testing.T) {
 		{name: "Service rejects schedule", mode: kontextv1alpha1.AgentModeService, goal: "serve", schedule: "* * * * *"},
 		{name: "Scheduled static goal", mode: kontextv1alpha1.AgentModeScheduled, goal: "scheduled", schedule: "* * * * *", wantValid: true},
 		{name: "Scheduled missing goal", mode: kontextv1alpha1.AgentModeScheduled, schedule: "* * * * *"},
+		{name: "Scheduled missing schedule", mode: kontextv1alpha1.AgentModeScheduled, goal: "scheduled"},
 		{name: "Scheduled rejects template", mode: kontextv1alpha1.AgentModeScheduled, goalTemplate: "${input}", schedule: "* * * * *"},
-		{name: "Scheduled rejects backoff", mode: kontextv1alpha1.AgentModeScheduled, goal: "scheduled", backoff: &kontextv1alpha1.BackoffSpec{}},
+		{name: "Scheduled rejects backoff", mode: kontextv1alpha1.AgentModeScheduled, goal: "scheduled", schedule: "* * * * *", backoff: &kontextv1alpha1.BackoffSpec{}},
 	}
 
 	for index, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			var schedule *kontextv1alpha1.ScheduleSpec
+			if test.schedule != "" {
+				schedule = &kontextv1alpha1.ScheduleSpec{Expression: test.schedule}
+			}
 			agent := &kontextv1alpha1.Agent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      fmt.Sprintf("task-agent-validation-%d", index),
@@ -55,7 +60,7 @@ func TestTaskAgentAPIValidation(t *testing.T) {
 					GoalTemplate: test.goalTemplate,
 					Model:        "test/model",
 					Runtime:      echoRuntimeSpec(),
-					Schedule:     test.schedule,
+					Schedule:     schedule,
 					Backoff:      test.backoff,
 				},
 			}
