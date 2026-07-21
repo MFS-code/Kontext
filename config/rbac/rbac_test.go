@@ -46,7 +46,8 @@ func TestLeaderElectionRBACIsSeparatedFromWebhookCertificates(t *testing.T) {
 		!slices.Equal(
 			registrationRole.Rules[1].ResourceNames,
 			[]string{"kontext-task-agentrun-mutator.kontext.dev"},
-		) {
+		) ||
+		!slices.Equal(registrationRole.Rules[1].Verbs, []string{"get", "patch", "update"}) {
 		t.Fatalf("webhook registration resource names = %#v", registrationRole.Rules)
 	}
 

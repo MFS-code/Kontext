@@ -53,6 +53,7 @@ rules:
       - kontext-task-agentrun-mutator.kontext.dev
     verbs:
       - get
+      - patch
       - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
