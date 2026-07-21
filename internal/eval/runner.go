@@ -14,6 +14,15 @@ import (
 	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 )
 
+type caseExecution struct {
+	record       *Record
+	item         Case
+	requirements artifactRequirements
+	run          *kontextv1alpha1.AgentRun
+	pod          *corev1.Pod
+	created      bool
+}
+
 func (runner Runner) RunSuite(ctx context.Context, suite EvalSuite) []Record {
 	runner.Options = normalizeRunnerOptions(runner.Options, suite.Spec.Defaults)
 	records := make([]Record, 0, len(suite.Spec.Cases))
@@ -37,50 +46,29 @@ func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Re
 		Run:         RunRef{Namespace: namespace, Name: name},
 		StartedAt:   now().UTC(),
 	}
+	execution := caseExecution{record: &record, item: item}
 	ownershipLabels := map[string]string{
 		labelManagedBy:  "kontext-eval",
 		labelEvalSuite:  labelValue(suite.Metadata.Name),
 		labelEvalCase:   labelValue(item.ID),
 		labelInvocation: labelValue(invocation),
 	}
-	requirements, requirementsErr := requirementsForGraders(item.Graders)
-	if requirementsErr != nil {
-		record.CollectionErrors = append(record.CollectionErrors, requirementsErr.Error())
-		return runner.finishRecord(
-			ctx,
-			&record,
-			item,
-			requirements,
-			nil,
-			nil,
-			false,
-			now,
-		)
+	requirements, err := requirementsForGraders(item.Graders)
+	if err == nil {
+		err = requirementsForSuiteAssertions(suite.Spec.Assertions, item.ID, &requirements)
+		if err != nil {
+			err = fmt.Errorf("resolve suite assertion requirements: %w", err)
+		}
 	}
-	if err := requirementsForSuiteAssertions(
-		suite.Spec.Assertions,
-		item.ID,
-		&requirements,
-	); err != nil {
-		record.CollectionErrors = append(
-			record.CollectionErrors,
-			fmt.Sprintf("resolve suite assertion requirements: %v", err),
-		)
-		return runner.finishRecord(
-			ctx,
-			&record,
-			item,
-			requirements,
-			nil,
-			nil,
-			false,
-			now,
-		)
+	execution.requirements = requirements
+	if err != nil {
+		record.CollectionErrors = append(record.CollectionErrors, err.Error())
+		return runner.finalize(ctx, &execution, now)
 	}
 	run := newAgentRun(name, namespace, item.AgentRun, ownershipLabels)
+	execution.run = run
 	caseCtx, cancel := context.WithTimeout(ctx, item.Timeout.Duration)
 	defer cancel()
-	created := false
 	if err := runner.Client.Create(caseCtx, run); err != nil {
 		record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("create AgentRun: %v", err))
 		if apierrors.IsAlreadyExists(err) {
@@ -97,9 +85,9 @@ func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Re
 				}, ownershipLabels)...,
 			)
 		}
-		return runner.finishRecord(caseCtx, &record, item, requirements, nil, nil, created, now)
+		return runner.finalize(caseCtx, &execution, now)
 	}
-	created = true
+	execution.created = true
 
 	terminalRun, waitErr := runner.waitForTerminal(caseCtx, types.NamespacedName{
 		Namespace: namespace,
@@ -126,35 +114,30 @@ func (runner Runner) runCase(ctx context.Context, suite EvalSuite, item Case) Re
 		}
 	}
 
-	var pod *corev1.Pod
-	if !requirements.pod {
-		return runner.finishRecord(caseCtx, &record, item, requirements, terminalRun, nil, created, now)
-	}
-	if terminalRun.Status.PodName == "" {
-		record.CollectionErrors = append(record.CollectionErrors, "required runtime Pod name was not recorded")
-	} else {
-		pod = &corev1.Pod{}
-		if err := runner.getWithRetry(caseCtx, types.NamespacedName{
-			Namespace: namespace,
-			Name:      terminalRun.Status.PodName,
-		}, pod); err != nil {
-			record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("get required runtime Pod: %v", err))
-			pod = nil
+	execution.run = terminalRun
+	if requirements.pod {
+		if terminalRun.Status.PodName == "" {
+			record.CollectionErrors = append(record.CollectionErrors, "required runtime Pod name was not recorded")
+		} else {
+			execution.pod = &corev1.Pod{}
+			if err := runner.getWithRetry(caseCtx, types.NamespacedName{
+				Namespace: namespace,
+				Name:      terminalRun.Status.PodName,
+			}, execution.pod); err != nil {
+				record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("get required runtime Pod: %v", err))
+				execution.pod = nil
+			}
 		}
 	}
-	return runner.finishRecord(caseCtx, &record, item, requirements, terminalRun, pod, created, now)
+	return runner.finalize(caseCtx, &execution, now)
 }
 
-func (runner Runner) finishRecord(
+func (runner Runner) finalize(
 	ctx context.Context,
-	record *Record,
-	item Case,
-	requirements artifactRequirements,
-	run *kontextv1alpha1.AgentRun,
-	pod *corev1.Pod,
-	created bool,
+	execution *caseExecution,
 	now func() time.Time,
 ) Record {
+	record := execution.record
 	collectionCtx := ctx
 	cancelCollection := func() {}
 	if ctx.Err() != nil {
@@ -165,58 +148,12 @@ func (runner Runner) finishRecord(
 	}
 	defer cancelCollection()
 
-	if requirements.exitCode {
-		record.PodExitCode = podExitCode(pod)
-		if pod != nil && record.PodExitCode == nil {
-			record.CollectionErrors = append(record.CollectionErrors, "required runtime container exit code was unavailable")
-		}
-	}
-	if pod != nil {
-		if requirements.envelope {
-			terminated := runtimeTermination(pod)
-			if terminated == nil {
-				record.CollectionErrors = append(record.CollectionErrors, "required runtime termination message was unavailable")
-			} else {
-				envelope, err := resultv1alpha1.ParseVersioned(terminated.Message)
-				if errors.Is(err, resultv1alpha1.ErrVersionedEnvelopeRequired) {
-					record.CollectionErrors = append(
-						record.CollectionErrors,
-						"required versioned result envelope was absent from runtime termination message",
-					)
-				} else if err != nil {
-					record.CollectionErrors = append(
-						record.CollectionErrors,
-						fmt.Sprintf("parse required runtime termination message: %v", err),
-					)
-				} else {
-					record.Envelope = projectEnvelope(envelope, requirements)
-				}
-			}
-		}
-		if requirements.logs && runner.Logs == nil {
-			record.CollectionErrors = append(record.CollectionErrors, "required runtime log fetcher is not configured")
-		}
-		if requirements.logs && runner.Logs != nil {
-			logs, err := runner.Logs.Fetch(collectionCtx, pod.Namespace, pod.Name, "runtime")
-			if err != nil {
-				record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("fetch required runtime logs: %v", err))
-			} else {
-				parsed := ParseLogs(
-					logs.Data,
-					logs.Truncated,
-					requirements.eventTypes,
-					requirements.eventDetailTypes,
-				)
-				record.Events = parsed.Events
-				record.CollectionErrors = append(record.CollectionErrors, parsed.Errors...)
-			}
-		}
-	}
+	runner.collectPodArtifacts(collectionCtx, execution)
 	record.CompletedAt = now().UTC()
 	record.DurationMillis = record.CompletedAt.Sub(record.StartedAt).Milliseconds()
-	GradeRecord(record, item.Graders)
+	GradeRecord(record, execution.item.Graders)
 
-	if created && runner.Options.Judge != nil {
+	if execution.created && runner.Options.Judge != nil {
 		judgeResult, err := runner.Options.Judge.Evaluate(collectionCtx, observationFor(*record))
 		if err != nil {
 			record.Judge = &JudgeResult{Configured: true, Error: boundedMessage(err.Error())}
@@ -228,8 +165,8 @@ func (runner Runner) finishRecord(
 		record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("case context ended: %v", err))
 	}
 
-	if created && !runner.Options.KeepRuns {
-		target := run
+	if execution.created && !runner.Options.KeepRuns {
+		target := execution.run
 		if target == nil {
 			target = &kontextv1alpha1.AgentRun{}
 			target.Namespace = record.Run.Namespace
@@ -247,6 +184,60 @@ func (runner Runner) finishRecord(
 		record.Pass = record.Pass && record.Judge.Error == "" && record.Judge.Pass
 	}
 	return *record
+}
+
+func (runner Runner) collectPodArtifacts(ctx context.Context, execution *caseExecution) {
+	record := execution.record
+	requirements := execution.requirements
+	pod := execution.pod
+	if requirements.exitCode {
+		record.PodExitCode = podExitCode(pod)
+		if pod != nil && record.PodExitCode == nil {
+			record.CollectionErrors = append(record.CollectionErrors, "required runtime container exit code was unavailable")
+		}
+	}
+	if pod == nil {
+		return
+	}
+	if requirements.envelope {
+		terminated := runtimeTermination(pod)
+		if terminated == nil {
+			record.CollectionErrors = append(record.CollectionErrors, "required runtime termination message was unavailable")
+		} else {
+			envelope, err := resultv1alpha1.ParseVersioned(terminated.Message)
+			if errors.Is(err, resultv1alpha1.ErrVersionedEnvelopeRequired) {
+				record.CollectionErrors = append(
+					record.CollectionErrors,
+					"required versioned result envelope was absent from runtime termination message",
+				)
+			} else if err != nil {
+				record.CollectionErrors = append(
+					record.CollectionErrors,
+					fmt.Sprintf("parse required runtime termination message: %v", err),
+				)
+			} else {
+				record.Envelope = projectEnvelope(envelope, requirements)
+			}
+		}
+	}
+	if requirements.logs && runner.Logs == nil {
+		record.CollectionErrors = append(record.CollectionErrors, "required runtime log fetcher is not configured")
+	}
+	if requirements.logs && runner.Logs != nil {
+		logs, err := runner.Logs.Fetch(ctx, pod.Namespace, pod.Name, "runtime")
+		if err != nil {
+			record.CollectionErrors = append(record.CollectionErrors, fmt.Sprintf("fetch required runtime logs: %v", err))
+		} else {
+			parsed := ParseLogs(
+				logs.Data,
+				logs.Truncated,
+				requirements.eventTypes,
+				requirements.eventDetailTypes,
+			)
+			record.Events = parsed.Events
+			record.CollectionErrors = append(record.CollectionErrors, parsed.Errors...)
+		}
+	}
 }
 
 func (runner Runner) waitForTerminal(
