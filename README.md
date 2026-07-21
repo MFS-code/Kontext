@@ -50,7 +50,7 @@ NetworkPolicy, and a MutatingWebhookConfiguration. Install the published
 VERSION=v0.1.0-alpha.1
 kubectl apply -f \
   "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml"
-kubectl rollout status deployment/controller-manager \
+kubectl rollout status deployment/kontext-controller-manager \
   --namespace kontext-system \
   --timeout=120s
 ```

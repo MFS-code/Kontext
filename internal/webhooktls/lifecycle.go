@@ -24,8 +24,8 @@ import (
 const (
 	DefaultNamespace         = "kontext-system"
 	DefaultSecretName        = "webhook-server-cert"
-	DefaultWebhookName       = "task-agentrun-mutator.kontext.dev"
-	DefaultServiceName       = "webhook-service"
+	DefaultWebhookName       = "kontext-task-agentrun-mutator.kontext.dev"
+	DefaultServiceName       = "kontext-webhook-service"
 	DefaultWebhookPath       = "/mutate-kontext-dev-v1alpha1-agentrun"
 	DefaultReconcileInterval = 30 * time.Second
 

@@ -6,4 +6,6 @@ resources:
   - ../rbac
   - ../manager
 
+namePrefix: kontext-
+
 namespace: kontext-system

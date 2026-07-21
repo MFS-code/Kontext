@@ -82,6 +82,8 @@ grep -Fq 'image: "operator:test"' "${overlay}/manager_patch.yaml" ||
   fail "development overlay omitted the operator image"
 grep -Fq 'value: "reporter:test"' "${overlay}/manager_patch.yaml" ||
   fail "development overlay omitted the reporter image"
+grep -Fq 'name: kontext-controller-manager' "${overlay}/manager_patch.yaml" ||
+  fail "development overlay targets the unprefixed manager Deployment"
 
 overlay_with_id="${tmp_dir}/overlay-with-id"
 mkdir "${overlay_with_id}"

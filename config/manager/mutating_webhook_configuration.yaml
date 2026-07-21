@@ -6,7 +6,7 @@ metadata:
     app.kubernetes.io/name: kontext
     app.kubernetes.io/managed-by: kontext
 webhooks:
-  - name: task-agentrun-mutator.kontext.dev
+  - name: kontext-task-agentrun-mutator.kontext.dev
     admissionReviewVersions:
       - v1
     clientConfig:

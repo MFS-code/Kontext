@@ -104,20 +104,42 @@ controller rollout:
 NEW_VERSION="<target-release-tag>"
 kubectl apply -f \
   "https://github.com/MFS-code/Kontext/releases/download/${NEW_VERSION}/install.yaml"
-kubectl rollout status deployment/controller-manager \
+
+# Remove identities used by releases before the kontext- name prefix.
+kubectl delete deployment/controller-manager \
+  -n kontext-system --ignore-not-found=true --wait=true
+kubectl delete \
+  mutatingwebhookconfiguration/task-agentrun-mutator.kontext.dev \
+  clusterrolebinding/manager-rolebinding \
+  clusterrolebinding/webhook-registration-manager \
+  clusterrole/manager-role \
+  clusterrole/webhook-registration-manager \
+  --ignore-not-found=true
+kubectl delete \
+  service/webhook-service \
+  serviceaccount/controller-manager \
+  rolebinding/leader-election-manager \
+  rolebinding/webhook-certificate-manager \
+  role/leader-election-manager \
+  role/webhook-certificate-manager \
+  networkpolicy/controller-manager-webhook \
+  -n kontext-system --ignore-not-found=true
+
+kubectl rollout status deployment/kontext-controller-manager \
   --namespace kontext-system \
   --timeout=180s
 ```
 
-Kubernetes updates the CRDs, RBAC, Deployment, and webhook registration
-declaratively; existing `Agent`, `AgentRun`, and valid webhook TLS Secret
-remain. Downgrades are not supported as an API compatibility guarantee. Release
-CI nevertheless applies the previous manifest after the candidate as a
-rollback safety check, verifies baseline workloads remain available, and then
-restores the candidate. Applying an older manifest does not prune newer
-webhook objects; its narrow match keeps complete AgentRuns independent, while
-sparse Task requests remain fail closed until the current controller is
-restored.
+The explicit cleanup is idempotent. It stops an unprefixed controller from
+retaining the shared leader-election Lease and removes its fail-closed webhook
+before the old Service disappears. The namespaced TLS Secret remains and is
+renewed for the prefixed webhook Service.
+
+Kubernetes updates the CRDs and current resources declaratively; existing
+`Agent` and `AgentRun` resources remain. Downgrades are not supported as an API
+compatibility guarantee. Release CI nevertheless migrates in both directions,
+applies the previous manifest after the candidate as a rollback safety check,
+verifies baseline workloads remain available, and then restores the candidate.
 
 ## Uninstall
 
@@ -125,16 +147,22 @@ To remove only the Kontext control plane while retaining the CRDs and custom
 resources in other namespaces:
 
 ```bash
-kubectl delete clusterrolebinding manager-rolebinding \
+kubectl delete clusterrolebinding kontext-manager-rolebinding \
   --ignore-not-found=true
-kubectl delete clusterrole manager-role \
+kubectl delete clusterrole kontext-manager-role \
+  --ignore-not-found=true
+kubectl delete mutatingwebhookconfiguration \
+  kontext-task-agentrun-mutator.kontext.dev --ignore-not-found=true
+kubectl delete clusterrolebinding kontext-webhook-registration-manager \
+  --ignore-not-found=true
+kubectl delete clusterrole kontext-webhook-registration-manager \
   --ignore-not-found=true
 kubectl delete mutatingwebhookconfiguration \
   task-agentrun-mutator.kontext.dev --ignore-not-found=true
-kubectl delete clusterrolebinding webhook-registration-manager \
-  --ignore-not-found=true
-kubectl delete clusterrole webhook-registration-manager \
-  --ignore-not-found=true
+kubectl delete clusterrolebinding manager-rolebinding \
+  webhook-registration-manager --ignore-not-found=true
+kubectl delete clusterrole manager-role \
+  webhook-registration-manager --ignore-not-found=true
 kubectl delete namespace kontext-system \
   --ignore-not-found=true --wait=true
 ```
