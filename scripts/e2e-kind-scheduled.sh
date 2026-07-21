@@ -30,21 +30,53 @@ need kubectl
 trap on_exit EXIT
 cleanup
 
-echo "==> waiting for one real Scheduled cron tick"
-"${APPLY_EXAMPLE}" echo-scheduled-agent.yaml
-
-scheduled_run=""
-for _ in $(seq 1 90); do
+scheduled_run_exists() {
   scheduled_run="$(
     kubectl get agent echo-scheduled \
       -o jsonpath='{.status.lastRunName}' 2>/dev/null || true
   )"
-  if [[ -n "${scheduled_run}" ]]; then
-    break
-  fi
-  sleep 2
-done
-if [[ -z "${scheduled_run}" ]]; then
+  [[ -n "${scheduled_run}" ]]
+}
+
+agent_generation_observed() {
+  observed_generation="$(
+    kubectl get agent echo-scheduled-forbid \
+      -o jsonpath='{.status.observedGeneration}' 2>/dev/null || true
+  )"
+  generation="$(
+    kubectl get agent echo-scheduled-forbid \
+      -o jsonpath='{.metadata.generation}' 2>/dev/null || true
+  )"
+  [[ -n "${generation}" && "${observed_generation}" == "${generation}" ]]
+}
+
+forbid_fixture_settled() {
+  settled_reason="$(
+    kubectl get agent echo-scheduled-forbid \
+      -o jsonpath='{.status.conditions[?(@.type=="Progressing")].reason}' \
+      2>/dev/null || true
+  )"
+  [[ "${settled_reason}" == "WaitingForSchedule" ]]
+}
+
+due_slot_advanced() {
+  local due_slot="$1"
+  evaluated_next="$(
+    kubectl get agent echo-scheduled-forbid \
+      -o jsonpath='{.status.nextScheduleTime}' 2>/dev/null || true
+  )"
+  [[ -n "${evaluated_next}" && "${evaluated_next}" != "${due_slot}" ]]
+}
+
+resource_absent() {
+  ! kubectl get "$@" >/dev/null 2>&1
+}
+
+echo "==> waiting for one real Scheduled cron tick"
+"${APPLY_EXAMPLE}" echo-scheduled-agent.yaml
+
+scheduled_run=""
+if ! wait_until 90 2 "Scheduled Agent to mint a run" scheduled_run_exists; then
   echo "Scheduled Agent did not mint a run from its controller requeue" >&2
   exit 1
 fi
@@ -85,21 +117,8 @@ spec:
     startingDeadlineSeconds: 3600
 EOF
 
-for _ in $(seq 1 30); do
-  observed_generation="$(
-    kubectl get agent echo-scheduled-forbid \
-      -o jsonpath='{.status.observedGeneration}' 2>/dev/null || true
-  )"
-  generation="$(
-    kubectl get agent echo-scheduled-forbid \
-      -o jsonpath='{.metadata.generation}' 2>/dev/null || true
-  )"
-  if [[ -n "${generation}" && "${observed_generation}" == "${generation}" ]]; then
-    break
-  fi
-  sleep 1
-done
-if [[ -z "${generation}" || "${observed_generation}" != "${generation}" ]]; then
+if ! wait_until 30 1 "Forbid fixture Agent initialization" \
+  agent_generation_observed; then
   echo "Forbid fixture Agent was not initialized" >&2
   exit 1
 fi
@@ -134,18 +153,7 @@ spec:
 EOF
 
 wait_for_run_phase echo-scheduled-forbid-active Running
-for _ in $(seq 1 30); do
-  settled_reason="$(
-    kubectl get agent echo-scheduled-forbid \
-      -o jsonpath='{.status.conditions[?(@.type=="Progressing")].reason}' \
-      2>/dev/null || true
-  )"
-  if [[ "${settled_reason}" == "WaitingForSchedule" ]]; then
-    break
-  fi
-  sleep 1
-done
-if [[ "${settled_reason}" != "WaitingForSchedule" ]]; then
+if ! wait_until 30 1 "Forbid fixture to settle" forbid_fixture_settled; then
   echo "Forbid fixture did not settle before forced due slot" >&2
   exit 1
 fi
@@ -160,17 +168,8 @@ kubectl annotate agent echo-scheduled-forbid \
   "kontext.dev/force-reconcile=$(date +%s)" --overwrite
 
 evaluated_next=""
-for _ in $(seq 1 30); do
-  evaluated_next="$(
-    kubectl get agent echo-scheduled-forbid \
-      -o jsonpath='{.status.nextScheduleTime}' 2>/dev/null || true
-  )"
-  if [[ -n "${evaluated_next}" && "${evaluated_next}" != "${due_slot}" ]]; then
-    break
-  fi
-  sleep 1
-done
-if [[ -z "${evaluated_next}" || "${evaluated_next}" == "${due_slot}" ]]; then
+if ! wait_until 30 1 "Forbid to advance the forced due slot" \
+  due_slot_advanced "${due_slot}"; then
   echo "Forbid did not advance the forced due slot" >&2
   exit 1
 fi
@@ -185,13 +184,8 @@ fi
 
 echo "==> verifying Agent deletion cascades to scheduled runs"
 kubectl delete agent echo-scheduled --wait=true
-for _ in $(seq 1 30); do
-  if ! kubectl get agentrun "${scheduled_run}" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-if kubectl get agentrun "${scheduled_run}" >/dev/null 2>&1; then
+if ! wait_until 30 1 "scheduled run deletion" \
+  resource_absent agentrun "${scheduled_run}"; then
   echo "scheduled run survived Agent deletion" >&2
   exit 1
 fi

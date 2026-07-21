@@ -31,6 +31,22 @@ if (need kontext-command-that-does-not-exist) 2>/dev/null; then
   fail "need accepted a missing command"
 fi
 
+attempt_count=0
+succeed_on_third_attempt() {
+  local expected="$1"
+  attempt_count=$((attempt_count + 1))
+  [[ "${attempt_count}" -eq "${expected}" ]]
+}
+wait_until 3 0.01 "third test attempt" succeed_on_third_attempt 3
+[[ "${attempt_count}" -eq 3 ]] ||
+  fail "wait_until did not retry until success"
+if timeout_error="$(wait_until 2 0.01 "test condition" false 2>&1)"; then
+  fail "wait_until accepted an exhausted poll"
+fi
+[[ "${timeout_error}" == \
+  "timed out waiting for test condition after 2 attempts" ]] ||
+  fail "wait_until gave an inconsistent timeout diagnostic"
+
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/kontext-shell-test.XXXXXX")"
 cleanup() {
   rm -rf "${tmp_dir}"
@@ -94,15 +110,28 @@ grep -Fq 'kontext.dev/local-operator-image-id: "sha256:local"' \
   fail "development overlay omitted the local image annotation"
 
 cat >"${tmp_dir}/tools.jsonl" <<'EOF'
-not-json
-{"type":"tool","data":{"name":"first","outputBytes":10,"isError":false,"truncated":false}}
-{"type":"tool","data":{"name":"second","outputBytes":20,"isError":true,"truncated":true}}
+{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-21T12:00:00Z","type":"tool","data":{"name":"first","count":1,"outputBytes":10,"isError":false,"truncated":false}}
+{"apiVersion":"kontext.dev/event/v1alpha1","timestamp":"2026-07-21T12:00:01Z","type":"tool","data":{"name":"second","count":2,"outputBytes":20,"isError":true,"truncated":true}}
+KONTEXT_RESULT:{"outcome":"Succeeded"}
 EOF
 "${ROOT_DIR}/scripts/validators/validate-tool-events.py" \
   "${tmp_dir}/tools.jsonl" 2 20 30 first,second 1 1
 if "${ROOT_DIR}/scripts/validators/validate-tool-events.py" \
   "${tmp_dir}/tools.jsonl" 1 20 30 first 0 0 2>/dev/null; then
   fail "tool-event validator accepted the wrong event count"
+fi
+
+printf '{malformed\n' >"${tmp_dir}/malformed-tools.jsonl"
+if "${ROOT_DIR}/scripts/validators/validate-tool-events.py" \
+  "${tmp_dir}/malformed-tools.jsonl" 0 20 30 "" 0 0 2>/dev/null; then
+  fail "tool-event validator ignored malformed JSON"
+fi
+cat >"${tmp_dir}/old-version-tools.jsonl" <<'EOF'
+{"apiVersion":"kontext.dev/event/v1alpha0","timestamp":"2026-07-21T12:00:00Z","type":"tool","data":{"name":"old","count":1,"outputBytes":10,"isError":false,"truncated":false}}
+EOF
+if "${ROOT_DIR}/scripts/validators/validate-tool-events.py" \
+  "${tmp_dir}/old-version-tools.jsonl" 1 20 30 old 0 0 2>/dev/null; then
+  fail "tool-event validator accepted an unsupported event apiVersion"
 fi
 
 cat >"${tmp_dir}/browser-pod.json" <<'EOF'

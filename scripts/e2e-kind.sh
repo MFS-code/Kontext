@@ -49,6 +49,15 @@ on_exit() {
 need kubectl
 trap on_exit EXIT
 
+pod_phase_is() {
+  local pod="$1"
+  local expected="$2"
+  signal_phase="$(
+    kubectl get pod "${pod}" -o jsonpath='{.status.phase}' 2>/dev/null || true
+  )"
+  [[ "${signal_phase}" == "${expected}" ]]
+}
+
 echo "==> cleaning previous e2e resources"
 cleanup_e2e_resources
 
@@ -151,14 +160,8 @@ fi
 
 echo "==> verifying SIGTERM forwarding to the child"
 "${APPLY_EXAMPLE}" stdout-signal-run.yaml
-for _ in $(seq 1 60); do
-  signal_phase="$(kubectl get pod run-stdout-signal -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-  if [[ "${signal_phase}" == "Running" ]]; then
-    break
-  fi
-  sleep 2
-done
-if [[ "${signal_phase}" != "Running" ]]; then
+if ! wait_until 60 2 "stdout signal Pod to reach Running" \
+  pod_phase_is run-stdout-signal Running; then
   echo "stdout signal pod did not reach Running" >&2
   exit 1
 fi
@@ -297,38 +300,4 @@ if [[ "${wallclock_phase}" != "BudgetExceeded" || -n "${wallclock_pod}" ]]; then
   exit 1
 fi
 
-echo "==> applying service echo agent"
-"${APPLY_EXAMPLE}" echo-service-agent.yaml
-
-echo "==> waiting for live service run"
-for _ in $(seq 1 60); do
-  current_run="$(kubectl get agent echo-service -o jsonpath='{.status.currentRunName}' 2>/dev/null || true)"
-  pod_phase="$(kubectl get pod -l kontext.dev/agent=echo-service -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)"
-  if [[ -n "${current_run}" && "${pod_phase}" == "Running" ]]; then
-    break
-  fi
-  sleep 2
-done
-
-service_pod="$(kubectl get pod -l kontext.dev/agent=echo-service -o jsonpath='{.items[0].metadata.name}')"
-if [[ -z "${service_pod}" ]]; then
-  echo "service agent pod not found" >&2
-  exit 1
-fi
-
-echo "==> deleting service pod to verify recast"
-before_run="$(kubectl get agent echo-service -o jsonpath='{.status.currentRunName}')"
-kubectl delete pod "${service_pod}" --wait=true
-
-for _ in $(seq 1 60); do
-  after_run="$(kubectl get agent echo-service -o jsonpath='{.status.currentRunName}')"
-  pod_phase="$(kubectl get pod -l kontext.dev/agent=echo-service -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)"
-  if [[ "${after_run}" != "${before_run}" && "${pod_phase}" == "Running" ]]; then
-    echo "recast verified: ${before_run} -> ${after_run}"
-    exit 0
-  fi
-  sleep 2
-done
-
-echo "service recast did not complete in time" >&2
-exit 1
+echo "keyless kind end-to-end scenarios passed"

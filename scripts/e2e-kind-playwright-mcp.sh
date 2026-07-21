@@ -25,91 +25,87 @@ trap cleanup EXIT
 
 wait_for_pod_absent() {
   local name="$1"
-  for _ in $(seq 1 60); do
-    if ! kubectl get pod "${name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
-  echo "timed out waiting for Pod ${name} to be deleted" >&2
-  return 1
+  wait_until 60 1 "Pod ${name} deletion" \
+    pod_absent "${name}"
+}
+
+pod_absent() {
+  local name="$1"
+  ! kubectl get pod "${name}" -n "${NAMESPACE}" >/dev/null 2>&1
+}
+
+no_browser_processes() {
+  browser_process_details="$(
+    kubectl exec deployment/playwright-mcp -n "${NAMESPACE}" -- \
+      node -e '
+        const fs = require("fs");
+        const active = [];
+        for (const entry of fs.readdirSync("/proc")) {
+          if (!/^[0-9]+$/.test(entry) || Number(entry) === process.pid) continue;
+          try {
+            const command = fs.readFileSync(`/proc/${entry}/cmdline`, "utf8").replace(/\0/g, " ");
+            if (command.includes("/ms-playwright/") && /(chrome|chromium)/i.test(command)) {
+              active.push(`${entry}:${command}`);
+            }
+          } catch {}
+        }
+        if (active.length) {
+          console.error(active.join("\n"));
+          process.exit(1);
+        }
+      ' 2>&1
+  )"
 }
 
 wait_for_no_browser_processes() {
-  local details=""
-  for _ in $(seq 1 60); do
-    if details="$(
-      kubectl exec deployment/playwright-mcp -n "${NAMESPACE}" -- \
-        node -e '
-          const fs = require("fs");
-          const active = [];
-          for (const entry of fs.readdirSync("/proc")) {
-            if (!/^[0-9]+$/.test(entry) || Number(entry) === process.pid) continue;
-            try {
-              const command = fs.readFileSync(`/proc/${entry}/cmdline`, "utf8").replace(/\0/g, " ");
-              if (command.includes("/ms-playwright/") && /(chrome|chromium)/i.test(command)) {
-                active.push(`${entry}:${command}`);
-              }
-            } catch {}
-          }
-          if (active.length) {
-            console.error(active.join("\n"));
-            process.exit(1);
-          }
-        ' 2>&1
-    )"; then
-      return 0
-    fi
-    sleep 1
-  done
-  echo "Playwright retained browser processes after bounded cleanup polling:" >&2
-  echo "${details}" >&2
+  browser_process_details=""
+  if wait_until 60 1 "Playwright browser process cleanup" \
+    no_browser_processes; then
+    return 0
+  fi
+  echo "${browser_process_details}" >&2
   return 1
 }
 
+browser_processes_present() {
+  browser_process_count="$(
+    kubectl exec deployment/playwright-mcp -n "${NAMESPACE}" -- \
+      node -e '
+        const fs = require("fs");
+        let count = 0;
+        for (const entry of fs.readdirSync("/proc")) {
+          if (!/^[0-9]+$/.test(entry) || Number(entry) === process.pid) continue;
+          try {
+            const command = fs.readFileSync(`/proc/${entry}/cmdline`, "utf8").replace(/\0/g, " ");
+            if (command.includes("/ms-playwright/") && /(chrome|chromium)/i.test(command)) count++;
+          } catch {}
+        }
+        process.stdout.write(String(count));
+      ' 2>/dev/null || true
+  )"
+  [[ "${browser_process_count}" =~ ^[0-9]+$ && "${browser_process_count}" -gt 0 ]]
+}
+
 wait_for_browser_processes() {
-  local count=""
-  for _ in $(seq 1 80); do
-    count="$(
-      kubectl exec deployment/playwright-mcp -n "${NAMESPACE}" -- \
-        node -e '
-          const fs = require("fs");
-          let count = 0;
-          for (const entry of fs.readdirSync("/proc")) {
-            if (!/^[0-9]+$/.test(entry) || Number(entry) === process.pid) continue;
-            try {
-              const command = fs.readFileSync(`/proc/${entry}/cmdline`, "utf8").replace(/\0/g, " ");
-              if (command.includes("/ms-playwright/") && /(chrome|chromium)/i.test(command)) count++;
-            } catch {}
-          }
-          process.stdout.write(String(count));
-        ' 2>/dev/null || true
-    )"
-    if [[ "${count}" =~ ^[0-9]+$ && "${count}" -gt 0 ]]; then
-      echo "observed ${count} active Chromium processes before cancellation"
-      return 0
-    fi
-    sleep 0.25
-  done
-  echo "no Chromium process was observed before wallclock cancellation" >&2
-  return 1
+  browser_process_count=""
+  wait_until 80 0.25 "Chromium process before wallclock cancellation" \
+    browser_processes_present
+  echo "observed ${browser_process_count} active Chromium processes before cancellation"
+}
+
+runtime_log_contains() {
+  local pod="$1"
+  local pattern="$2"
+  local logs=""
+  logs="$(kubectl logs "${pod}" -n "${NAMESPACE}" -c runtime 2>/dev/null || true)"
+  [[ "${logs}" == *"${pattern}"* ]]
 }
 
 wait_for_runtime_log_pattern() {
   local pod="$1"
   local pattern="$2"
-  local logs=""
-  for _ in $(seq 1 80); do
-    logs="$(
-      kubectl logs "${pod}" -n "${NAMESPACE}" -c runtime 2>/dev/null || true
-    )"
-    if [[ "${logs}" == *"${pattern}"* ]]; then
-      return 0
-    fi
-    sleep 0.25
-  done
-  echo "${pod} did not reach expected tool state: ${pattern}" >&2
-  return 1
+  wait_until 80 0.25 "${pod} tool state ${pattern}" \
+    runtime_log_contains "${pod}" "${pattern}"
 }
 
 validate_tool_events() {

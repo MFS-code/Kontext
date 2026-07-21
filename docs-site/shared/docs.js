@@ -1,5 +1,7 @@
 // @ts-check
 
+import docsConfig from "../../docs-nav.json" with { type: "json" };
+
 /**
  * @typedef {Readonly<{
  *   srcFile: string;
@@ -9,120 +11,26 @@
  * }>} PageMetadata
  */
 
-/** @type {Array<[string, PageMetadata]>} */
-const pageMetadataEntries = [
-  [
-    "docs/index",
-    {
-      srcFile: "docs/index.md",
-      routePath: "/docs",
-      rawPath: "/raw/docs/index.md",
-      githubPath: "docs/index.md",
-    },
-  ],
-  [
-    "docs/quickstart",
-    {
-      srcFile: "docs/quickstart.md",
-      routePath: "/docs/quickstart",
-      rawPath: "/raw/docs/quickstart.md",
-      githubPath: "docs/quickstart.md",
-    },
-  ],
-  [
-    "docs/resources",
-    {
-      srcFile: "docs/resources.md",
-      routePath: "/docs/resources",
-      rawPath: "/raw/docs/resources.md",
-      githubPath: "docs/resources.md",
-    },
-  ],
-  [
-    "docs/task-workload",
-    {
-      srcFile: "docs/task-workload.md",
-      routePath: "/docs/task-workload",
-      rawPath: "/raw/docs/task-workload.md",
-      githubPath: "docs/task-workload.md",
-    },
-  ],
-  [
-    "docs/scheduled-workload",
-    {
-      srcFile: "docs/scheduled-workload.md",
-      routePath: "/docs/scheduled-workload",
-      rawPath: "/raw/docs/scheduled-workload.md",
-      githubPath: "docs/scheduled-workload.md",
-    },
-  ],
-  [
-    "docs/service-workload",
-    {
-      srcFile: "docs/service-workload.md",
-      routePath: "/docs/service-workload",
-      rawPath: "/raw/docs/service-workload.md",
-      githubPath: "docs/service-workload.md",
-    },
-  ],
-  [
-    "docs/operations",
-    {
-      srcFile: "docs/operations.md",
-      routePath: "/docs/operations",
-      rawPath: "/raw/docs/operations.md",
-      githubPath: "docs/operations.md",
-    },
-  ],
-  [
-    "docs/releases",
-    {
-      srcFile: "docs/releases.md",
-      routePath: "/docs/releases",
-      rawPath: "/raw/docs/releases.md",
-      githubPath: "docs/releases.md",
-    },
-  ],
-  [
-    "docs/runtimes",
-    {
-      srcFile: "docs/runtimes.md",
-      routePath: "/docs/runtimes",
-      rawPath: "/raw/docs/runtimes.md",
-      githubPath: "docs/runtimes.md",
-    },
-  ],
-  [
-    "docs/evals",
-    {
-      srcFile: "docs/evals.md",
-      routePath: "/docs/evals",
-      rawPath: "/raw/docs/evals.md",
-      githubPath: "docs/evals.md",
-    },
-  ],
-  [
-    "SPEC",
-    {
-      srcFile: "SPEC.md",
-      routePath: "/SPEC",
-      rawPath: "/raw/SPEC.md",
-      githubPath: "SPEC.md",
-    },
-  ],
-  [
-    "docs/when-not-to-use-agents",
-    {
-      srcFile: "docs/when-not-to-use-agents.md",
-      routePath: "/docs/when-not-to-use-agents",
-      rawPath: "/raw/docs/when-not-to-use-agents.md",
-      githubPath: "docs/when-not-to-use-agents.md",
-    },
-  ],
-];
+const pageIds = docsConfig.navigation.groups.flatMap((group) => group.pages);
+
+/**
+ * @param {string} id
+ * @returns {PageMetadata}
+ */
+function derivePageMetadata(id) {
+  const srcFile = `${id}.md`;
+  return {
+    srcFile,
+    routePath: id === "docs/index" ? "/docs" : `/${id}`,
+    rawPath: `/raw/${srcFile}`,
+    githubPath: srcFile,
+  };
+}
 
 /** @type {ReadonlyMap<string, PageMetadata>} */
-export const pageMetadataById = new Map(pageMetadataEntries);
+export const pageMetadataById = new Map(
+  pageIds.map((id) => [id, derivePageMetadata(id)]),
+);
 
 /**
  * @param {string} id

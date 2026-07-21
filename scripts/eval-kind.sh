@@ -14,34 +14,39 @@ MARKER="${EVAL_DIR}/not-run.json"
 SERVICE_AGENT="echo-service"
 APPLY_EXAMPLE="${ROOT_DIR}/scripts/apply-example.sh"
 
-wait_for_service() {
-  local previous_run="${1:-}"
+service_is_running() {
+  local previous_run="$1"
   local current_run=""
   local pod_name=""
   local pod_phase=""
-  for _ in $(seq 1 60); do
-    current_run="$(
-      kubectl get agent "${SERVICE_AGENT}" -n "${EVAL_NAMESPACE}" \
-        -o jsonpath='{.status.currentRunName}' 2>/dev/null || true
-    )"
-    pod_name="$(
-      kubectl get pod -n "${EVAL_NAMESPACE}" \
-        -l "kontext.dev/agent=${SERVICE_AGENT}" \
-        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
-    )"
-    pod_phase="$(
-      kubectl get pod "${pod_name}" -n "${EVAL_NAMESPACE}" \
-        -o jsonpath='{.status.phase}' 2>/dev/null || true
-    )"
-    if [[ -n "${current_run}" &&
-      "${current_run}" != "${previous_run}" &&
-      "${pod_phase}" == "Running" ]]; then
-      printf '%s\n' "${current_run}"
-      return 0
-    fi
-    sleep 2
-  done
-  echo "service did not become Running with a fresh run" >&2
+  current_run="$(
+    kubectl get agent "${SERVICE_AGENT}" -n "${EVAL_NAMESPACE}" \
+      -o jsonpath='{.status.currentRunName}' 2>/dev/null || true
+  )"
+  pod_name="$(
+    kubectl get pod -n "${EVAL_NAMESPACE}" \
+      -l "kontext.dev/agent=${SERVICE_AGENT}" \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+  )"
+  pod_phase="$(
+    kubectl get pod "${pod_name}" -n "${EVAL_NAMESPACE}" \
+      -o jsonpath='{.status.phase}' 2>/dev/null || true
+  )"
+  if [[ -n "${current_run}" &&
+    "${current_run}" != "${previous_run}" &&
+    "${pod_phase}" == "Running" ]]; then
+    printf '%s\n' "${current_run}"
+    return 0
+  fi
+  return 1
+}
+
+wait_for_service() {
+  local previous_run="${1:-}"
+  if wait_until 60 2 "Service to become Running with a fresh run" \
+    service_is_running "${previous_run}"; then
+    return 0
+  fi
   kubectl get agent,agentrun,pod -n "${EVAL_NAMESPACE}" -o wide >&2 || true
   return 1
 }
