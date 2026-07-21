@@ -238,6 +238,13 @@ kubectl delete clusterrolebinding kontext-webhook-registration-manager \
   --ignore-not-found=true
 kubectl delete clusterrole kontext-webhook-registration-manager \
   --ignore-not-found=true
+# Also clean identities used before the kontext- prefix.
+kubectl delete mutatingwebhookconfiguration \
+  task-agentrun-mutator.kontext.dev --ignore-not-found=true
+kubectl delete clusterrolebinding manager-rolebinding \
+  webhook-registration-manager --ignore-not-found=true
+kubectl delete clusterrole manager-role \
+  webhook-registration-manager --ignore-not-found=true
 kubectl delete namespace kontext-system \
   --ignore-not-found=true --wait=true
 ```
