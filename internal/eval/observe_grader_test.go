@@ -311,10 +311,24 @@ func TestGraderDispatchSpecsCoverEveryGraderType(t *testing.T) {
 				if !requirements.statusUsage {
 					t.Fatal("status usage was not requested")
 				}
-			case GraderEnvelopeError, GraderEnvelopeOutcome, GraderExecutionModel,
-				GraderEnvelopeTurns, GraderEnvelopeTools:
-				if !requirements.pod || !requirements.envelope ||
-					len(requirements.envelopeProjectors) != 1 {
+			case GraderEnvelopeError:
+				if !requirements.pod || !requirements.envelope || !requirements.wantErrorCode {
+					t.Fatalf("envelope error artifacts were incomplete: %#v", requirements)
+				}
+			case GraderEnvelopeOutcome:
+				if !requirements.pod || !requirements.envelope || !requirements.wantOutcome {
+					t.Fatalf("envelope outcome artifacts were incomplete: %#v", requirements)
+				}
+			case GraderExecutionModel:
+				if !requirements.pod || !requirements.envelope || !requirements.wantModel {
+					t.Fatalf("envelope model artifacts were incomplete: %#v", requirements)
+				}
+			case GraderEnvelopeTurns:
+				if !requirements.pod || !requirements.envelope || !requirements.wantTurns {
+					t.Fatalf("envelope turns artifacts were incomplete: %#v", requirements)
+				}
+			case GraderEnvelopeTools:
+				if !requirements.pod || !requirements.envelope || !requirements.wantToolCalls {
 					t.Fatalf("envelope artifacts were incomplete: %#v", requirements)
 				}
 			case GraderEventCount:

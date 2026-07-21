@@ -10,19 +10,21 @@ import (
 	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 )
 
-type envelopeProjector func(resultv1alpha1.Envelope, *EnvelopeObservation)
-
 type artifactRequirements struct {
-	pod                bool
-	logs               bool
-	envelope           bool
-	exitCode           bool
-	statusResult       bool
-	statusOutput       bool
-	statusUsage        bool
-	eventTypes         map[eventv1alpha1.Type]struct{}
-	eventDetailTypes   map[eventv1alpha1.Type]struct{}
-	envelopeProjectors []envelopeProjector
+	pod              bool
+	logs             bool
+	envelope         bool
+	exitCode         bool
+	statusResult     bool
+	statusOutput     bool
+	statusUsage      bool
+	wantOutcome      bool
+	wantErrorCode    bool
+	wantModel        bool
+	wantTurns        bool
+	wantToolCalls    bool
+	eventTypes       map[eventv1alpha1.Type]struct{}
+	eventDetailTypes map[eventv1alpha1.Type]struct{}
 }
 
 func requirementsForGraders(graders []Grader) (artifactRequirements, error) {
@@ -45,56 +47,27 @@ func projectEnvelope(
 	requirements artifactRequirements,
 ) *EnvelopeObservation {
 	observation := &EnvelopeObservation{}
-	for _, projector := range requirements.envelopeProjectors {
-		projector(envelope, observation)
+	if requirements.wantOutcome {
+		observation.Outcome = envelope.Outcome
 	}
-	return observation
-}
-
-func projectEnvelopeOutcome(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
-	observation.Outcome = envelope.Outcome
-}
-
-func projectEnvelopeError(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
-	if envelope.Error != nil {
+	if requirements.wantErrorCode && envelope.Error != nil {
 		observation.Error = &EnvelopeErrorObservation{Code: boundedString(envelope.Error.Code, 4096)}
 	}
-}
-
-func projectEnvelopeModel(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
-	execution := ensureEnvelopeExecution(observation)
-	if envelope.Execution != nil {
-		execution.Model = boundedString(envelope.Execution.Model, 4096)
-	}
-}
-
-func projectEnvelopeTurns(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
-	execution := ensureEnvelopeExecution(observation)
-	if envelope.Execution != nil {
-		execution.Turns = cloneInt32(envelope.Execution.Turns)
-	}
-}
-
-func projectEnvelopeTools(envelope resultv1alpha1.Envelope, observation *EnvelopeObservation) {
-	execution := ensureEnvelopeExecution(observation)
-	if envelope.Execution != nil {
-		execution.ToolCalls = cloneInt32(envelope.Execution.ToolCalls)
-	}
-}
-
-func ensureEnvelopeExecution(observation *EnvelopeObservation) *EnvelopeExecutionObservation {
-	if observation.Execution == nil {
+	if requirements.wantModel || requirements.wantTurns || requirements.wantToolCalls {
 		observation.Execution = &EnvelopeExecutionObservation{}
+		if envelope.Execution != nil {
+			if requirements.wantModel {
+				observation.Execution.Model = boundedString(envelope.Execution.Model, 4096)
+			}
+			if requirements.wantTurns {
+				observation.Execution.Turns = envelope.Execution.Turns
+			}
+			if requirements.wantToolCalls {
+				observation.Execution.ToolCalls = envelope.Execution.ToolCalls
+			}
+		}
 	}
-	return observation.Execution
-}
-
-func cloneInt32(value *int32) *int32 {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
+	return observation
 }
 
 func containsCollectionError(errors []string, fragment string) bool {

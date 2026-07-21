@@ -312,14 +312,14 @@ func TestEnvelopeGradersUseTerminationMessageWithoutLogs(t *testing.T) {
 		{Type: GraderEnvelopeTools, ToolCalls: &tools},
 	}}
 	requirements := mustArtifactRequirements(t, item.Graders)
-	finished := (Runner{Logs: logs}).finishRecord(
+	finished := (Runner{Logs: logs}).finalize(
 		context.Background(),
-		&record,
-		item,
-		requirements,
-		nil,
-		pod,
-		false,
+		&caseExecution{
+			record:       &record,
+			item:         item,
+			requirements: requirements,
+			pod:          pod,
+		},
 		func() time.Time { return time.Unix(1, 0) },
 	)
 	if !finished.Pass || finished.Envelope == nil {
@@ -362,14 +362,14 @@ func TestEnvelopeGradersRequireVersionedWireEnvelope(t *testing.T) {
 				}},
 			}}
 			record := Record{StartedAt: time.Unix(0, 0)}
-			finished := (Runner{}).finishRecord(
+			finished := (Runner{}).finalize(
 				context.Background(),
-				&record,
-				item,
-				requirements,
-				nil,
-				pod,
-				false,
+				&caseExecution{
+					record:       &record,
+					item:         item,
+					requirements: requirements,
+					pod:          pod,
+				},
 				func() time.Time { return time.Unix(1, 0) },
 			)
 			if finished.Pass ||
@@ -404,14 +404,15 @@ func TestEventGradersFailTransportAndTruncationErrors(t *testing.T) {
 					Judge:    judge,
 					KeepRuns: true,
 				},
-			}).finishRecord(
+			}).finalize(
 				context.Background(),
-				&record,
-				item,
-				requirements,
-				nil,
-				pod,
-				true,
+				&caseExecution{
+					record:       &record,
+					item:         item,
+					requirements: requirements,
+					pod:          pod,
+					created:      true,
+				},
 				func() time.Time { return time.Unix(1, 0) },
 			)
 			if finished.Pass || len(finished.CollectionErrors) == 0 {
@@ -446,14 +447,15 @@ func TestCleanupUsesFreshContextAfterCancellation(t *testing.T) {
 		Type: GraderTerminalPhase, Phase: kontextv1alpha1.AgentRunPhaseSucceeded,
 	}}}
 	requirements := mustArtifactRequirements(t, item.Graders)
-	finished := (Runner{Client: cluster}).finishRecord(
+	finished := (Runner{Client: cluster}).finalize(
 		ctx,
-		&record,
-		item,
-		requirements,
-		run,
-		nil,
-		true,
+		&caseExecution{
+			record:       &record,
+			item:         item,
+			requirements: requirements,
+			run:          run,
+			created:      true,
+		},
 		func() time.Time { return time.Unix(1, 0) },
 	)
 	if cluster.deletes != 1 || cluster.deleteContextErr != nil || !cluster.hadDeadline {
@@ -493,14 +495,15 @@ func TestCollectionUsesFreshContextAfterCaseTimeout(t *testing.T) {
 			Judge:    judge,
 			KeepRuns: true,
 		},
-	}).finishRecord(
+	}).finalize(
 		ctx,
-		&record,
-		item,
-		requirements,
-		nil,
-		pod,
-		true,
+		&caseExecution{
+			record:       &record,
+			item:         item,
+			requirements: requirements,
+			pod:          pod,
+			created:      true,
+		},
 		func() time.Time { return time.Unix(1, 0) },
 	)
 
@@ -561,7 +564,7 @@ func TestKubernetesLogFetcherSetsServerBoundsAndReportsIncompleteTail(t *testing
 	}
 }
 
-func TestFinishRecordAllowsStatusOnlyResultWithoutPodArtifacts(t *testing.T) {
+func TestFinalizeAllowsStatusOnlyResultWithoutPodArtifacts(t *testing.T) {
 	timeout := Duration{Duration: time.Second}
 	item := Case{
 		ID:      "wallclock",
@@ -578,14 +581,13 @@ func TestFinishRecordAllowsStatusOnlyResultWithoutPodArtifacts(t *testing.T) {
 	now := func() time.Time { return time.Unix(1, 0) }
 	requirements := mustArtifactRequirements(t, item.Graders)
 
-	finished := (Runner{}).finishRecord(
+	finished := (Runner{}).finalize(
 		context.Background(),
-		&record,
-		item,
-		requirements,
-		nil,
-		nil,
-		false,
+		&caseExecution{
+			record:       &record,
+			item:         item,
+			requirements: requirements,
+		},
 		now,
 	)
 	if !finished.Pass || len(finished.CollectionErrors) != 0 {
@@ -593,7 +595,7 @@ func TestFinishRecordAllowsStatusOnlyResultWithoutPodArtifacts(t *testing.T) {
 	}
 }
 
-func TestFinishRecordFailsWhenGraderRequiredArtifactIsMissing(t *testing.T) {
+func TestFinalizeFailsWhenGraderRequiredArtifactIsMissing(t *testing.T) {
 	exitCode := int32(7)
 	turns := int32(1)
 	cases := map[string]Grader{
@@ -625,14 +627,13 @@ func TestFinishRecordFailsWhenGraderRequiredArtifactIsMissing(t *testing.T) {
 
 			record := Record{StartedAt: time.Unix(0, 0)}
 			item := Case{Graders: []Grader{grader}}
-			finished := (Runner{}).finishRecord(
+			finished := (Runner{}).finalize(
 				context.Background(),
-				&record,
-				item,
-				requirements,
-				nil,
-				nil,
-				false,
+				&caseExecution{
+					record:       &record,
+					item:         item,
+					requirements: requirements,
+				},
 				func() time.Time { return time.Unix(1, 0) },
 			)
 			if finished.Pass {

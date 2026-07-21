@@ -17,6 +17,41 @@ type graderSpec struct {
 	grade        func(*Record, Grader) Grade
 }
 
+type envelopeExpected func(Grader) (any, error)
+type envelopeObserved func(*EnvelopeObservation) (any, bool)
+
+func envelopeGraderSpec(
+	expected envelopeExpected,
+	observed envelopeObserved,
+	selectArtifact func(*artifactRequirements),
+) graderSpec {
+	return graderSpec{
+		validate: func(grader Grader) error {
+			_, err := expected(grader)
+			return err
+		},
+		requirements: func(_ Grader, requirements *artifactRequirements) {
+			requirements.pod = true
+			requirements.envelope = true
+			selectArtifact(requirements)
+		},
+		grade: func(record *Record, grader Grader) Grade {
+			expectedValue, err := expected(grader)
+			result := Grade{Type: grader.Type, Expected: expectedValue}
+			if err != nil {
+				result.Message = err.Error()
+				return result
+			}
+			observedValue, present := observed(record.Envelope)
+			if present {
+				result.Observed = observedValue
+				result.Pass = observedValue == expectedValue
+			}
+			return result
+		},
+	}
+}
+
 var graderSpecs = map[GraderType]graderSpec{
 	GraderTerminalPhase: {
 		validate:     validateTerminalPhaseGrader,
@@ -38,31 +73,95 @@ var graderSpecs = map[GraderType]graderSpec{
 		requirements: requireStatusUsage,
 		grade:        gradeUsageFields,
 	},
-	GraderEnvelopeError: {
-		validate:     validateEnvelopeErrorGrader,
-		requirements: requireEnvelopeError,
-		grade:        gradeEnvelopeError,
-	},
-	GraderEnvelopeOutcome: {
-		validate:     validateEnvelopeOutcomeGrader,
-		requirements: requireEnvelopeOutcome,
-		grade:        gradeEnvelopeOutcome,
-	},
-	GraderExecutionModel: {
-		validate:     validateExecutionModelGrader,
-		requirements: requireEnvelopeModel,
-		grade:        gradeExecutionModel,
-	},
-	GraderEnvelopeTurns: {
-		validate:     validateEnvelopeTurnsGrader,
-		requirements: requireEnvelopeTurns,
-		grade:        gradeEnvelopeTurns,
-	},
-	GraderEnvelopeTools: {
-		validate:     validateEnvelopeToolsGrader,
-		requirements: requireEnvelopeTools,
-		grade:        gradeEnvelopeTools,
-	},
+	GraderEnvelopeError: envelopeGraderSpec(
+		func(grader Grader) (any, error) {
+			if strings.TrimSpace(grader.ErrorCode) == "" {
+				return nil, errors.New("errorCode is required")
+			}
+			return grader.ErrorCode, nil
+		},
+		func(envelope *EnvelopeObservation) (any, bool) {
+			if envelope == nil || envelope.Error == nil {
+				return nil, false
+			}
+			return envelope.Error.Code, true
+		},
+		func(requirements *artifactRequirements) {
+			requirements.wantErrorCode = true
+		},
+	),
+	GraderEnvelopeOutcome: envelopeGraderSpec(
+		func(grader Grader) (any, error) {
+			switch grader.Outcome {
+			case resultv1alpha1.OutcomeSucceeded, resultv1alpha1.OutcomeFailed:
+				return grader.Outcome, nil
+			default:
+				return nil, fmt.Errorf("invalid envelope outcome %q", grader.Outcome)
+			}
+		},
+		func(envelope *EnvelopeObservation) (any, bool) {
+			if envelope == nil {
+				return nil, false
+			}
+			return envelope.Outcome, true
+		},
+		func(requirements *artifactRequirements) {
+			requirements.wantOutcome = true
+		},
+	),
+	GraderExecutionModel: envelopeGraderSpec(
+		func(grader Grader) (any, error) {
+			if strings.TrimSpace(grader.Model) == "" {
+				return nil, errors.New("model is required")
+			}
+			return grader.Model, nil
+		},
+		func(envelope *EnvelopeObservation) (any, bool) {
+			if envelope == nil || envelope.Execution == nil {
+				return nil, false
+			}
+			return envelope.Execution.Model, true
+		},
+		func(requirements *artifactRequirements) {
+			requirements.wantModel = true
+		},
+	),
+	GraderEnvelopeTurns: envelopeGraderSpec(
+		func(grader Grader) (any, error) {
+			if grader.Turns == nil || *grader.Turns < 0 {
+				return nil, errors.New("turns must be a non-negative integer")
+			}
+			return *grader.Turns, nil
+		},
+		func(envelope *EnvelopeObservation) (any, bool) {
+			if envelope == nil || envelope.Execution == nil ||
+				envelope.Execution.Turns == nil {
+				return nil, false
+			}
+			return *envelope.Execution.Turns, true
+		},
+		func(requirements *artifactRequirements) {
+			requirements.wantTurns = true
+		},
+	),
+	GraderEnvelopeTools: envelopeGraderSpec(
+		func(grader Grader) (any, error) {
+			if grader.ToolCalls == nil || *grader.ToolCalls < 0 {
+				return nil, errors.New("toolCalls must be a non-negative integer")
+			}
+			return *grader.ToolCalls, nil
+		},
+		func(envelope *EnvelopeObservation) (any, bool) {
+			if envelope == nil || envelope.Execution == nil ||
+				envelope.Execution.ToolCalls == nil {
+				return nil, false
+			}
+			return *envelope.Execution.ToolCalls, true
+		},
+		func(requirements *artifactRequirements) {
+			requirements.wantToolCalls = true
+		},
+	),
 	GraderEventCount: {
 		validate:     validateEventCountGrader,
 		requirements: requireEventCount,
@@ -176,43 +275,6 @@ func validateUsageFieldsGrader(grader Grader) error {
 	return nil
 }
 
-func validateEnvelopeErrorGrader(grader Grader) error {
-	if strings.TrimSpace(grader.ErrorCode) == "" {
-		return errors.New("errorCode is required")
-	}
-	return nil
-}
-
-func validateEnvelopeOutcomeGrader(grader Grader) error {
-	switch grader.Outcome {
-	case resultv1alpha1.OutcomeSucceeded, resultv1alpha1.OutcomeFailed:
-		return nil
-	default:
-		return fmt.Errorf("invalid envelope outcome %q", grader.Outcome)
-	}
-}
-
-func validateExecutionModelGrader(grader Grader) error {
-	if strings.TrimSpace(grader.Model) == "" {
-		return errors.New("model is required")
-	}
-	return nil
-}
-
-func validateEnvelopeTurnsGrader(grader Grader) error {
-	if grader.Turns == nil || *grader.Turns < 0 {
-		return errors.New("turns must be a non-negative integer")
-	}
-	return nil
-}
-
-func validateEnvelopeToolsGrader(grader Grader) error {
-	if grader.ToolCalls == nil || *grader.ToolCalls < 0 {
-		return errors.New("toolCalls must be a non-negative integer")
-	}
-	return nil
-}
-
 func validateEventCountGrader(grader Grader) error {
 	if grader.Event == nil || grader.Event.Count < 0 {
 		return errors.New("event with non-negative count is required")
@@ -268,32 +330,6 @@ func requireStatusOutput(_ Grader, requirements *artifactRequirements) {
 
 func requireStatusUsage(_ Grader, requirements *artifactRequirements) {
 	requirements.statusUsage = true
-}
-
-func requireEnvelopeError(_ Grader, requirements *artifactRequirements) {
-	requireEnvelope(requirements, projectEnvelopeError)
-}
-
-func requireEnvelopeOutcome(_ Grader, requirements *artifactRequirements) {
-	requireEnvelope(requirements, projectEnvelopeOutcome)
-}
-
-func requireEnvelopeModel(_ Grader, requirements *artifactRequirements) {
-	requireEnvelope(requirements, projectEnvelopeModel)
-}
-
-func requireEnvelopeTurns(_ Grader, requirements *artifactRequirements) {
-	requireEnvelope(requirements, projectEnvelopeTurns)
-}
-
-func requireEnvelopeTools(_ Grader, requirements *artifactRequirements) {
-	requireEnvelope(requirements, projectEnvelopeTools)
-}
-
-func requireEnvelope(requirements *artifactRequirements, projector envelopeProjector) {
-	requirements.pod = true
-	requirements.envelope = true
-	requirements.envelopeProjectors = append(requirements.envelopeProjectors, projector)
 }
 
 func requireEventCount(grader Grader, requirements *artifactRequirements) {
@@ -377,53 +413,6 @@ func gradeUsageFields(record *Record, grader Grader) Grade {
 		Observed: observed,
 		Pass:     pass,
 	}
-}
-
-func gradeEnvelopeError(record *Record, grader Grader) Grade {
-	result := Grade{Type: grader.Type, Expected: grader.ErrorCode}
-	if record.Envelope != nil && record.Envelope.Error != nil {
-		result.Observed = record.Envelope.Error.Code
-		result.Pass = record.Envelope.Error.Code == grader.ErrorCode
-	}
-	return result
-}
-
-func gradeEnvelopeOutcome(record *Record, grader Grader) Grade {
-	result := Grade{Type: grader.Type, Expected: grader.Outcome}
-	if record.Envelope != nil {
-		result.Observed = record.Envelope.Outcome
-		result.Pass = record.Envelope.Outcome == grader.Outcome
-	}
-	return result
-}
-
-func gradeExecutionModel(record *Record, grader Grader) Grade {
-	result := Grade{Type: grader.Type, Expected: grader.Model}
-	if record.Envelope != nil && record.Envelope.Execution != nil {
-		result.Observed = record.Envelope.Execution.Model
-		result.Pass = record.Envelope.Execution.Model == grader.Model
-	}
-	return result
-}
-
-func gradeEnvelopeTurns(record *Record, grader Grader) Grade {
-	result := Grade{Type: grader.Type, Expected: *grader.Turns}
-	if record.Envelope != nil && record.Envelope.Execution != nil &&
-		record.Envelope.Execution.Turns != nil {
-		result.Observed = *record.Envelope.Execution.Turns
-		result.Pass = *record.Envelope.Execution.Turns == *grader.Turns
-	}
-	return result
-}
-
-func gradeEnvelopeTools(record *Record, grader Grader) Grade {
-	result := Grade{Type: grader.Type, Expected: *grader.ToolCalls}
-	if record.Envelope != nil && record.Envelope.Execution != nil &&
-		record.Envelope.Execution.ToolCalls != nil {
-		result.Observed = *record.Envelope.Execution.ToolCalls
-		result.Pass = *record.Envelope.Execution.ToolCalls == *grader.ToolCalls
-	}
-	return result
 }
 
 func gradeEventCount(record *Record, grader Grader) Grade {
