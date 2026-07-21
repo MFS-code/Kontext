@@ -42,9 +42,9 @@ GitHub release is created if anonymous access cannot be verified.
 ## Release checklist
 
 - [ ] Bump the documented release version in `README.md`, `SECURITY.md`,
-  `docs/quickstart.md`, `docs/releases.md`, `docs/service-workload.md`,
-  `website/index.html`, `deploy/examples/v1alpha1/README.md`, and
-  `.github/ISSUE_TEMPLATE/bug_report.yml`.
+  `docs/quickstart.md`, `docs/releases.md`, `docs/scheduled-workload.md`,
+  `docs/service-workload.md`, `docs/task-workload.md`, `website/index.html`,
+  `deploy/examples/v1alpha1/README.md`, and `.github/ISSUE_TEMPLATE/bug_report.yml`.
 
 ## Install
 
