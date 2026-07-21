@@ -13,7 +13,6 @@ import (
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/conditions"
-	"github.com/MFS-code/Kontext/internal/podbuilder"
 	"github.com/MFS-code/Kontext/internal/runfactory"
 	"github.com/MFS-code/Kontext/internal/scheduledrun"
 	"github.com/MFS-code/Kontext/internal/scheduler"
@@ -195,25 +194,12 @@ func (r *AgentReconciler) observeScheduledRuns(
 	ctx context.Context,
 	agent *kontextv1alpha1.Agent,
 ) (observedScheduledRuns, error) {
-	var children kontextv1alpha1.AgentRunList
-	if err := r.List(
-		ctx,
-		&children,
-		client.InNamespace(agent.Namespace),
-		client.MatchingLabels{podbuilder.LabelAgentName: agent.Name},
-	); err != nil {
+	children, err := r.ownedRuns(ctx, agent)
+	if err != nil {
 		return observedScheduledRuns{}, err
 	}
 
-	owned := make([]kontextv1alpha1.AgentRun, 0, len(children.Items))
-	for i := range children.Items {
-		run := &children.Items[i]
-		if !metav1.IsControlledBy(run, agent) {
-			continue
-		}
-		owned = append(owned, *run.DeepCopy())
-	}
-	return summarizeScheduledRuns(owned), nil
+	return summarizeScheduledRuns(children), nil
 }
 
 func summarizeScheduledRuns(items []kontextv1alpha1.AgentRun) observedScheduledRuns {
