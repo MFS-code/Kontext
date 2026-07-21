@@ -64,7 +64,11 @@ func TestMain(m *testing.M) {
 	go func() {
 		cacheErrors <- manager.GetCache().Start(ctx)
 	}()
-	if !manager.GetCache().WaitForCacheSync(ctx) {
+	syncCtx, cancelSync := context.WithTimeout(ctx, 10*time.Second)
+	cacheSynced := manager.GetCache().WaitForCacheSync(syncCtx)
+	cancelSync()
+	if !cacheSynced {
+		cancelCache()
 		panic("controller test cache did not sync")
 	}
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
