@@ -381,6 +381,99 @@ func TestAgentRunReconcilerRejectsPodNameCollision(t *testing.T) {
 	}
 }
 
+func TestAgentRunReconcilerPreservesTerminalStatusOnForeignPodReuse(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "terminal-pod-reuse",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	completed := metav1.NewTime(time.Now().Truncate(time.Second))
+	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
+		Phase:          kontextv1alpha1.AgentRunPhaseSucceeded,
+		PodName:        podbuilder.PodNameForRun(run.Name),
+		Result:         "owned result",
+		CompletionTime: &completed,
+	}); err != nil {
+		t.Fatalf("update run status: %v", err)
+	}
+
+	unrelatedPod := testsupport.BuildPod(run)
+	if err := k8sClient.Create(ctx, unrelatedPod); err != nil {
+		t.Fatalf("create unrelated pod: %v", err)
+	}
+
+	reconcileAgentRun(ctx, t, types.NamespacedName{Name: run.Name, Namespace: run.Namespace})
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(run), &updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseSucceeded ||
+		updated.Status.Result != "owned result" ||
+		updated.Status.CompletionTime == nil ||
+		!updated.Status.CompletionTime.Equal(&completed) {
+		t.Fatalf("terminal status changed after foreign Pod reuse: %#v", updated.Status)
+	}
+}
+
+func TestAgentRunReconcilerContinuesOwnedLegacyNamedPod(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      strings.Repeat("a", 56) + "-legacy",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	legacyPodName := podbuilder.LegacyPodNameForRun(run.Name)
+	hashedPodName := podbuilder.PodNameForRun(run.Name)
+	if legacyPodName == hashedPodName {
+		t.Fatalf("test requires distinct legacy and hashed Pod names: %s", legacyPodName)
+	}
+	legacyPod := buildOwnedPod(t, run)
+	legacyPod.Name = legacyPodName
+	if err := k8sClient.Create(ctx, legacyPod); err != nil {
+		t.Fatalf("create legacy Pod: %v", err)
+	}
+
+	reconcileAgentRun(ctx, t, types.NamespacedName{Name: run.Name, Namespace: run.Namespace})
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(run), &updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.PodName != legacyPodName {
+		t.Fatalf("expected legacy Pod %q to remain authoritative, got %q", legacyPodName, updated.Status.PodName)
+	}
+	if err := k8sClient.Get(
+		ctx,
+		types.NamespacedName{Name: hashedPodName, Namespace: run.Namespace},
+		&corev1.Pod{},
+	); !apierrors.IsNotFound(err) {
+		t.Fatalf("expected no duplicate hashed Pod, got %v", err)
+	}
+}
+
 func TestAgentRunReconcilerDeletesLegacyPodWithInvalidWallclock(t *testing.T) {
 	ctx := context.Background()
 	run := &kontextv1alpha1.AgentRun{

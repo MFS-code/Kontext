@@ -345,9 +345,13 @@ func TestPodNameForRunDistinguishesLongNamesWithSharedPrefix(t *testing.T) {
 	sharedPrefix := strings.Repeat("a", 56)
 	first := podbuilder.PodNameForRun(sharedPrefix + "-first")
 	second := podbuilder.PodNameForRun(sharedPrefix + "-second")
+	legacy := podbuilder.LegacyPodNameForRun(sharedPrefix + "-first")
 
 	if first == second {
 		t.Fatalf("long run names produced the same pod name: %s", first)
+	}
+	if legacy != "run-"+sharedPrefix {
+		t.Fatalf("unexpected legacy pod name: %s", legacy)
 	}
 	for _, name := range []string{first, second} {
 		if len(name) > 63 {

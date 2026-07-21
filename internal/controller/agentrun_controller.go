@@ -49,7 +49,26 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if podErr != nil && !podMissing {
 		return ctrl.Result{}, podErr
 	}
+	if podMissing && run.Status.PodName == "" {
+		legacyPodName := podbuilder.LegacyPodNameForRun(run.Name)
+		if legacyPodName != podName {
+			legacyPod := &corev1.Pod{}
+			legacyPodKey := client.ObjectKey{Namespace: run.Namespace, Name: legacyPodName}
+			legacyPodErr := r.Get(ctx, legacyPodKey, legacyPod)
+			switch {
+			case legacyPodErr == nil && metav1.IsControlledBy(legacyPod, &run):
+				pod = legacyPod
+				podName = legacyPodName
+				podMissing = false
+			case legacyPodErr != nil && !apierrors.IsNotFound(legacyPodErr):
+				return ctrl.Result{}, legacyPodErr
+			}
+		}
+	}
 	if !podMissing && !metav1.IsControlledBy(pod, &run) {
+		if status.IsTerminalPhase(run.Status.Phase) {
+			return ctrl.Result{}, nil
+		}
 		return r.failPodNameCollision(ctx, &run, pod)
 	}
 

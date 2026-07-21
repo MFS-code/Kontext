@@ -352,11 +352,7 @@ func budgetDollars(budget *kontextv1alpha1.BudgetSpec) string {
 
 // PodNameForRun returns a deterministic Pod name for an AgentRun.
 func PodNameForRun(runName string) string {
-	safe := invalidNameChars.ReplaceAllString(strings.ToLower(runName), "-")
-	safe = strings.Trim(safe, "-")
-	if safe == "" {
-		safe = "run"
-	}
+	safe := sanitizedRunName(runName)
 	if len(safe) <= maxUnhashedRunNameLength {
 		return podNamePrefix + safe
 	}
@@ -366,6 +362,29 @@ func PodNameForRun(runName string) string {
 	prefixLength := maxPodNameLength - len(podNamePrefix) - 1 - len(hash)
 	prefix := strings.TrimRight(safe[:prefixLength], "-")
 	return fmt.Sprintf("%s%s-%s", podNamePrefix, prefix, hash)
+}
+
+// LegacyPodNameForRun returns the Pod name used before truncated names gained
+// a hash suffix. It supports adopting an already-owned Pod during upgrades.
+func LegacyPodNameForRun(runName string) string {
+	safe := sanitizedRunName(runName)
+	if len(safe) > maxUnhashedRunNameLength {
+		safe = safe[:maxUnhashedRunNameLength]
+	}
+	safe = strings.Trim(safe, "-")
+	if safe == "" {
+		safe = "run"
+	}
+	return podNamePrefix + safe
+}
+
+func sanitizedRunName(runName string) string {
+	safe := invalidNameChars.ReplaceAllString(strings.ToLower(runName), "-")
+	safe = strings.Trim(safe, "-")
+	if safe == "" {
+		safe = "run"
+	}
+	return safe
 }
 
 func resourceQuantity(value string) resource.Quantity {
