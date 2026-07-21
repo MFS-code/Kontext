@@ -29,7 +29,7 @@ spec:
   provider: echo
   model: echo-model
   runtime:
-    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1
+    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.2
   budget:
     wallclock: 2m
 ```

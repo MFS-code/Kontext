@@ -44,10 +44,10 @@ backward-compatible text projection. The full versioned contract is in
 An existing Kubernetes cluster needs only kubectl and permission to create
 CRDs, cluster-scoped RBAC, a Namespace, a Deployment, a Service, a
 NetworkPolicy, and a MutatingWebhookConfiguration. Install the published
-`v0.1.0-alpha.1` release directly from GitHub:
+`v0.1.0-alpha.2` release directly from GitHub:
 
 ```bash
-VERSION=v0.1.0-alpha.1
+VERSION=v0.1.0-alpha.2
 kubectl apply -f \
   "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml"
 kubectl rollout status deployment/kontext-controller-manager \
@@ -303,7 +303,7 @@ scripts/                   kind install + e2e
 
 ## Status
 
-The current public release is `v0.1.0-alpha.1`. Its GitHub release contains
+The current public release is `v0.1.0-alpha.2`. Its GitHub release contains
 the digest-pinned install manifest and versioned multi-architecture images.
 `v1alpha1` is alpha on purpose: the API shape is allowed to evolve. `Task`,
 `Service`, `Scheduled`, and standalone `AgentRun` paths are implemented and

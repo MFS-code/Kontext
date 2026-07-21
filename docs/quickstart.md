@@ -15,7 +15,7 @@ clone.
 ## Install
 
 ```bash
-VERSION=v0.1.0-alpha.1
+VERSION=v0.1.0-alpha.2
 kubectl apply -f \
   "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml"
 kubectl rollout status deployment/kontext-controller-manager \
@@ -42,7 +42,7 @@ spec:
   provider: echo
   model: echo-model
   runtime:
-    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1
+    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.2
   budget:
     wallclock: 5m
 ```
@@ -75,7 +75,7 @@ spec:
   provider: echo
   model: echo-model
   runtime:
-    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1
+    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.2
 ---
 apiVersion: kontext.dev/v1alpha1
 kind: AgentRun
@@ -109,7 +109,7 @@ spec:
   provider: echo
   model: echo-model
   runtime:
-    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1
+    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.2
     command: ["/entrypoint.sh"]
   schedule:
     expression: "* * * * *"

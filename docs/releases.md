@@ -6,7 +6,7 @@ sidebarTitle: Releases
 
 # Release and image versioning
 
-The current public release is `v0.1.0-alpha.1`. Kontext releases use
+The current public release is `v0.1.0-alpha.2`. Kontext releases use
 SemVer-compatible git tags:
 
 ```text
@@ -45,7 +45,7 @@ Install a tagged release on an existing cluster without cloning the repository
 or building images:
 
 ```bash
-VERSION=v0.1.0-alpha.1
+VERSION=v0.1.0-alpha.2
 kubectl apply -f \
   "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml"
 ```
@@ -168,7 +168,7 @@ created inside `kontext-system` are deleted with that Namespace.
 To remove Kontext completely, including both CRDs:
 
 ```bash
-VERSION=v0.1.0-alpha.1
+VERSION=v0.1.0-alpha.2
 kubectl delete -f \
   "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml" \
   --ignore-not-found=true --wait=true
