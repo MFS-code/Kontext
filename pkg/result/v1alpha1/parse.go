@@ -48,6 +48,9 @@ func Parse(message string) (Envelope, bool, error) {
 		}
 		return envelope, false, nil
 	}
+	if !hasLegacyField(fields) {
+		return Envelope{}, false, errors.New("decode termination payload: unrecognized JSON object")
+	}
 
 	var legacy LegacyPayload
 	if err := json.Unmarshal([]byte(message), &legacy); err != nil {
@@ -60,6 +63,17 @@ func Parse(message string) (Envelope, bool, error) {
 		envelope.Error = &ErrorInfo{Message: legacy.Error}
 	}
 	return envelope, true, nil
+}
+
+func hasLegacyField(fields map[string]json.RawMessage) bool {
+	for field := range fields {
+		for _, key := range [...]string{"result", "tokensUsed", "dollarsUsed", "error"} {
+			if strings.EqualFold(field, key) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ParseVersioned decodes a termination message only when the wire payload
