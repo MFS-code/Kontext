@@ -341,6 +341,24 @@ func TestPodNameForRunTrimsHyphenAfterTruncation(t *testing.T) {
 	}
 }
 
+func TestPodNameForRunDistinguishesLongNamesWithSharedPrefix(t *testing.T) {
+	sharedPrefix := strings.Repeat("a", 56)
+	first := podbuilder.PodNameForRun(sharedPrefix + "-first")
+	second := podbuilder.PodNameForRun(sharedPrefix + "-second")
+
+	if first == second {
+		t.Fatalf("long run names produced the same pod name: %s", first)
+	}
+	for _, name := range []string{first, second} {
+		if len(name) > 63 {
+			t.Fatalf("pod name exceeds DNS label limit: %d", len(name))
+		}
+		if strings.HasSuffix(name, "-") {
+			t.Fatalf("pod name must not end in a hyphen: %s", name)
+		}
+	}
+}
+
 func TestBuildPodPopulatesBudgetEnv(t *testing.T) {
 	tokens := int32(1000)
 	dollars := 2.5

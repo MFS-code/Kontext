@@ -1,6 +1,8 @@
 package podbuilder
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"slices"
@@ -25,6 +27,10 @@ const (
 	ReporterBinaryPath        = ReporterMountPath + "/" + ReporterBinaryName
 	reporterImageBinaryPath   = "/kontext-reporter"
 	reporterInstallFlag       = "--install-to"
+	podNamePrefix             = "run-"
+	maxPodNameLength          = 63
+	maxUnhashedRunNameLength  = 56
+	truncatedRunNameHashChars = 8
 )
 
 var invalidNameChars = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -351,14 +357,15 @@ func PodNameForRun(runName string) string {
 	if safe == "" {
 		safe = "run"
 	}
-	if len(safe) > 56 {
-		safe = safe[:56]
+	if len(safe) <= maxUnhashedRunNameLength {
+		return podNamePrefix + safe
 	}
-	safe = strings.Trim(safe, "-")
-	if safe == "" {
-		safe = "run"
-	}
-	return fmt.Sprintf("run-%s", safe)
+
+	sum := sha256.Sum256([]byte(runName))
+	hash := hex.EncodeToString(sum[:])[:truncatedRunNameHashChars]
+	prefixLength := maxPodNameLength - len(podNamePrefix) - 1 - len(hash)
+	prefix := strings.TrimRight(safe[:prefixLength], "-")
+	return fmt.Sprintf("%s%s-%s", podNamePrefix, prefix, hash)
 }
 
 func resourceQuantity(value string) resource.Quantity {

@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
@@ -61,6 +62,9 @@ func TestAgentRunReconcilerCreatesPod(t *testing.T) {
 	pod := &corev1.Pod{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, pod); err != nil {
 		t.Fatalf("expected pod %s: %v", podName, err)
+	}
+	if !metav1.IsControlledBy(pod, &updated) {
+		t.Fatalf("expected pod to be controlled by AgentRun %s", updated.Name)
 	}
 }
 
@@ -310,6 +314,73 @@ func TestAgentRunReconcilerFailsWhenPodLost(t *testing.T) {
 	}
 }
 
+func TestAgentRunReconcilerRejectsPodNameCollision(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-name-collision-run",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	unrelatedPod := testsupport.BuildPod(run)
+	if err := k8sClient.Create(ctx, unrelatedPod); err != nil {
+		t.Fatalf("create unrelated pod: %v", err)
+	}
+	podKey := types.NamespacedName{Name: unrelatedPod.Name, Namespace: unrelatedPod.Namespace}
+	if err := k8sClient.Get(ctx, podKey, unrelatedPod); err != nil {
+		t.Fatalf("get unrelated pod: %v", err)
+	}
+	unrelatedPod.Status.Phase = corev1.PodSucceeded
+	unrelatedPod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: podbuilder.RuntimeContainerName,
+		State: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: 0,
+				Message:  `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"text/plain","value":"foreign result"},"usage":{"totalTokens":42}}`,
+			},
+		},
+	}}
+	if err := k8sClient.Status().Update(ctx, unrelatedPod); err != nil {
+		t.Fatalf("update unrelated pod status: %v", err)
+	}
+
+	reconcileAgentRun(ctx, t, types.NamespacedName{Name: run.Name, Namespace: run.Namespace})
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: run.Name, Namespace: run.Namespace}, &updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("expected Failed, got %s", updated.Status.Phase)
+	}
+	if !strings.Contains(updated.Status.Message, "Pod name collision") ||
+		!strings.Contains(updated.Status.Message, "is not controlled by AgentRun") {
+		t.Fatalf("expected clear collision status, got %q", updated.Status.Message)
+	}
+	if updated.Status.Result != "" || updated.Status.Output != nil || updated.Status.Usage != nil {
+		t.Fatalf("run adopted unrelated pod results: %#v", updated.Status)
+	}
+	if updated.Status.CompletionTime == nil {
+		t.Fatal("expected completion time")
+	}
+	if err := k8sClient.Get(ctx, podKey, unrelatedPod); err != nil {
+		t.Fatalf("get unrelated pod after reconcile: %v", err)
+	}
+	if len(unrelatedPod.OwnerReferences) != 0 {
+		t.Fatalf("unrelated pod was adopted: %#v", unrelatedPod.OwnerReferences)
+	}
+}
+
 func TestAgentRunReconcilerDeletesLegacyPodWithInvalidWallclock(t *testing.T) {
 	ctx := context.Background()
 	run := &kontextv1alpha1.AgentRun{
@@ -328,7 +399,7 @@ func TestAgentRunReconcilerDeletesLegacyPodWithInvalidWallclock(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	pod := testsupport.BuildPod(run)
+	pod := buildOwnedPod(t, run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -392,7 +463,7 @@ func TestAgentRunReconcilerObservesSucceededPod(t *testing.T) {
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := testsupport.BuildPod(run)
+	pod := buildOwnedPod(t, run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -464,7 +535,7 @@ func TestAgentRunReconcilerObservesRunningPodWithinWallclockBudget(t *testing.T)
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := testsupport.BuildPod(run)
+	pod := buildOwnedPod(t, run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -529,7 +600,7 @@ func TestAgentRunReconcilerEnforcesWallclockBudget(t *testing.T) {
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := testsupport.BuildPod(run)
+	pod := buildOwnedPod(t, run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -591,7 +662,7 @@ func TestAgentRunReconcilerKeepsWallclockBudgetExceededAuthoritative(t *testing.
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := testsupport.BuildPod(run)
+	pod := buildOwnedPod(t, run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -702,7 +773,7 @@ func TestAgentRunReconcilerPreservesRuntimeCancellationBeforeWallclockEnforcemen
 		t.Fatalf("update run status: %v", err)
 	}
 
-	pod := testsupport.BuildPod(run)
+	pod := buildOwnedPod(t, run)
 	if err := k8sClient.Create(ctx, pod); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -775,4 +846,13 @@ func (c *legacyWallclockClient) Get(
 func updateAgentRunStatus(ctx context.Context, run *kontextv1alpha1.AgentRun, next kontextv1alpha1.AgentRunStatus) error {
 	run.Status = next
 	return k8sClient.Status().Update(ctx, run)
+}
+
+func buildOwnedPod(t *testing.T, run *kontextv1alpha1.AgentRun) *corev1.Pod {
+	t.Helper()
+	pod := testsupport.BuildPod(run)
+	if err := controllerutil.SetControllerReference(run, pod, scheme); err != nil {
+		t.Fatalf("set pod owner reference: %v", err)
+	}
+	return pod
 }
