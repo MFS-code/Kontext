@@ -22,6 +22,7 @@ import (
 // AgentRunReconciler reconciles an AgentRun object.
 type AgentRunReconciler struct {
 	client.Client
+	APIReader     client.Reader
 	Scheme        *runtime.Scheme
 	ReporterImage string
 }
@@ -35,6 +36,13 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	var run kontextv1alpha1.AgentRun
 	if err := r.Get(ctx, req.NamespacedName, &run); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if status.IsTerminalPhase(run.Status.Phase) {
+		if run.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
+			return ctrl.Result{}, r.deleteBudgetExceededPod(ctx, &run)
+		}
+		return ctrl.Result{}, nil
 	}
 
 	podName := run.Status.PodName
@@ -65,39 +73,76 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 		}
 	}
-	if !podMissing && !metav1.IsControlledBy(pod, &run) {
-		if status.IsTerminalPhase(run.Status.Phase) {
-			return ctrl.Result{}, nil
+	if podMissing && run.Status.PodName != "" {
+		if r.APIReader == nil {
+			return ctrl.Result{}, fmt.Errorf(
+				"cannot verify missing Pod %s/%s: APIReader is not configured",
+				run.Namespace,
+				podName,
+			)
 		}
+		livePod := &corev1.Pod{}
+		if err := r.APIReader.Get(ctx, podKey, livePod); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+		} else {
+			pod = livePod
+			podMissing = false
+		}
+	}
+	if !podMissing && !metav1.IsControlledBy(pod, &run) {
 		return r.failPodNameCollision(ctx, &run, pod)
 	}
 
-	var wallclockLimit *time.Duration
-	if !status.IsTerminalPhase(run.Status.Phase) {
-		parsedLimit, budgetErr := parseWallclockBudget(run.Spec.Budget)
-		if budgetErr != nil {
-			return r.failInvalidWallclock(ctx, &run, pod, !podMissing, budgetErr)
-		}
-		wallclockLimit = parsedLimit
+	wallclockLimit, budgetErr := parseWallclockBudget(run.Spec.Budget)
+	if budgetErr != nil {
+		return r.failInvalidWallclock(ctx, &run, pod, !podMissing, budgetErr)
 	}
 
 	if podMissing {
 		return r.reconcileMissingPod(ctx, &run, podName)
 	}
 
-	wallclockResult, done, err := r.enforceWallclock(ctx, &run, pod, wallclockLimit)
-	if err != nil || done {
+	wallclockResult, err := r.enforceWallclock(ctx, &run, pod, wallclockLimit)
+	if err != nil || status.IsTerminalPhase(run.Status.Phase) {
 		return wallclockResult, err
 	}
 
-	observationResult, err := r.syncPodObservation(ctx, &run, pod, podName)
-	if err != nil {
+	if err := r.syncPodObservation(ctx, &run, pod, podName); err != nil {
 		return ctrl.Result{}, err
 	}
-	if wallclockResult.RequeueAfter > 0 {
-		return wallclockResult, nil
+	return wallclockResult, nil
+}
+
+func (r *AgentRunReconciler) deleteBudgetExceededPod(
+	ctx context.Context,
+	run *kontextv1alpha1.AgentRun,
+) error {
+	if r.APIReader == nil {
+		return fmt.Errorf(
+			"cannot delete Pod for budget-exceeded AgentRun %s/%s: APIReader is not configured",
+			run.Namespace,
+			run.Name,
+		)
 	}
-	return observationResult, nil
+
+	podName := run.Status.PodName
+	if podName == "" {
+		podName = podbuilder.PodNameForRun(run.Name)
+	}
+	pod := &corev1.Pod{}
+	podKey := client.ObjectKey{Namespace: run.Namespace, Name: podName}
+	if err := r.APIReader.Get(ctx, podKey, pod); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if !metav1.IsControlledBy(pod, run) {
+		return nil
+	}
+	if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 func (r *AgentRunReconciler) failPodNameCollision(
@@ -112,58 +157,45 @@ func (r *AgentRunReconciler) failPodNameCollision(
 		run.Namespace,
 		run.Name,
 	)
-	return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
-		next.Phase = kontextv1alpha1.AgentRunPhaseFailed
-		next.PodName = pod.Name
-		next.Result = ""
-		next.Output = nil
-		next.Usage = nil
-		next.StartTime = nil
-		if next.Message != message || next.CompletionTime == nil {
-			next.CompletionTime = nowPtr()
-		}
-		next.Message = message
-		setStatusConditions(
-			&next.Conditions,
-			run.Generation,
-			conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed)...,
-		)
-	})
+	return ctrl.Result{}, r.transitionRun(
+		ctx,
+		run,
+		kontextv1alpha1.AgentRunPhaseFailed,
+		message,
+		func(next *kontextv1alpha1.AgentRunStatus) {
+			next.PodName = pod.Name
+			next.Result = ""
+			next.Output = nil
+			next.Usage = nil
+			next.StartTime = nil
+		},
+	)
 }
 
 func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *kontextv1alpha1.AgentRun, podName string) (ctrl.Result, error) {
-	if status.IsTerminalPhase(run.Status.Phase) {
-		return ctrl.Result{}, nil
-	}
-
 	if run.Status.PodName != "" {
-		return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
-			next.Phase = kontextv1alpha1.AgentRunPhaseFailed
-			next.PodName = podName
-			next.Message = "Pod lost before run completed."
-			next.CompletionTime = nowPtr()
-			setStatusConditions(
-				&next.Conditions,
-				run.Generation,
-				conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed)...,
-			)
-		})
+		return ctrl.Result{}, r.transitionRun(
+			ctx,
+			run,
+			kontextv1alpha1.AgentRunPhaseFailed,
+			"Pod lost before run completed.",
+			func(next *kontextv1alpha1.AgentRunStatus) {
+				next.PodName = podName
+			},
+		)
 	}
 
 	pod, err := podbuilder.BuildPodWithConfig(run, podbuilder.Config{
 		ReporterImage: r.ReporterImage,
 	})
 	if err != nil {
-		return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
-			next.Phase = kontextv1alpha1.AgentRunPhaseFailed
-			next.Message = fmt.Sprintf("Agent run configuration is invalid: %v.", err)
-			next.CompletionTime = nowPtr()
-			setStatusConditions(
-				&next.Conditions,
-				run.Generation,
-				conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed)...,
-			)
-		})
+		return ctrl.Result{}, r.transitionRun(
+			ctx,
+			run,
+			kontextv1alpha1.AgentRunPhaseFailed,
+			fmt.Sprintf("Agent run configuration is invalid: %v.", err),
+			nil,
+		)
 	}
 	if err := controllerutil.SetControllerReference(run, pod, r.Scheme); err != nil {
 		return ctrl.Result{}, err
@@ -172,19 +204,18 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
-		next.Phase = kontextv1alpha1.AgentRunPhasePending
-		next.PodName = podName
-		next.Message = "Agent run pod requested."
-		setStatusConditions(
-			&next.Conditions,
-			run.Generation,
-			conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhasePending)...,
-		)
-	})
+	return ctrl.Result{}, r.transitionRun(
+		ctx,
+		run,
+		kontextv1alpha1.AgentRunPhasePending,
+		"Agent run pod requested.",
+		func(next *kontextv1alpha1.AgentRunStatus) {
+			next.PodName = podName
+		},
+	)
 }
 
-func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontextv1alpha1.AgentRun, pod *corev1.Pod, podName string) (ctrl.Result, error) {
+func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontextv1alpha1.AgentRun, pod *corev1.Pod, podName string) error {
 	observation := status.ObservePod(pod)
 
 	err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
@@ -214,10 +245,10 @@ func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontex
 		)
 	})
 	if err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
-	return ctrl.Result{}, nil
+	return nil
 }
 
 func parseWallclockBudget(budget *kontextv1alpha1.BudgetSpec) (*time.Duration, error) {
@@ -251,19 +282,17 @@ func (r *AgentRunReconciler) failInvalidWallclock(
 		}
 	}
 
-	return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
-		next.Phase = kontextv1alpha1.AgentRunPhaseFailed
-		if podExists {
-			next.PodName = pod.Name
-		}
-		next.Message = fmt.Sprintf("Agent run configuration is invalid: %v.", cause)
-		next.CompletionTime = nowPtr()
-		setStatusConditions(
-			&next.Conditions,
-			run.Generation,
-			conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed)...,
-		)
-	})
+	return ctrl.Result{}, r.transitionRun(
+		ctx,
+		run,
+		kontextv1alpha1.AgentRunPhaseFailed,
+		fmt.Sprintf("Agent run configuration is invalid: %v.", cause),
+		func(next *kontextv1alpha1.AgentRunStatus) {
+			if podExists {
+				next.PodName = pod.Name
+			}
+		},
+	)
 }
 
 func (r *AgentRunReconciler) enforceWallclock(
@@ -271,22 +300,13 @@ func (r *AgentRunReconciler) enforceWallclock(
 	run *kontextv1alpha1.AgentRun,
 	pod *corev1.Pod,
 	limit *time.Duration,
-) (ctrl.Result, bool, error) {
-	if run.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
-		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, true, err
-		}
-		return ctrl.Result{}, true, nil
-	}
+) (ctrl.Result, error) {
 	if limit == nil {
-		return ctrl.Result{}, false, nil
-	}
-	if status.IsTerminalPhase(run.Status.Phase) {
-		return ctrl.Result{}, false, nil
+		return ctrl.Result{}, nil
 	}
 
 	if pod.Status.Phase != corev1.PodRunning {
-		return ctrl.Result{}, false, nil
+		return ctrl.Result{}, nil
 	}
 
 	startedAt := status.ObservePod(pod).StartedAt
@@ -294,35 +314,61 @@ func (r *AgentRunReconciler) enforceWallclock(
 		startedAt = run.Status.StartTime
 	}
 	if startedAt == nil {
-		return ctrl.Result{}, false, nil
+		return ctrl.Result{}, nil
 	}
 
 	elapsed := time.Since(startedAt.Time)
 	if elapsed <= *limit {
 		remaining := *limit - elapsed
-		return ctrl.Result{RequeueAfter: remaining + time.Second}, false, nil
+		return ctrl.Result{RequeueAfter: remaining + time.Second}, nil
 	}
 
-	err := r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
-		next.Phase = kontextv1alpha1.AgentRunPhaseBudgetExceeded
-		next.PodName = pod.Name
-		next.Message = fmt.Sprintf("Wallclock budget exceeded after %s.", *limit)
-		recordedStart := *startedAt
-		next.StartTime = &recordedStart
-		next.CompletionTime = nowPtr()
+	err := r.transitionRun(
+		ctx,
+		run,
+		kontextv1alpha1.AgentRunPhaseBudgetExceeded,
+		fmt.Sprintf("Wallclock budget exceeded after %s.", *limit),
+		func(next *kontextv1alpha1.AgentRunStatus) {
+			next.PodName = pod.Name
+			recordedStart := *startedAt
+			next.StartTime = &recordedStart
+		},
+	)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *AgentRunReconciler) transitionRun(
+	ctx context.Context,
+	run *kontextv1alpha1.AgentRun,
+	phase kontextv1alpha1.AgentRunPhase,
+	message string,
+	update func(*kontextv1alpha1.AgentRunStatus),
+) error {
+	return r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+		next.Phase = phase
+		next.Message = message
+		if update != nil {
+			update(next)
+		}
+		if status.IsTerminalPhase(phase) {
+			if next.CompletionTime == nil {
+				next.CompletionTime = nowPtr()
+			}
+		} else {
+			next.CompletionTime = nil
+		}
 		setStatusConditions(
 			&next.Conditions,
 			run.Generation,
-			conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseBudgetExceeded)...,
+			conditions.ForAgentRunPhase(phase)...,
 		)
 	})
-	if err != nil {
-		return ctrl.Result{}, false, err
-	}
-	if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, true, err
-	}
-	return ctrl.Result{}, true, nil
 }
 
 func (r *AgentRunReconciler) patchRunStatus(ctx context.Context, run *kontextv1alpha1.AgentRun, mutate func(*kontextv1alpha1.AgentRunStatus)) error {

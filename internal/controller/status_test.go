@@ -112,7 +112,7 @@ func TestEnforceWallclockTreatsOmissionAsNoDeadline(t *testing.T) {
 	}
 
 	for _, run := range runs {
-		result, done, err := reconciler.enforceWallclock(
+		result, err := reconciler.enforceWallclock(
 			context.Background(),
 			run,
 			&corev1.Pod{},
@@ -121,8 +121,8 @@ func TestEnforceWallclockTreatsOmissionAsNoDeadline(t *testing.T) {
 		if err != nil {
 			t.Fatalf("omitted wallclock returned error: %v", err)
 		}
-		if done || result.Requeue || result.RequeueAfter != 0 {
-			t.Fatalf("omitted wallclock scheduled enforcement: result=%#v done=%t", result, done)
+		if result.Requeue || result.RequeueAfter != 0 {
+			t.Fatalf("omitted wallclock scheduled enforcement: result=%#v", result)
 		}
 		if len(run.Status.Conditions) != 0 {
 			t.Fatalf("omitted wallclock wrote conditions: %#v", run.Status.Conditions)
