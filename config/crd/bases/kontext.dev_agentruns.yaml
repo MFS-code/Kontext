@@ -68,9 +68,11 @@ spec:
                 description: BudgetSpec limits resource consumption for an agent run.
                 properties:
                   dollars:
+                    minimum: 0
                     type: number
                   tokens:
                     format: int32
+                    minimum: 1
                     type: integer
                   wallclock:
                     type: string

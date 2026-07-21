@@ -141,9 +141,13 @@ type ResultFormat string
 // BudgetSpec limits resource consumption for an agent run.
 // +kubebuilder:validation:XValidation:rule="!has(self.wallclock) || self.wallclock.size() == 0 || duration(self.wallclock) > duration('0s')",message="wallclock must be empty or a positive duration"
 type BudgetSpec struct {
-	Tokens    *int32   `json:"tokens,omitempty"`
-	Wallclock string   `json:"wallclock,omitempty"`
-	Dollars   *float64 `json:"dollars,omitempty"`
+	// +kubebuilder:validation:Minimum=1
+	Tokens *int32 `json:"tokens,omitempty"`
+
+	Wallclock string `json:"wallclock,omitempty"`
+
+	// +kubebuilder:validation:Minimum=0
+	Dollars *float64 `json:"dollars,omitempty"`
 }
 
 // SecretRef references a Kubernetes Secret with provider credentials.
