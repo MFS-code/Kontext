@@ -91,7 +91,8 @@ The separate `webhook-certificate-manager` Role can create Secrets only in
 `webhook-registration-manager` ClusterRole can read or update only
 `task-agentrun-mutator.kontext.dev`; Kubernetes authorization cannot constrain
 the name of a create request, so its create permission is resource-scoped but
-not name-scoped.
+not name-scoped. Leader-election Lease access is isolated in the namespaced
+`leader-election-manager` Role and is not part of either webhook Role.
 
 ### Admission webhook TLS
 

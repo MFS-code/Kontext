@@ -51,6 +51,7 @@ install_release() {
   kubectl get secret webhook-server-cert -n kontext-system >/dev/null
   kubectl get mutatingwebhookconfiguration task-agentrun-mutator.kontext.dev >/dev/null
   kubectl get role webhook-certificate-manager -n kontext-system >/dev/null
+  kubectl get role leader-election-manager -n kontext-system >/dev/null
   kubectl get clusterrole webhook-registration-manager >/dev/null
 
   local secret_ca=""
@@ -108,6 +109,10 @@ fi
 
 echo "==> running registry-backed keyless acceptance"
 KONTEXT_RELEASE_TAG="${CURRENT_VERSION}" "${ROOT_DIR}/scripts/e2e-kind.sh"
+
+echo "==> running registry-backed Scheduled acceptance"
+KONTEXT_ECHO_IMAGE="$(kontext_image kontext-echo):${CURRENT_VERSION}" \
+  "${ROOT_DIR}/scripts/e2e-kind-scheduled.sh"
 
 echo "==> running registry-backed webhook TLS and HA acceptance"
 KONTEXT_ECHO_IMAGE="$(kontext_image kontext-echo):${CURRENT_VERSION}" \

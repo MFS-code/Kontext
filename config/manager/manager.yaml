@@ -24,16 +24,6 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: webhook-cert
-          secret:
-            secretName: webhook-server-cert
-            optional: true
-            defaultMode: 0400
-            items:
-              - key: ca.crt
-                path: ca.crt
-              - key: tls.crt
-                path: tls.crt
       containers:
         - name: manager
           image: controller:latest
@@ -53,9 +43,6 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: webhook-cert
-              mountPath: /var/run/kontext/webhook
-              readOnly: true
           ports:
             - containerPort: 8081
               name: health

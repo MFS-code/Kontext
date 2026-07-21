@@ -19,21 +19,6 @@ rules:
     verbs:
       - get
       - update
-  - apiGroups:
-      - coordination.k8s.io
-    resources:
-      - leases
-    verbs:
-      - create
-  - apiGroups:
-      - coordination.k8s.io
-    resources:
-      - leases
-    resourceNames:
-      - kontext.dev
-    verbs:
-      - get
-      - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
