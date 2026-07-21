@@ -50,7 +50,7 @@ rules:
     resources:
       - mutatingwebhookconfigurations
     resourceNames:
-      - task-agentrun-mutator.kontext.dev
+      - kontext-task-agentrun-mutator.kontext.dev
     verbs:
       - get
       - update

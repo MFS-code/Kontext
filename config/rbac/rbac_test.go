@@ -23,7 +23,8 @@ type document struct {
 }
 
 type kustomization struct {
-	Resources []string `json:"resources"`
+	NamePrefix string   `json:"namePrefix"`
+	Resources  []string `json:"resources"`
 }
 
 func TestLeaderElectionRBACIsSeparatedFromWebhookCertificates(t *testing.T) {
@@ -34,6 +35,19 @@ func TestLeaderElectionRBACIsSeparatedFromWebhookCertificates(t *testing.T) {
 			slices.Contains(rule.Resources, "leases") {
 			t.Fatal("webhook certificate Role absorbed leader-election permissions")
 		}
+	}
+	registrationRole := requireDocument(
+		t,
+		webhookDocuments,
+		"ClusterRole",
+		"webhook-registration-manager",
+	)
+	if len(registrationRole.Rules) != 2 ||
+		!slices.Equal(
+			registrationRole.Rules[1].ResourceNames,
+			[]string{"kontext-task-agentrun-mutator.kontext.dev"},
+		) {
+		t.Fatalf("webhook registration resource names = %#v", registrationRole.Rules)
 	}
 
 	leaderDocuments := readDocuments(t, "leader_election_role.yaml")
@@ -65,6 +79,20 @@ func TestLeaderElectionRBACIsSeparatedFromWebhookCertificates(t *testing.T) {
 	}
 	if !slices.Contains(config.Resources, "leader_election_role.yaml") {
 		t.Fatal("RBAC kustomization omits the dedicated leader-election Role")
+	}
+}
+
+func TestDefaultKustomizationPrefixesResourceNames(t *testing.T) {
+	data, err := os.ReadFile("../default/kustomization.yaml")
+	if err != nil {
+		t.Fatalf("read default kustomization: %v", err)
+	}
+	var config kustomization
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("decode default kustomization: %v", err)
+	}
+	if config.NamePrefix != "kontext-" {
+		t.Fatalf("default namePrefix = %q, want kontext-", config.NamePrefix)
 	}
 }
 

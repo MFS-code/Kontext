@@ -81,7 +81,7 @@ CONTROLLER_POD_UID_BEFORE="$(
     -o jsonpath='{.items[0].metadata.uid}' 2>/dev/null || true
 )"
 DEPLOYED_IMAGE_ID_BEFORE="$(
-  kubectl get deployment controller-manager -n kontext-system \
+  kubectl get deployment kontext-controller-manager -n kontext-system \
     -o jsonpath='{.spec.template.metadata.annotations.kontext\.dev/local-operator-image-id}' \
     2>/dev/null || true
 )"
@@ -89,7 +89,7 @@ kubectl kustomize "${KIND_OVERLAY_DIR}" |
   kubectl apply -f -
 
 echo "==> waiting for controller rollout"
-kubectl rollout status deployment/controller-manager -n kontext-system --timeout=120s
+kubectl rollout status deployment/kontext-controller-manager -n kontext-system --timeout=120s
 
 if [[ -n "${CONTROLLER_POD_UID_BEFORE}" &&
   "${DEPLOYED_IMAGE_ID_BEFORE}" != "${OPERATOR_IMAGE_ID}" ]]; then
@@ -114,7 +114,7 @@ fi
 
 echo "==> ready"
 kubectl get crd agents.kontext.dev agentruns.kontext.dev
-kubectl get deploy -n kontext-system controller-manager
+kubectl get deploy -n kontext-system kontext-controller-manager
 echo "controller local image identity: ${OPERATOR_IMAGE_ID}"
 kubectl get pods -n kontext-system -l control-plane=controller-manager \
   -o custom-columns='NAME:.metadata.name,IMAGE:.spec.containers[0].image,IMAGE_ID:.status.containerStatuses[0].imageID,READY:.status.containerStatuses[0].ready'

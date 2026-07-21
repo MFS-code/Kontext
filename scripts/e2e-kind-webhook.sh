@@ -6,9 +6,10 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
 NAMESPACE="kontext-system"
-DEPLOYMENT="controller-manager"
+DEPLOYMENT="kontext-controller-manager"
 SECRET="webhook-server-cert"
-WEBHOOK="task-agentrun-mutator.kontext.dev"
+WEBHOOK="kontext-task-agentrun-mutator.kontext.dev"
+WEBHOOK_SERVICE="kontext-webhook-service"
 ECHO_IMAGE="${KONTEXT_ECHO_IMAGE:-kontext-echo:dev}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kontext-webhook-e2e.XXXXXX")"
 PORT_FORWARD_PIDS=()
@@ -88,13 +89,14 @@ create_task_invocation_retry() {
 
 echo "==> verifying fresh trusted bootstrap"
 kubectl rollout status deployment/"${DEPLOYMENT}" -n "${NAMESPACE}" --timeout=180s
-kubectl get service webhook-service -n "${NAMESPACE}" >/dev/null
+kubectl get service "${WEBHOOK_SERVICE}" -n "${NAMESPACE}" >/dev/null
 kubectl get mutatingwebhookconfiguration "${WEBHOOK}" >/dev/null
 kubectl get secret "${SECRET}" -n "${NAMESPACE}" >/dev/null
 secret_value 'ca\.crt' >"${TMP_DIR}/ca.crt"
 secret_value 'tls\.crt' >"${TMP_DIR}/tls.crt"
 openssl verify -CAfile "${TMP_DIR}/ca.crt" "${TMP_DIR}/tls.crt"
-openssl x509 -in "${TMP_DIR}/tls.crt" -noout -checkhost webhook-service.kontext-system.svc
+openssl x509 -in "${TMP_DIR}/tls.crt" -noout \
+  -checkhost "${WEBHOOK_SERVICE}.${NAMESPACE}.svc"
 secret_ca="$(kubectl get secret "${SECRET}" -n "${NAMESPACE}" -o jsonpath='{.data.ca\.crt}')"
 registered_ca="$(kubectl get mutatingwebhookconfiguration "${WEBHOOK}" -o jsonpath='{.webhooks[0].clientConfig.caBundle}')"
 if [[ "${secret_ca}" != "${registered_ca}" ]]; then
@@ -219,9 +221,9 @@ old_fingerprint="$(leaf_fingerprint)"
 secret_value 'ca\.key' >"${TMP_DIR}/ca.key"
 openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
   -keyout "${TMP_DIR}/near.key" -out "${TMP_DIR}/near.csr" \
-  -subj '/CN=webhook-service.kontext-system.svc' >/dev/null 2>&1
-cat >"${TMP_DIR}/san.ext" <<'EOF'
-subjectAltName=DNS:webhook-service,DNS:webhook-service.kontext-system,DNS:webhook-service.kontext-system.svc,DNS:webhook-service.kontext-system.svc.cluster.local
+  -subj "/CN=${WEBHOOK_SERVICE}.${NAMESPACE}.svc" >/dev/null 2>&1
+cat >"${TMP_DIR}/san.ext" <<EOF
+subjectAltName=DNS:${WEBHOOK_SERVICE},DNS:${WEBHOOK_SERVICE}.${NAMESPACE},DNS:${WEBHOOK_SERVICE}.${NAMESPACE}.svc,DNS:${WEBHOOK_SERVICE}.${NAMESPACE}.svc.cluster.local
 extendedKeyUsage=serverAuth
 keyUsage=digitalSignature
 EOF
@@ -284,7 +286,7 @@ for index in 0 1; do
   for _ in $(seq 1 50); do
     if fingerprint="$(
       openssl s_client -connect "127.0.0.1:${port}" \
-        -servername webhook-service.kontext-system.svc </dev/null 2>/dev/null |
+        -servername "${WEBHOOK_SERVICE}.${NAMESPACE}.svc" </dev/null 2>/dev/null |
         openssl x509 -noout -fingerprint -sha256 2>/dev/null
     )"; then
       fingerprints+=("${fingerprint}")

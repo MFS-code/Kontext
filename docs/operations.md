@@ -67,9 +67,9 @@ They are not part of the supported installation path.
 
 ### Operator identity
 
-The controller runs as the `controller-manager` ServiceAccount in the
-`kontext-system` Namespace. The installed `manager-role` ClusterRole permits
-it to:
+The controller runs as the `kontext-controller-manager` ServiceAccount in the
+`kontext-system` Namespace. The installed `kontext-manager-role` ClusterRole
+permits it to:
 
 - create and patch Events;
 - create, read, watch, update, patch, and delete Pods;
@@ -81,13 +81,14 @@ These permissions are cluster-wide because Kontext reconciles namespaced
 resources in every namespace. Runtime Pods do not inherit the controller's
 ServiceAccount or RBAC permissions.
 
-The separate `webhook-certificate-manager` Role can create Secrets only in
-`kontext-system` and can read or update only `webhook-server-cert`. The
-`webhook-registration-manager` ClusterRole can read or update only
-`task-agentrun-mutator.kontext.dev`; Kubernetes authorization cannot constrain
-the name of a create request, so its create permission is resource-scoped but
-not name-scoped. Leader-election Lease access is isolated in the namespaced
-`leader-election-manager` Role and is not part of either webhook Role.
+The separate `kontext-webhook-certificate-manager` Role can create Secrets
+only in `kontext-system` and can read or update only `webhook-server-cert`.
+The `kontext-webhook-registration-manager` ClusterRole can read or update only
+`kontext-task-agentrun-mutator.kontext.dev`; Kubernetes authorization cannot
+constrain the name of a create request, so its create permission is
+resource-scoped but not name-scoped. Leader-election Lease access is isolated
+in the namespaced `kontext-leader-election-manager` Role and is not part of
+either webhook Role.
 
 ### Admission webhook TLS
 
@@ -163,9 +164,9 @@ Kontext does not create a default NetworkPolicy for workloads. Runtime Pods
 have whatever ingress and egress the cluster, namespace, and CNI allow. On many
 clusters that means unrestricted egress.
 
-The release does install `controller-manager-webhook`, an ingress-only policy
-in `kontext-system`. It selects controller Pods and allows only webhook port
-9443 and health port 8081. It does not select `AgentRun` Pods, restrict
+The release does install `kontext-controller-manager-webhook`, an ingress-only
+policy in `kontext-system`. It selects controller Pods and allows only webhook
+port 9443 and health port 8081. It does not select `AgentRun` Pods, restrict
 controller egress, or provide workload isolation.
 
 Tool declarations do not restrict network traffic. Apply an enforced
@@ -227,15 +228,15 @@ To remove the controller while retaining CRDs and resources outside
 `kontext-system`:
 
 ```bash
-kubectl delete clusterrolebinding manager-rolebinding \
+kubectl delete clusterrolebinding kontext-manager-rolebinding \
   --ignore-not-found=true
-kubectl delete clusterrole manager-role \
+kubectl delete clusterrole kontext-manager-role \
   --ignore-not-found=true
 kubectl delete mutatingwebhookconfiguration \
-  task-agentrun-mutator.kontext.dev --ignore-not-found=true
-kubectl delete clusterrolebinding webhook-registration-manager \
+  kontext-task-agentrun-mutator.kontext.dev --ignore-not-found=true
+kubectl delete clusterrolebinding kontext-webhook-registration-manager \
   --ignore-not-found=true
-kubectl delete clusterrole webhook-registration-manager \
+kubectl delete clusterrole kontext-webhook-registration-manager \
   --ignore-not-found=true
 kubectl delete namespace kontext-system \
   --ignore-not-found=true --wait=true
@@ -259,9 +260,9 @@ upgrade procedure.
 
 ```bash
 kubectl get deployment,pods -n kontext-system
-kubectl rollout status deployment/controller-manager \
+kubectl rollout status deployment/kontext-controller-manager \
   -n kontext-system --timeout=180s
-kubectl logs deployment/controller-manager -n kontext-system
+kubectl logs deployment/kontext-controller-manager -n kontext-system
 ```
 
 If the Deployment is unavailable, describe its Pod and inspect recent events:

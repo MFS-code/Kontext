@@ -24,18 +24,18 @@ install_release() {
   local manifest="$1"
   local expect_webhook="${2:-true}"
   kubectl apply -f "${manifest}"
-  kubectl rollout status deployment/controller-manager \
+  kubectl rollout status deployment/kontext-controller-manager \
     --namespace kontext-system \
     --timeout=180s
 
   local operator_image=""
   local reporter_image=""
   operator_image="$(
-    kubectl get deployment controller-manager -n kontext-system \
+    kubectl get deployment kontext-controller-manager -n kontext-system \
       -o jsonpath='{.spec.template.spec.containers[?(@.name=="manager")].image}'
   )"
   reporter_image="$(
-    kubectl get deployment controller-manager -n kontext-system \
+    kubectl get deployment kontext-controller-manager -n kontext-system \
       -o jsonpath='{.spec.template.spec.containers[?(@.name=="manager")].env[?(@.name=="KONTEXT_REPORTER_IMAGE")].value}'
   )"
   if [[ "${operator_image}" != *@sha256:* || "${reporter_image}" != *@sha256:* ]]; then
@@ -47,12 +47,13 @@ install_release() {
     return 0
   fi
 
-  kubectl get service webhook-service -n kontext-system >/dev/null
+  kubectl get service kontext-webhook-service -n kontext-system >/dev/null
   kubectl get secret webhook-server-cert -n kontext-system >/dev/null
-  kubectl get mutatingwebhookconfiguration task-agentrun-mutator.kontext.dev >/dev/null
-  kubectl get role webhook-certificate-manager -n kontext-system >/dev/null
-  kubectl get role leader-election-manager -n kontext-system >/dev/null
-  kubectl get clusterrole webhook-registration-manager >/dev/null
+  kubectl get mutatingwebhookconfiguration \
+    kontext-task-agentrun-mutator.kontext.dev >/dev/null
+  kubectl get role kontext-webhook-certificate-manager -n kontext-system >/dev/null
+  kubectl get role kontext-leader-election-manager -n kontext-system >/dev/null
+  kubectl get clusterrole kontext-webhook-registration-manager >/dev/null
 
   local secret_ca=""
   local registered_ca=""
@@ -61,7 +62,8 @@ install_release() {
       -o jsonpath='{.data.ca\.crt}'
   )"
   registered_ca="$(
-    kubectl get mutatingwebhookconfiguration task-agentrun-mutator.kontext.dev \
+    kubectl get mutatingwebhookconfiguration \
+      kontext-task-agentrun-mutator.kontext.dev \
       -o jsonpath='{.webhooks[0].clientConfig.caBundle}'
   )"
   if [[ -z "${secret_ca}" || "${secret_ca}" != "${registered_ca}" ]]; then
@@ -157,11 +159,14 @@ if [[ "${retained_result}" != *"Verify custom-resource retention during control-
   exit 1
 fi
 
-kubectl delete clusterrolebinding manager-rolebinding --ignore-not-found=true
-kubectl delete clusterrole manager-role --ignore-not-found=true
-kubectl delete mutatingwebhookconfiguration task-agentrun-mutator.kontext.dev --ignore-not-found=true
-kubectl delete clusterrolebinding webhook-registration-manager --ignore-not-found=true
-kubectl delete clusterrole webhook-registration-manager --ignore-not-found=true
+kubectl delete clusterrolebinding kontext-manager-rolebinding --ignore-not-found=true
+kubectl delete clusterrole kontext-manager-role --ignore-not-found=true
+kubectl delete mutatingwebhookconfiguration \
+  kontext-task-agentrun-mutator.kontext.dev --ignore-not-found=true
+kubectl delete clusterrolebinding \
+  kontext-webhook-registration-manager --ignore-not-found=true
+kubectl delete clusterrole \
+  kontext-webhook-registration-manager --ignore-not-found=true
 kubectl delete namespace kontext-system --ignore-not-found=true --wait=true
 
 kubectl get crd agents.kontext.dev agentruns.kontext.dev >/dev/null
@@ -190,11 +195,13 @@ kubectl delete -f "${CURRENT_MANIFEST}" --ignore-not-found=true --wait=true
 if kubectl get crd agents.kontext.dev >/dev/null 2>&1 ||
   kubectl get crd agentruns.kontext.dev >/dev/null 2>&1 ||
   kubectl get namespace kontext-system >/dev/null 2>&1 ||
-  kubectl get clusterrole manager-role >/dev/null 2>&1 ||
-  kubectl get clusterrolebinding manager-rolebinding >/dev/null 2>&1 ||
-  kubectl get mutatingwebhookconfiguration task-agentrun-mutator.kontext.dev >/dev/null 2>&1 ||
-  kubectl get clusterrole webhook-registration-manager >/dev/null 2>&1 ||
-  kubectl get clusterrolebinding webhook-registration-manager >/dev/null 2>&1; then
+  kubectl get clusterrole kontext-manager-role >/dev/null 2>&1 ||
+  kubectl get clusterrolebinding kontext-manager-rolebinding >/dev/null 2>&1 ||
+  kubectl get mutatingwebhookconfiguration \
+    kontext-task-agentrun-mutator.kontext.dev >/dev/null 2>&1 ||
+  kubectl get clusterrole kontext-webhook-registration-manager >/dev/null 2>&1 ||
+  kubectl get clusterrolebinding \
+    kontext-webhook-registration-manager >/dev/null 2>&1; then
   echo "complete uninstall left Kontext resources behind" >&2
   exit 1
 fi

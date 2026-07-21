@@ -52,14 +52,14 @@ echo "==> collecting kind diagnostics into ${OUT_DIR}"
 } >"${OUT_DIR}/workload-overview.txt" 2>&1 || true
 
 {
-  echo "# controller-manager deployment"
-  kubectl get deploy -n "${NAMESPACE}" controller-manager -o yaml || true
+  echo "# kontext-controller-manager deployment"
+  kubectl get deploy -n "${NAMESPACE}" kontext-controller-manager -o yaml || true
   echo
-  echo "# controller-manager pods"
+  echo "# kontext-controller-manager pods"
   kubectl get pods -n "${NAMESPACE}" -l control-plane=controller-manager -o wide || true
   echo
-  echo "# controller-manager describe"
-  kubectl describe deploy -n "${NAMESPACE}" controller-manager || true
+  echo "# kontext-controller-manager describe"
+  kubectl describe deploy -n "${NAMESPACE}" kontext-controller-manager || true
   kubectl describe pods -n "${NAMESPACE}" -l control-plane=controller-manager || true
 } >"${OUT_DIR}/controller.txt" 2>&1 || true
 

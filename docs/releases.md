@@ -104,7 +104,7 @@ controller rollout:
 NEW_VERSION="<target-release-tag>"
 kubectl apply -f \
   "https://github.com/MFS-code/Kontext/releases/download/${NEW_VERSION}/install.yaml"
-kubectl rollout status deployment/controller-manager \
+kubectl rollout status deployment/kontext-controller-manager \
   --namespace kontext-system \
   --timeout=180s
 ```
@@ -125,15 +125,15 @@ To remove only the Kontext control plane while retaining the CRDs and custom
 resources in other namespaces:
 
 ```bash
-kubectl delete clusterrolebinding manager-rolebinding \
+kubectl delete clusterrolebinding kontext-manager-rolebinding \
   --ignore-not-found=true
-kubectl delete clusterrole manager-role \
+kubectl delete clusterrole kontext-manager-role \
   --ignore-not-found=true
 kubectl delete mutatingwebhookconfiguration \
-  task-agentrun-mutator.kontext.dev --ignore-not-found=true
-kubectl delete clusterrolebinding webhook-registration-manager \
+  kontext-task-agentrun-mutator.kontext.dev --ignore-not-found=true
+kubectl delete clusterrolebinding kontext-webhook-registration-manager \
   --ignore-not-found=true
-kubectl delete clusterrole webhook-registration-manager \
+kubectl delete clusterrole kontext-webhook-registration-manager \
   --ignore-not-found=true
 kubectl delete namespace kontext-system \
   --ignore-not-found=true --wait=true

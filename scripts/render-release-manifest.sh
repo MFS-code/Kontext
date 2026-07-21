@@ -85,7 +85,7 @@ cat >"${overlay_dir}/manager_patch.yaml" <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: kontext-controller-manager
   namespace: kontext-system
   labels:
     app.kubernetes.io/version: "${release_tag}"

@@ -94,6 +94,8 @@ grep -Fq "$(kontext_image kontext-operator)@sha256:" "${tmp_dir}/install.yaml" |
   fail "rendered manifest lacks canonical operator image"
 grep -Fq "$(kontext_image kontext-reporter)@sha256:" "${tmp_dir}/install.yaml" ||
   fail "rendered manifest lacks canonical reporter image"
+grep -Fq "name: kontext-controller-manager" "${tmp_dir}/install.yaml" ||
+  fail "release renderer targets the unprefixed manager Deployment"
 
 jq --arg wrong_repository "ghcr.io/other-owner" \
   '(.images[] | select(.name == "operator").immutableReference) |=
