@@ -16,7 +16,6 @@ import (
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/conditions"
-	"github.com/MFS-code/Kontext/internal/podbuilder"
 	"github.com/MFS-code/Kontext/internal/runfactory"
 	"github.com/MFS-code/Kontext/internal/scheduler"
 	"github.com/MFS-code/Kontext/internal/status"
@@ -26,6 +25,8 @@ const (
 	defaultBackoffInitial = 5
 	defaultBackoffMax     = 60
 	maxRunSuffix          = int32(1<<31 - 1)
+	// AgentRunOwnerUIDField is the cache index for controlling Agent UIDs.
+	AgentRunOwnerUIDField = ".metadata.controller"
 )
 
 // AgentReconciler reconciles an Agent object.
@@ -62,18 +63,15 @@ func (r *AgentReconciler) reconcileTask(
 	ctx context.Context,
 	agent *kontextv1alpha1.Agent,
 ) (ctrl.Result, error) {
-	var children kontextv1alpha1.AgentRunList
-	if err := r.List(ctx, &children, client.InNamespace(agent.Namespace)); err != nil {
+	children, err := r.ownedRuns(ctx, agent)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	var newest *kontextv1alpha1.AgentRun
 	var retained int32
-	for i := range children.Items {
-		run := &children.Items[i]
-		if !metav1.IsControlledBy(run, agent) {
-			continue
-		}
+	for i := range children {
+		run := &children[i]
 		if retained == maxRunSuffix {
 			return ctrl.Result{}, fmt.Errorf(
 				"Task Agent %s/%s owns more than %d retained AgentRuns",
@@ -251,23 +249,15 @@ func (r *AgentReconciler) observeServiceRuns(
 	ctx context.Context,
 	agent *kontextv1alpha1.Agent,
 ) (observedServiceRuns, error) {
-	var children kontextv1alpha1.AgentRunList
-	if err := r.List(
-		ctx,
-		&children,
-		client.InNamespace(agent.Namespace),
-		client.MatchingLabels{podbuilder.LabelAgentName: agent.Name},
-	); err != nil {
+	children, err := r.ownedRuns(ctx, agent)
+	if err != nil {
 		return observedServiceRuns{}, err
 	}
 
 	var observed observedServiceRuns
 	var previousSuffix int32
-	for i := range children.Items {
-		run := &children.Items[i]
-		if !metav1.IsControlledBy(run, agent) {
-			continue
-		}
+	for i := range children {
+		run := &children[i]
 		suffix, ok := serviceRunSuffix(agent.Name, run.Name)
 		if !ok {
 			continue
@@ -377,8 +367,53 @@ func (r *AgentReconciler) now() time.Time {
 	return time.Now()
 }
 
+func (r *AgentReconciler) ownedRuns(
+	ctx context.Context,
+	agent *kontextv1alpha1.Agent,
+) ([]kontextv1alpha1.AgentRun, error) {
+	if agent.UID == "" {
+		return nil, fmt.Errorf("Agent %s/%s has no UID", agent.Namespace, agent.Name)
+	}
+	var runs kontextv1alpha1.AgentRunList
+	if err := r.List(
+		ctx,
+		&runs,
+		client.InNamespace(agent.Namespace),
+		client.MatchingFields{AgentRunOwnerUIDField: string(agent.UID)},
+	); err != nil {
+		return nil, err
+	}
+	return runs.Items, nil
+}
+
+// RegisterAgentRunOwnerIndex indexes AgentRuns by their controlling Agent UID.
+func RegisterAgentRunOwnerIndex(ctx context.Context, indexer client.FieldIndexer) error {
+	return indexer.IndexField(
+		ctx,
+		&kontextv1alpha1.AgentRun{},
+		AgentRunOwnerUIDField,
+		func(object client.Object) []string {
+			run, ok := object.(*kontextv1alpha1.AgentRun)
+			if !ok {
+				return nil
+			}
+			owner := metav1.GetControllerOf(run)
+			if owner == nil ||
+				owner.APIVersion != kontextv1alpha1.GroupVersion.String() ||
+				owner.Kind != "Agent" ||
+				owner.UID == "" {
+				return nil
+			}
+			return []string{string(owner.UID)}
+		},
+	)
+}
+
 // SetupWithManager sets up the Manager.
 func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := RegisterAgentRunOwnerIndex(context.Background(), mgr.GetFieldIndexer()); err != nil {
+		return fmt.Errorf("index AgentRuns by owner UID: %w", err)
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kontextv1alpha1.Agent{}).
 		Owns(&kontextv1alpha1.AgentRun{}).

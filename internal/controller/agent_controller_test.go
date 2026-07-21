@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -316,12 +317,12 @@ func TestAgentReconcilerRequeuesWhenCachedListMissesOwnedRun(t *testing.T) {
 	createOwnedAgentRun(ctx, t, agent, run)
 
 	staleClient := &staleAgentRunListClient{
-		Client:   k8sClient,
+		Client:   newOwnerIndexedClient(),
 		omitName: types.NamespacedName{Name: run.Name, Namespace: run.Namespace},
 	}
 	reconciler := &controller.AgentReconciler{
 		Client:    staleClient,
-		APIReader: k8sClient,
+		APIReader: apiReader,
 		Scheme:    scheme,
 	}
 	result, err := reconciler.Reconcile(ctx, ctrl.Request{
@@ -479,6 +480,80 @@ func TestAgentReconcilerNoopsWhenRunActive(t *testing.T) {
 	}
 	if len(runs.Items) != 1 {
 		t.Fatalf("expected one run, got %d", len(runs.Items))
+	}
+}
+
+func TestAgentReconcilerObservesOwnedServiceRunWithoutLabel(t *testing.T) {
+	ctx := context.Background()
+	agent := &kontextv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unlabeled-owner",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentSpec{
+			Mode:     kontextv1alpha1.AgentModeService,
+			Goal:     "stay ready",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unlabeled-owner-1",
+			Namespace: agent.Namespace,
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			AgentRef: &kontextv1alpha1.AgentRef{Name: agent.Name},
+			Goal:     agent.Spec.Goal,
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	createOwnedAgentRun(ctx, t, agent, run)
+
+	reconciler := newAgentReconciler()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		result, err := reconciler.Reconcile(ctx, ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+		})
+		if err != nil {
+			t.Fatalf("reconcile unlabeled owned run: %v", err)
+		}
+		if !result.Requeue {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("unlabeled owned run caused a hot requeue loop")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	var duplicate kontextv1alpha1.AgentRun
+	err := apiReader.Get(ctx, types.NamespacedName{
+		Name:      "unlabeled-owner-2",
+		Namespace: agent.Namespace,
+	}, &duplicate)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("unexpected duplicate service run: %v", err)
+	}
+
+	var updated kontextv1alpha1.Agent
+	if err := apiReader.Get(
+		ctx,
+		types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+		&updated,
+	); err != nil {
+		t.Fatalf("get reconciled agent: %v", err)
+	}
+	if updated.Status.CurrentRunName != run.Name || updated.Status.RunsCreated != 1 {
+		t.Fatalf("unlabeled owned run was not observed: %#v", updated.Status)
 	}
 }
 

@@ -280,12 +280,12 @@ func TestScheduledRecoversCreateSuccessStatusFailure(t *testing.T) {
 	reconcileScheduled(ctx, t, reconciler, agent)
 
 	clock.Set(time.Date(2026, time.July, 20, 12, 1, 5, 0, time.UTC))
-	failingClient := &failAgentStatusPatchOnceClient{Client: k8sClient, fail: true}
+	failingClient := &failAgentStatusPatchOnceClient{Client: newOwnerIndexedClient(), fail: true}
 	reconciler.Client = failingClient
 	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(agent)}); err == nil {
 		t.Fatal("expected injected status failure")
 	}
-	reconciler.Client = k8sClient
+	reconciler.Client = newOwnerIndexedClient()
 	reconcileScheduled(ctx, t, reconciler, agent)
 
 	runs := listOwnedRuns(ctx, t, agent)
@@ -311,7 +311,7 @@ func TestScheduledStaleCacheAndUnrelatedCollision(t *testing.T) {
 
 		clock.Set(time.Date(2026, time.July, 20, 12, 1, 5, 0, time.UTC))
 		reconciler.Client = &staleAgentRunListClient{
-			Client:   k8sClient,
+			Client:   newOwnerIndexedClient(),
 			omitName: types.NamespacedName{Name: runName, Namespace: agent.Namespace},
 		}
 		reconcileScheduled(ctx, t, reconciler, agent)
@@ -594,8 +594,8 @@ func (w *failAgentStatusWriter) Patch(
 
 func newScheduledReconciler(clock scheduler.Clock) *controller.AgentReconciler {
 	return &controller.AgentReconciler{
-		Client:    k8sClient,
-		APIReader: k8sClient,
+		Client:    newOwnerIndexedClient(),
+		APIReader: apiReader,
 		Scheme:    scheme,
 		Clock:     clock,
 	}
