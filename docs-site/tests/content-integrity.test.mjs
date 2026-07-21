@@ -67,6 +67,19 @@ const routeSources = new Map(
   ]),
 );
 
+function embeddedKontextManifests(source) {
+  const manifests = [];
+  for (const match of source.matchAll(/<pre\b[^>]*>([\s\S]*?)<\/pre>/g)) {
+    const plainText = match[1].replace(/<\/?span\b[^>]*>/g, "");
+    for (const section of plainText.split(/\n\s*\n|^---\s*$/m)) {
+      if (/^apiVersion:\s*kontext\.dev\//m.test(section)) {
+        manifests.push(section.trim());
+      }
+    }
+  }
+  return manifests;
+}
+
 function decodeLinkPath(rawTarget) {
   const encodedPathname = rawTarget.split("#", 1)[0].split("?", 1)[0];
   try {
@@ -143,6 +156,8 @@ test("public docs contain no stale mode language", () => {
     /\bUnsupportedMode\b/,
     /\breserved\b/i,
     /Until Task mutation ships/i,
+    /\bowned files\b/i,
+    /\bcode owners?\b/i,
   ];
 
   for (const file of publicFiles) {
@@ -154,6 +169,26 @@ test("public docs contain no stale mode language", () => {
         `${path.relative(repoRoot, file)} contains stale public language`,
       );
     }
+  }
+});
+
+test("website AgentRun manifests include required execution fields", () => {
+  const source = fs.readFileSync(
+    path.join(repoRoot, "website/index.html"),
+    "utf8",
+  );
+  const agentRuns = embeddedKontextManifests(source).filter((manifest) =>
+    /^kind:\s*AgentRun\s*$/m.test(manifest),
+  );
+
+  assert.ok(agentRuns.length > 0, "website embeds at least one AgentRun manifest");
+  for (const manifest of agentRuns) {
+    assert.match(manifest, /^  goal:\s+\S.*$/m);
+    assert.match(manifest, /^  provider:\s+\S.*$/m);
+    assert.match(manifest, /^  model:\s+\S.*$/m);
+    const runtime = manifest.match(/^  runtime:\s*\n((?: {4}.*(?:\n|$))*)/m);
+    assert.ok(runtime, "AgentRun spec includes runtime");
+    assert.match(runtime[1], /^    image:\s+\S.*$/m);
   }
 });
 

@@ -20,6 +20,15 @@ func TestRedactorDetectsRawAndJSONEscapedSensitiveValues(t *testing.T) {
 	}
 }
 
+func TestRedactorReplacesJSONEscapedSensitiveValues(t *testing.T) {
+	const secret = "quote\"\nsecret"
+	redactor := newRedactor([]string{secret})
+	got := redactor.clean(`server error: schema="quote\"\nsecret"`)
+	if got != `server error: schema="[REDACTED]"` {
+		t.Fatalf("escaped sensitive value was not redacted: %q", got)
+	}
+}
+
 func TestRedactingLineWriterBoundsBeforeWriting(t *testing.T) {
 	var output bytes.Buffer
 	writer := newRedactingLineWriter(&output, newRedactor([]string{"secret"}))

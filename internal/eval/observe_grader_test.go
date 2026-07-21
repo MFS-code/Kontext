@@ -367,3 +367,32 @@ func TestGradeRecordRejectsUnsupportedGraderType(t *testing.T) {
 		t.Fatalf("unsupported grader was not rejected clearly: %#v", record.Grades)
 	}
 }
+
+func TestGradeRecordRejectsInvalidGradersWithoutPanicking(t *testing.T) {
+	graderTypes := []GraderType{
+		GraderTerminalPhase,
+		GraderStatusResult,
+		GraderStructuredOutput,
+		GraderUsageFields,
+		GraderEnvelopeError,
+		GraderEnvelopeOutcome,
+		GraderExecutionModel,
+		GraderEnvelopeTurns,
+		GraderEnvelopeTools,
+		GraderEventCount,
+		GraderToolEvents,
+		GraderDuration,
+		GraderPodExitCode,
+	}
+	for _, graderType := range graderTypes {
+		t.Run(string(graderType), func(t *testing.T) {
+			record := Record{}
+			GradeRecord(&record, []Grader{{Type: graderType}})
+			if len(record.Grades) != 1 ||
+				record.Grades[0].Pass ||
+				!strings.Contains(record.Grades[0].Message, "invalid grader") {
+				t.Fatalf("invalid grader was not rejected clearly: %#v", record.Grades)
+			}
+		})
+	}
+}
