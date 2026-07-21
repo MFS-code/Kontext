@@ -291,6 +291,7 @@ func TestTwoLifecycleReplicasConverge(t *testing.T) {
 	clock := &testClock{now: time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)}
 	k8sClient := newFakeClient(t)
 	options := testOptions(clock)
+	options.ServingValidity = 72 * time.Hour
 	stores := []*Store{{}, {}}
 	lifecycles := []*Lifecycle{
 		NewLifecycle(k8sClient, stores[0], options),
@@ -326,6 +327,34 @@ func TestTwoLifecycleReplicasConverge(t *testing.T) {
 	}
 	if !bytes.Equal(first.Certificate[0], second.Certificate[0]) {
 		t.Fatal("replicas did not converge on shared serving certificate")
+	}
+
+	clock.Advance(47*time.Hour + time.Minute)
+	results = make(chan error, len(lifecycles))
+	for _, lifecycle := range lifecycles {
+		wait.Add(1)
+		go func(current *Lifecycle) {
+			defer wait.Done()
+			results <- current.Ensure(ctx)
+		}(lifecycle)
+	}
+	wait.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatalf("concurrent CA rotation: %v", err)
+		}
+	}
+	if !bytes.Equal(stores[0].CABundle(), stores[1].CABundle()) {
+		t.Fatal("replicas did not converge after concurrent CA rotation")
+	}
+	rotated := getSecret(t, k8sClient)
+	var registration admissionv1.MutatingWebhookConfiguration
+	if err := k8sClient.Get(ctx, client.ObjectKey{Name: DefaultWebhookName}, &registration); err != nil {
+		t.Fatalf("get registration after concurrent rotation: %v", err)
+	}
+	if !bytes.Equal(registration.Webhooks[0].ClientConfig.CABundle, rotated.Data[CACertKey]) {
+		t.Fatal("concurrent CA rotation left serving material and admission trust mismatched")
 	}
 }
 

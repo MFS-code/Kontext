@@ -126,7 +126,7 @@ func (l *Lifecycle) Ensure(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("validate rotated webhook certificates: %w", err)
 			}
-			if err := l.reconcileRegistration(ctx, next.CACert); err != nil {
+			if err := l.publishRotationTrust(ctx, next.CACert); err != nil {
 				return err
 			}
 			updated := secret.DeepCopy()
@@ -135,6 +135,9 @@ func (l *Lifecycle) Ensure(ctx context.Context) error {
 				if apierrors.IsConflict(err) {
 					continue
 				}
+				return err
+			}
+			if err := l.reconcileRegistration(ctx, next.CACert); err != nil {
 				return err
 			}
 			l.store.load(nextParsed)
@@ -267,6 +270,43 @@ func (l *Lifecycle) registeredCABundle(ctx context.Context) ([]byte, error) {
 		return nil, nil
 	}
 	return append([]byte(nil), registration.Webhooks[0].ClientConfig.CABundle...), nil
+}
+
+func (l *Lifecycle) publishRotationTrust(ctx context.Context, nextCABundle []byte) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		var registration admissionv1.MutatingWebhookConfiguration
+		if err := l.client.Get(
+			ctx,
+			client.ObjectKey{Name: l.opts.WebhookName},
+			&registration,
+		); err != nil {
+			return err
+		}
+		if len(registration.Webhooks) != 1 {
+			return fmt.Errorf(
+				"publish webhook CA rotation trust: registration %s has %d webhooks",
+				l.opts.WebhookName,
+				len(registration.Webhooks),
+			)
+		}
+
+		combined := append([]byte(nil), nextCABundle...)
+		current := registration.Webhooks[0].ClientConfig.CABundle
+		if len(current) > 0 && !bytes.Contains(combined, current) {
+			combined = append(combined, current...)
+		}
+		if bytes.Equal(current, combined) {
+			return nil
+		}
+
+		before := registration.DeepCopy()
+		registration.Webhooks[0].ClientConfig.CABundle = combined
+		return l.client.Patch(
+			ctx,
+			&registration,
+			client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}),
+		)
+	})
 }
 
 func (l *Lifecycle) reconcileRegistration(ctx context.Context, caBundle []byte) error {
