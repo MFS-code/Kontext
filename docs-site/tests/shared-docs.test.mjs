@@ -73,85 +73,20 @@ test("page metadata covers every navigation page with stable paths", () => {
 
   assert.equal(new Set(navIds).size, navIds.length);
   assert.deepEqual([...pageMetadataById.keys()].sort(), [...navIds].sort());
-  assert.deepEqual(Object.fromEntries(pageMetadataById), {
-    "docs/index": {
-      srcFile: "docs/index.md",
-      routePath: "/docs",
-      rawPath: "/raw/docs/index.md",
-      githubPath: "docs/index.md",
-    },
-    "docs/quickstart": {
-      srcFile: "docs/quickstart.md",
-      routePath: "/docs/quickstart",
-      rawPath: "/raw/docs/quickstart.md",
-      githubPath: "docs/quickstart.md",
-    },
-    "docs/resources": {
-      srcFile: "docs/resources.md",
-      routePath: "/docs/resources",
-      rawPath: "/raw/docs/resources.md",
-      githubPath: "docs/resources.md",
-    },
-    "docs/task-workload": {
-      srcFile: "docs/task-workload.md",
-      routePath: "/docs/task-workload",
-      rawPath: "/raw/docs/task-workload.md",
-      githubPath: "docs/task-workload.md",
-    },
-    "docs/scheduled-workload": {
-      srcFile: "docs/scheduled-workload.md",
-      routePath: "/docs/scheduled-workload",
-      rawPath: "/raw/docs/scheduled-workload.md",
-      githubPath: "docs/scheduled-workload.md",
-    },
-    "docs/service-workload": {
-      srcFile: "docs/service-workload.md",
-      routePath: "/docs/service-workload",
-      rawPath: "/raw/docs/service-workload.md",
-      githubPath: "docs/service-workload.md",
-    },
-    "docs/operations": {
-      srcFile: "docs/operations.md",
-      routePath: "/docs/operations",
-      rawPath: "/raw/docs/operations.md",
-      githubPath: "docs/operations.md",
-    },
-    "docs/releases": {
-      srcFile: "docs/releases.md",
-      routePath: "/docs/releases",
-      rawPath: "/raw/docs/releases.md",
-      githubPath: "docs/releases.md",
-    },
-    "docs/runtimes": {
-      srcFile: "docs/runtimes.md",
-      routePath: "/docs/runtimes",
-      rawPath: "/raw/docs/runtimes.md",
-      githubPath: "docs/runtimes.md",
-    },
-    "docs/evals": {
-      srcFile: "docs/evals.md",
-      routePath: "/docs/evals",
-      rawPath: "/raw/docs/evals.md",
-      githubPath: "docs/evals.md",
-    },
-    SPEC: {
-      srcFile: "SPEC.md",
-      routePath: "/SPEC",
-      rawPath: "/raw/SPEC.md",
-      githubPath: "SPEC.md",
-    },
-    "docs/when-not-to-use-agents": {
-      srcFile: "docs/when-not-to-use-agents.md",
-      routePath: "/docs/when-not-to-use-agents",
-      rawPath: "/raw/docs/when-not-to-use-agents.md",
-      githubPath: "docs/when-not-to-use-agents.md",
-    },
-  });
 
   for (const id of navIds) {
     const metadata = requirePageMetadata(id);
+    const srcFile = `${id}.md`;
+    assert.deepEqual(metadata, {
+      srcFile,
+      routePath: id === "docs/index" ? "/docs" : `/${id}`,
+      rawPath: `/raw/${srcFile}`,
+      githubPath: srcFile,
+    });
     assert.ok(fs.existsSync(path.join(repoRoot, metadata.githubPath)));
   }
+  assert.equal(requirePageMetadata("docs/index").routePath, "/docs");
+  assert.equal(requirePageMetadata("SPEC").rawPath, "/raw/SPEC.md");
   assert.throws(
     () => requirePageMetadata("docs/not-in-navigation"),
     /Missing page metadata/,
