@@ -1,6 +1,8 @@
 package podbuilder
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"slices"
@@ -25,6 +27,10 @@ const (
 	ReporterBinaryPath        = ReporterMountPath + "/" + ReporterBinaryName
 	reporterImageBinaryPath   = "/kontext-reporter"
 	reporterInstallFlag       = "--install-to"
+	podNamePrefix             = "run-"
+	maxPodNameLength          = 63
+	maxUnhashedRunNameLength  = 56
+	truncatedRunNameHashChars = 8
 )
 
 var invalidNameChars = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -346,19 +352,39 @@ func budgetDollars(budget *kontextv1alpha1.BudgetSpec) string {
 
 // PodNameForRun returns a deterministic Pod name for an AgentRun.
 func PodNameForRun(runName string) string {
+	safe := sanitizedRunName(runName)
+	if len(safe) <= maxUnhashedRunNameLength {
+		return podNamePrefix + safe
+	}
+
+	sum := sha256.Sum256([]byte(runName))
+	hash := hex.EncodeToString(sum[:])[:truncatedRunNameHashChars]
+	prefixLength := maxPodNameLength - len(podNamePrefix) - 1 - len(hash)
+	prefix := strings.TrimRight(safe[:prefixLength], "-")
+	return fmt.Sprintf("%s%s-%s", podNamePrefix, prefix, hash)
+}
+
+// LegacyPodNameForRun returns the Pod name used before truncated names gained
+// a hash suffix. It supports adopting an already-owned Pod during upgrades.
+func LegacyPodNameForRun(runName string) string {
+	safe := sanitizedRunName(runName)
+	if len(safe) > maxUnhashedRunNameLength {
+		safe = safe[:maxUnhashedRunNameLength]
+	}
+	safe = strings.Trim(safe, "-")
+	if safe == "" {
+		safe = "run"
+	}
+	return podNamePrefix + safe
+}
+
+func sanitizedRunName(runName string) string {
 	safe := invalidNameChars.ReplaceAllString(strings.ToLower(runName), "-")
 	safe = strings.Trim(safe, "-")
 	if safe == "" {
 		safe = "run"
 	}
-	if len(safe) > 56 {
-		safe = safe[:56]
-	}
-	safe = strings.Trim(safe, "-")
-	if safe == "" {
-		safe = "run"
-	}
-	return fmt.Sprintf("run-%s", safe)
+	return safe
 }
 
 func resourceQuantity(value string) resource.Quantity {

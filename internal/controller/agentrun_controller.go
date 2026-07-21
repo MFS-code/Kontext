@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,6 +49,28 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if podErr != nil && !podMissing {
 		return ctrl.Result{}, podErr
 	}
+	if podMissing && run.Status.PodName == "" {
+		legacyPodName := podbuilder.LegacyPodNameForRun(run.Name)
+		if legacyPodName != podName {
+			legacyPod := &corev1.Pod{}
+			legacyPodKey := client.ObjectKey{Namespace: run.Namespace, Name: legacyPodName}
+			legacyPodErr := r.Get(ctx, legacyPodKey, legacyPod)
+			switch {
+			case legacyPodErr == nil && metav1.IsControlledBy(legacyPod, &run):
+				pod = legacyPod
+				podName = legacyPodName
+				podMissing = false
+			case legacyPodErr != nil && !apierrors.IsNotFound(legacyPodErr):
+				return ctrl.Result{}, legacyPodErr
+			}
+		}
+	}
+	if !podMissing && !metav1.IsControlledBy(pod, &run) {
+		if status.IsTerminalPhase(run.Status.Phase) {
+			return ctrl.Result{}, nil
+		}
+		return r.failPodNameCollision(ctx, &run, pod)
+	}
 
 	var wallclockLimit *time.Duration
 	if !status.IsTerminalPhase(run.Status.Phase) {
@@ -75,6 +98,37 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return wallclockResult, nil
 	}
 	return observationResult, nil
+}
+
+func (r *AgentRunReconciler) failPodNameCollision(
+	ctx context.Context,
+	run *kontextv1alpha1.AgentRun,
+	pod *corev1.Pod,
+) (ctrl.Result, error) {
+	message := fmt.Sprintf(
+		"Pod name collision: Pod %s/%s is not controlled by AgentRun %s/%s.",
+		pod.Namespace,
+		pod.Name,
+		run.Namespace,
+		run.Name,
+	)
+	return ctrl.Result{}, r.patchRunStatus(ctx, run, func(next *kontextv1alpha1.AgentRunStatus) {
+		next.Phase = kontextv1alpha1.AgentRunPhaseFailed
+		next.PodName = pod.Name
+		next.Result = ""
+		next.Output = nil
+		next.Usage = nil
+		next.StartTime = nil
+		if next.Message != message || next.CompletionTime == nil {
+			next.CompletionTime = nowPtr()
+		}
+		next.Message = message
+		setStatusConditions(
+			&next.Conditions,
+			run.Generation,
+			conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseFailed)...,
+		)
+	})
 }
 
 func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *kontextv1alpha1.AgentRun, podName string) (ctrl.Result, error) {
