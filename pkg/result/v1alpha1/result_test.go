@@ -61,6 +61,66 @@ func TestParseLegacyPayload(t *testing.T) {
 	}
 }
 
+func TestParseClassifiesLegacyPayloadsByKnownKeys(t *testing.T) {
+	tests := []struct {
+		name      string
+		message   string
+		wantError bool
+	}{
+		{
+			name:      "typoed envelope",
+			message:   `{"Outcome":"Failed"}`,
+			wantError: true,
+		},
+		{
+			name:      "unrelated object",
+			message:   `{"message":"done"}`,
+			wantError: true,
+		},
+		{
+			name:    "result only",
+			message: `{"result":"done"}`,
+		},
+		{
+			name:    "tokens used only",
+			message: `{"tokensUsed":12}`,
+		},
+		{
+			name:    "dollars used only",
+			message: `{"dollarsUsed":1.5}`,
+		},
+		{
+			name:    "error only",
+			message: `{"error":"diagnostic"}`,
+		},
+		{
+			name:    "existing legacy payload",
+			message: `{"result":"done","tokensUsed":12,"dollarsUsed":1.5,"error":"diagnostic"}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, legacy, err := resultv1alpha1.Parse(test.message)
+			if test.wantError {
+				if err == nil {
+					t.Fatal("expected unrecognized payload error")
+				}
+				if legacy {
+					t.Fatal("unrecognized payload must not be classified as legacy")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parse legacy payload: %v", err)
+			}
+			if !legacy {
+				t.Fatal("expected legacy wire format")
+			}
+		})
+	}
+}
+
 func TestParseLegacyPayloadWithoutUsageLeavesUsageAbsent(t *testing.T) {
 	parsed, legacy, err := resultv1alpha1.Parse(`{"result":"done"}`)
 	if err != nil {
