@@ -137,7 +137,8 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 	}
 
 	staticInvocation := testAgentRun("static-through-webhook", map[string]any{
-		"agentRef": map[string]any{"name": staticAgent.Name},
+		"agentRef":   map[string]any{"name": staticAgent.Name},
+		"parameters": map[string]any{},
 	})
 	if err := k8sClient.Create(ctx, staticInvocation); err != nil {
 		t.Fatalf("create static sparse Task invocation: %v", err)

@@ -37,6 +37,9 @@ func (h *TaskHandler) Handle(ctx context.Context, request admission.Request) adm
 		namespace = invocation.Namespace
 	}
 	invocation.Namespace = namespace
+	if len(invocation.Spec.Parameters) == 0 {
+		invocation.Spec.Parameters = nil
+	}
 
 	var agent kontextv1alpha1.Agent
 	err := h.reader.Get(ctx, client.ObjectKey{
