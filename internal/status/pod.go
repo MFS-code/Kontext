@@ -98,7 +98,7 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 	}
 	output := outputStatus(envelope)
 	usage := usageStatus(envelope)
-	legacyResult := resultv1alpha1.ProjectLegacyResult(envelope.Output)
+	legacyResult := resultv1alpha1.PlainText(envelope.Output)
 
 	if terminated.ExitCode == 0 {
 		if parseErr != nil {
