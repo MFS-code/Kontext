@@ -168,31 +168,34 @@ jobs:
             org.opencontainers.image.version=${{ needs.validate.outputs.version }}
             org.opencontainers.image.licenses=MIT
 
-      - name: Make package public
+      - name: Verify package is public
         env:
-          GH_TOKEN: ${{ secrets.PACKAGES_TOKEN || github.token }}
+          GH_TOKEN: ${{ github.token }}
           PACKAGE: ${{ matrix.package }}
           OWNER_TYPE: ${{ github.event.repository.owner.type }}
           OWNER: ${{ needs.validate.outputs.github_owner }}
         run: |
-          # For user-owned repos, use /users/{owner}/... — not /user/..., which
-          # targets the authenticated token identity (often not the package owner).
+          # GitHub has no REST API to change container package visibility, so
+          # a package must be made public once, by hand, in its settings UI.
+          # Visibility persists across pushes; this step only verifies it and
+          # retries briefly to absorb read-after-write lag on first publish.
           if [[ "${OWNER_TYPE}" == "Organization" ]]; then
             endpoint="orgs/${OWNER}/packages/container/${PACKAGE}"
+            settings_url="https://github.com/orgs/${OWNER}/packages/container/${PACKAGE}/settings"
           else
             endpoint="users/${OWNER}/packages/container/${PACKAGE}"
+            settings_url="https://github.com/users/${OWNER}/packages/container/${PACKAGE}/settings"
           fi
 
           for attempt in 1 2 3 4 5; do
-            if gh api --method PATCH "${endpoint}" --field visibility=public >/dev/null &&
-              [[ "$(gh api "${endpoint}" --jq .visibility)" == "public" ]]; then
+            if [[ "$(gh api "${endpoint}" --jq .visibility)" == "public" ]]; then
               exit 0
             fi
             if [[ "${attempt}" -lt 5 ]]; then
               sleep $((attempt * 2))
             fi
           done
-          echo "::error::could not make ${REGISTRY}/${REGISTRY_OWNER}/${PACKAGE} public via ${endpoint}"
+          echo "::error::${REGISTRY}/${REGISTRY_OWNER}/${PACKAGE} is not public; make it public once at ${settings_url} and re-run this job"
           exit 1
 
       - name: Verify anonymous multi-arch pull

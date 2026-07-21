@@ -33,11 +33,12 @@ publish mutable `latest` or `dev` tags. The workflow refuses to overwrite an
 existing release image tag, verifies anonymous pulls, and attaches an
 `image-digests.json` asset containing immutable `image@sha256:...` references.
 
-The workflow uses its repository token to make new GHCR packages public. If
-the account's package policy denies visibility changes to that token, configure
-a classic `PACKAGES_TOKEN` repository secret with `write:packages`; the
-workflow uses it only for the visibility operation. Publication fails before a
-GitHub release is created if anonymous access cannot be verified.
+GitHub provides no API to change container package visibility, so each GHCR
+package must be made public once, manually, in its package settings on
+GitHub. Visibility persists across pushes. The workflow verifies that every
+package is public and fails with a link to the settings page if one is not.
+Publication fails before a GitHub release is created if anonymous access
+cannot be verified.
 
 ## Install
 
