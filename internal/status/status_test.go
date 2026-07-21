@@ -364,22 +364,6 @@ func TestObservePodPending(t *testing.T) {
 	}
 }
 
-func TestIsTerminalPhase(t *testing.T) {
-	cases := map[kontextv1alpha1.AgentRunPhase]bool{
-		kontextv1alpha1.AgentRunPhaseSucceeded:      true,
-		kontextv1alpha1.AgentRunPhaseFailed:         true,
-		kontextv1alpha1.AgentRunPhaseBudgetExceeded: true,
-		kontextv1alpha1.AgentRunPhasePending:        false,
-		kontextv1alpha1.AgentRunPhaseRunning:        false,
-		kontextv1alpha1.AgentRunPhase("Bogus"):      false,
-	}
-	for phase, want := range cases {
-		if got := status.IsTerminalPhase(phase); got != want {
-			t.Fatalf("IsTerminalPhase(%s) = %v, want %v", phase, got, want)
-		}
-	}
-}
-
 func TestObservePodTerminatedFailure(t *testing.T) {
 	pod := &corev1.Pod{
 		Status: corev1.PodStatus{

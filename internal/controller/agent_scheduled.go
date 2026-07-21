@@ -9,14 +9,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/conditions"
 	"github.com/MFS-code/Kontext/internal/runfactory"
 	"github.com/MFS-code/Kontext/internal/scheduledrun"
 	"github.com/MFS-code/Kontext/internal/scheduler"
-	"github.com/MFS-code/Kontext/internal/status"
 )
 
 func (r *AgentReconciler) reconcileScheduled(
@@ -212,7 +210,7 @@ func summarizeScheduledRuns(items []kontextv1alpha1.AgentRun) observedScheduledR
 	}
 	for i := range observed.items {
 		run := &observed.items[i]
-		if !status.IsTerminalPhase(run.Status.Phase) {
+		if !run.Status.Phase.IsTerminal() {
 			observed.hasActive = true
 		}
 
@@ -285,27 +283,21 @@ func (r *AgentReconciler) verifyScheduledRun(
 	runName string,
 	slot time.Time,
 ) (*kontextv1alpha1.AgentRun, error) {
-	if r.APIReader == nil {
-		return nil, fmt.Errorf(
-			"cannot verify existing AgentRun %s/%s: APIReader is not configured",
-			agent.Namespace,
-			runName,
-		)
-	}
-
-	var existing kontextv1alpha1.AgentRun
-	if err := r.APIReader.Get(
+	existing, accepted, err := r.verifyExistingOwnedRun(
 		ctx,
-		client.ObjectKey{Namespace: agent.Namespace, Name: runName},
-		&existing,
-	); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, nil
-		}
+		agent,
+		runName,
+		func(run *kontextv1alpha1.AgentRun) bool {
+			return scheduledrun.RepresentsSlot(run, slot)
+		},
+	)
+	if err != nil {
 		return nil, err
 	}
-	if !metav1.IsControlledBy(&existing, agent) ||
-		!scheduledrun.RepresentsSlot(&existing, slot) {
+	if existing == nil {
+		return nil, nil
+	}
+	if !accepted {
 		return nil, fmt.Errorf(
 			"scheduled run name collision: AgentRun %s/%s does not represent slot %s for Agent %s/%s",
 			existing.Namespace,
@@ -315,7 +307,7 @@ func (r *AgentReconciler) verifyScheduledRun(
 			agent.Name,
 		)
 	}
-	return &existing, nil
+	return existing, nil
 }
 
 func (r *AgentReconciler) pruneScheduledHistory(

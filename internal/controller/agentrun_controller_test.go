@@ -744,7 +744,9 @@ func TestAgentRunReconcilerObservesSucceededPod(t *testing.T) {
 func TestAgentRunReconcilerObservesRunningPodWithinWallclockBudget(t *testing.T) {
 	ctx := context.Background()
 	podName := podbuilder.PodNameForRun("active-wallclock-run")
-	started := metav1.NewTime(time.Now().Truncate(time.Second).Add(-time.Second))
+	now := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: now}
+	started := metav1.NewTime(now.Add(-time.Second))
 	run := &kontextv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "active-wallclock-run",
@@ -787,7 +789,13 @@ func TestAgentRunReconcilerObservesRunningPodWithinWallclockBudget(t *testing.T)
 		t.Fatalf("update pod status: %v", err)
 	}
 
-	reconcileAgentRun(ctx, t, types.NamespacedName{Name: run.Name, Namespace: run.Namespace})
+	reconciler := newAgentRunReconciler()
+	reconciler.Clock = clock
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: run.Name, Namespace: run.Namespace},
+	}); err != nil {
+		t.Fatalf("reconcile run: %v", err)
+	}
 
 	var updated kontextv1alpha1.AgentRun
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: run.Name, Namespace: run.Namespace}, &updated); err != nil {
@@ -807,8 +815,10 @@ func TestAgentRunReconcilerObservesRunningPodWithinWallclockBudget(t *testing.T)
 func TestAgentRunReconcilerEnforcesWallclockBudget(t *testing.T) {
 	ctx := context.Background()
 	podName := podbuilder.PodNameForRun("wallclock-run")
-	started := metav1.NewTime(time.Now().Truncate(time.Second).Add(-2 * time.Minute))
-	recordedStarted := metav1.NewTime(time.Now())
+	now := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: now}
+	started := metav1.NewTime(now.Add(-2 * time.Minute))
+	recordedStarted := metav1.NewTime(now)
 	run := &kontextv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "wallclock-run",
@@ -852,7 +862,13 @@ func TestAgentRunReconcilerEnforcesWallclockBudget(t *testing.T) {
 		t.Fatalf("update pod status: %v", err)
 	}
 
-	reconcileAgentRun(ctx, t, types.NamespacedName{Name: run.Name, Namespace: run.Namespace})
+	reconciler := newAgentRunReconciler()
+	reconciler.Clock = clock
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: run.Name, Namespace: run.Namespace},
+	}); err != nil {
+		t.Fatalf("reconcile run: %v", err)
+	}
 
 	var updated kontextv1alpha1.AgentRun
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: run.Name, Namespace: run.Namespace}, &updated); err != nil {
@@ -870,7 +886,9 @@ func TestAgentRunReconcilerKeepsWallclockBudgetExceededAuthoritative(t *testing.
 	ctx := context.Background()
 	runName := "wallclock-cancellation-race"
 	podName := podbuilder.PodNameForRun(runName)
-	started := metav1.NewTime(time.Now().Truncate(time.Second).Add(-2 * time.Minute))
+	now := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: now}
+	started := metav1.NewTime(now.Add(-2 * time.Minute))
 	run := &kontextv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      runName,
@@ -917,6 +935,7 @@ func TestAgentRunReconcilerKeepsWallclockBudgetExceededAuthoritative(t *testing.
 
 	deleteErr := errors.New("injected pod deletion failure")
 	reconciler := newAgentRunReconciler()
+	reconciler.Clock = clock
 	reconciler.Client = &deleteErrorClient{Client: k8sClient, err: deleteErr}
 	_, err := reconciler.Reconcile(ctx, ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: run.Name, Namespace: run.Namespace},
@@ -981,7 +1000,9 @@ func TestAgentRunReconcilerPreservesRuntimeCancellationBeforeWallclockEnforcemen
 	ctx := context.Background()
 	runName := "runtime-cancellation"
 	podName := podbuilder.PodNameForRun(runName)
-	started := metav1.NewTime(time.Now().Truncate(time.Second).Add(-time.Minute))
+	now := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: now}
+	started := metav1.NewTime(now.Add(-time.Minute))
 	run := &kontextv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      runName,
@@ -1029,7 +1050,11 @@ func TestAgentRunReconcilerPreservesRuntimeCancellationBeforeWallclockEnforcemen
 	}
 
 	runKey := types.NamespacedName{Name: run.Name, Namespace: run.Namespace}
-	reconcileAgentRun(ctx, t, runKey)
+	reconciler := newAgentRunReconciler()
+	reconciler.Clock = clock
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: runKey}); err != nil {
+		t.Fatalf("reconcile run: %v", err)
+	}
 
 	var updated kontextv1alpha1.AgentRun
 	if err := k8sClient.Get(ctx, runKey, &updated); err != nil {

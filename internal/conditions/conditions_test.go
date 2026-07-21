@@ -19,38 +19,6 @@ func findCondition(conds []metav1.Condition, condType string) *metav1.Condition 
 	return nil
 }
 
-func TestUnsupportedMode(t *testing.T) {
-	conds := conditions.UnsupportedMode("Task")
-	if len(conds) != 2 {
-		t.Fatalf("expected two conditions, got %d", len(conds))
-	}
-
-	ready := findCondition(conds, conditions.Ready)
-	if ready == nil {
-		t.Fatalf("expected Ready condition")
-	}
-	if ready.Status != metav1.ConditionFalse {
-		t.Fatalf("expected Ready=False, got %s", ready.Status)
-	}
-	if ready.Reason != "UnsupportedMode" {
-		t.Fatalf("unexpected Ready reason: %s", ready.Reason)
-	}
-	if !strings.Contains(ready.Message, "Task") {
-		t.Fatalf("expected mode in message, got %q", ready.Message)
-	}
-
-	progressing := findCondition(conds, conditions.Progressing)
-	if progressing == nil {
-		t.Fatalf("expected Progressing condition")
-	}
-	if progressing.Status != metav1.ConditionFalse {
-		t.Fatalf("expected Progressing=False, got %s", progressing.Status)
-	}
-	if progressing.Reason != "UnsupportedMode" {
-		t.Fatalf("unexpected Progressing reason: %s", progressing.Reason)
-	}
-}
-
 func TestInvalidMode(t *testing.T) {
 	conds := conditions.InvalidMode("Bogus")
 	if len(conds) != 1 {

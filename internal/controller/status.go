@@ -21,8 +21,3 @@ func setStatusConditions(existing *[]metav1.Condition, generation int64, updates
 		meta.SetStatusCondition(existing, updates[i])
 	}
 }
-
-func nowPtr() *metav1.Time {
-	now := metav1.Now()
-	return &now
-}

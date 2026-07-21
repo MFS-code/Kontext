@@ -3,7 +3,6 @@ package controller_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -57,15 +56,13 @@ func TestAgentReconcilerProjectsTaskReadinessAndRetainedChildren(t *testing.T) {
 		t.Fatalf("expected ready Task template, got %#v", updated.Status.Conditions)
 	}
 
-	first := taskRunForAgent(agent, "z-first")
+	first := taskRunForAgent(agent, "a-first")
 	createOwnedAgentRun(ctx, t, agent, first)
-	time.Sleep(1100 * time.Millisecond)
-	second := taskRunForAgent(agent, "a-second")
+	second := taskRunForAgent(agent, "m-second")
 	createOwnedAgentRun(ctx, t, agent, second)
 
-	ownedWithoutLabel := taskRunForAgent(agent, "owned-without-label")
+	ownedWithoutLabel := taskRunForAgent(agent, "z-owned-without-label")
 	ownedWithoutLabel.Labels = nil
-	time.Sleep(1100 * time.Millisecond)
 	createOwnedAgentRun(ctx, t, agent, ownedWithoutLabel)
 
 	unrelated := taskRunForAgent(agent, "unrelated-same-label")

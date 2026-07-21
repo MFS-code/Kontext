@@ -469,25 +469,18 @@ func TestAgentReconcilerObservesOwnedServiceRunWithoutLabel(t *testing.T) {
 	createOwnedAgentRun(ctx, t, agent, run)
 
 	reconciler := newAgentReconciler()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		result, err := reconciler.Reconcile(ctx, ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
-		})
-		if err != nil {
-			t.Fatalf("reconcile unlabeled owned run: %v", err)
-		}
-		if !result.Requeue {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("unlabeled owned run caused a hot requeue loop")
-		}
-		time.Sleep(20 * time.Millisecond)
+	result, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+	})
+	if err != nil {
+		t.Fatalf("reconcile unlabeled owned run: %v", err)
+	}
+	if result.Requeue {
+		t.Fatal("unlabeled owned run caused a hot requeue loop")
 	}
 
 	var duplicate kontextv1alpha1.AgentRun
-	err := apiReader.Get(ctx, types.NamespacedName{
+	err = apiReader.Get(ctx, types.NamespacedName{
 		Name:      "unlabeled-owner-2",
 		Namespace: agent.Namespace,
 	}, &duplicate)
@@ -510,6 +503,8 @@ func TestAgentReconcilerObservesOwnedServiceRunWithoutLabel(t *testing.T) {
 
 func TestAgentReconcilerRecastsTerminalRunWithStaleStatus(t *testing.T) {
 	ctx := context.Background()
+	now := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: now}
 	agent := newServiceAgent(
 		"recast-owner",
 		&kontextv1alpha1.BackoffSpec{InitialSeconds: 1, MaxSeconds: 1},
@@ -535,12 +530,18 @@ func TestAgentReconcilerRecastsTerminalRunWithStaleStatus(t *testing.T) {
 	createOwnedAgentRun(ctx, t, agent, run)
 	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
 		Phase:          kontextv1alpha1.AgentRunPhaseFailed,
-		CompletionTime: &metav1.Time{Time: time.Now().Add(-time.Minute)},
+		CompletionTime: &metav1.Time{Time: now.Add(-time.Minute)},
 	}); err != nil {
 		t.Fatalf("update run status: %v", err)
 	}
 
-	reconcileAgent(ctx, t, types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace})
+	reconciler := newAgentReconciler()
+	reconciler.Clock = clock
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+	}); err != nil {
+		t.Fatalf("reconcile agent: %v", err)
+	}
 
 	var updated kontextv1alpha1.Agent
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace}, &updated); err != nil {
@@ -567,7 +568,11 @@ func TestAgentReconcilerRecastsTerminalRunWithStaleStatus(t *testing.T) {
 		t.Fatalf("update new run status: %v", err)
 	}
 
-	reconcileAgent(ctx, t, types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace})
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+	}); err != nil {
+		t.Fatalf("reconcile active recast: %v", err)
+	}
 
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace}, &updated); err != nil {
 		t.Fatalf("get agent: %v", err)
@@ -637,6 +642,8 @@ func TestAgentReconcilerRecastsTerminalRunWithoutCompletionTime(t *testing.T) {
 
 func TestAgentReconcilerBacksOffFromObservedTerminalRun(t *testing.T) {
 	ctx := context.Background()
+	now := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: now}
 	agent := newServiceAgent(
 		"backoff-owner",
 		&kontextv1alpha1.BackoffSpec{InitialSeconds: 30, MaxSeconds: 30},
@@ -662,12 +669,14 @@ func TestAgentReconcilerBacksOffFromObservedTerminalRun(t *testing.T) {
 	createOwnedAgentRun(ctx, t, agent, run)
 	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
 		Phase:          kontextv1alpha1.AgentRunPhaseFailed,
-		CompletionTime: &metav1.Time{Time: time.Now()},
+		CompletionTime: &metav1.Time{Time: now},
 	}); err != nil {
 		t.Fatalf("update run status: %v", err)
 	}
 
-	result, err := newAgentReconciler().Reconcile(ctx, ctrl.Request{
+	reconciler := newAgentReconciler()
+	reconciler.Clock = clock
+	result, err := reconciler.Reconcile(ctx, ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
 	})
 	if err != nil {
@@ -774,6 +783,8 @@ func TestAgentReconcilerRecoversStatusFromObservedChildren(t *testing.T) {
 
 func TestAgentReconcilerUsesOwnedCanonicalRunSequence(t *testing.T) {
 	ctx := context.Background()
+	now := time.Date(2026, time.July, 21, 12, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: now}
 	agent := newServiceAgent(
 		"sequence-owner",
 		&kontextv1alpha1.BackoffSpec{InitialSeconds: 1, MaxSeconds: 1},
@@ -817,12 +828,18 @@ func TestAgentReconcilerUsesOwnedCanonicalRunSequence(t *testing.T) {
 	createOwnedAgentRun(ctx, t, agent, current)
 	if err := updateAgentRunStatus(ctx, current, kontextv1alpha1.AgentRunStatus{
 		Phase:          kontextv1alpha1.AgentRunPhaseFailed,
-		CompletionTime: &metav1.Time{Time: time.Now().Add(-time.Minute)},
+		CompletionTime: &metav1.Time{Time: now.Add(-time.Minute)},
 	}); err != nil {
 		t.Fatalf("update current run status: %v", err)
 	}
 
-	reconcileAgent(ctx, t, types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace})
+	reconciler := newAgentReconciler()
+	reconciler.Clock = clock
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+	}); err != nil {
+		t.Fatalf("reconcile agent: %v", err)
+	}
 
 	var next kontextv1alpha1.AgentRun
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: "sequence-owner-4", Namespace: agent.Namespace}, &next); err != nil {
