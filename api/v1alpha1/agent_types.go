@@ -9,6 +9,9 @@ const (
 	AgentModeService   = "Service"
 	AgentModeScheduled = "Scheduled"
 
+	ConcurrencyPolicyAllow  ConcurrencyPolicy = "Allow"
+	ConcurrencyPolicyForbid ConcurrencyPolicy = "Forbid"
+
 	ResultSourceStdout          ResultSource = "Stdout"
 	ResultFormatLastLine        ResultFormat = "LastLine"
 	ResultFormatKontextEnvelope ResultFormat = "KontextEnvelope"
@@ -16,7 +19,7 @@ const (
 
 // AgentSpec defines the desired state of Agent.
 // +kubebuilder:validation:XValidation:rule="self.mode == 'Task' ? has(self.goal) != has(self.goalTemplate) : has(self.goal) && !has(self.goalTemplate)",message="Task agents require exactly one of goal or goalTemplate; Service and Scheduled agents require goal and forbid goalTemplate"
-// +kubebuilder:validation:XValidation:rule="self.mode == 'Scheduled' || !has(self.schedule)",message="schedule is only valid for Scheduled agents"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Scheduled' ? has(self.schedule) : !has(self.schedule)",message="schedule is required only for Scheduled agents"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'Service' || !has(self.backoff)",message="backoff is only valid for Service agents"
 type AgentSpec struct {
 	Mode AgentMode `json:"mode"`
@@ -43,13 +46,48 @@ type AgentSpec struct {
 
 	Env []EnvVar `json:"env,omitempty"`
 
-	Schedule string       `json:"schedule,omitempty"`
-	Backoff  *BackoffSpec `json:"backoff,omitempty"`
+	Schedule *ScheduleSpec `json:"schedule,omitempty"`
+	Backoff  *BackoffSpec  `json:"backoff,omitempty"`
 }
 
 // AgentMode defines how an Agent behaves.
 // +kubebuilder:validation:Enum=Task;Service;Scheduled
 type AgentMode string
+
+// ScheduleSpec controls Scheduled-mode run creation.
+// +kubebuilder:validation:XValidation:rule="!self.expression.matches('(^|[[:space:]])(CRON_TZ|TZ)=')",message="time zones must be configured with schedule.timeZone, not inside schedule.expression"
+type ScheduleSpec struct {
+	// Expression is a standard five-field cron expression.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^(\S+\s+){4}\S+$`
+	Expression string `json:"expression"`
+
+	// +kubebuilder:default="Etc/UTC"
+	TimeZone string `json:"timeZone,omitempty"`
+
+	// +kubebuilder:default=Forbid
+	ConcurrencyPolicy ConcurrencyPolicy `json:"concurrencyPolicy,omitempty"`
+
+	// +kubebuilder:default=60
+	// +kubebuilder:validation:Minimum=0
+	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
+
+	// +kubebuilder:default=false
+	Suspend bool `json:"suspend,omitempty"`
+
+	// +kubebuilder:default=3
+	// +kubebuilder:validation:Minimum=0
+	SuccessfulRunsHistoryLimit *int32 `json:"successfulRunsHistoryLimit,omitempty"`
+
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=0
+	FailedRunsHistoryLimit *int32 `json:"failedRunsHistoryLimit,omitempty"`
+}
+
+// ConcurrencyPolicy controls whether a due slot may overlap an active run.
+// Replace is intentionally deferred.
+// +kubebuilder:validation:Enum=Allow;Forbid
+type ConcurrencyPolicy string
 
 // RuntimeSpec describes the container image implementing the runtime contract.
 // +kubebuilder:validation:XValidation:rule="!has(self.result) || (has(self.command) && size(self.command) > 0 && size(self.command[0]) > 0)",message="runtime.command must provide a non-empty executable when runtime.result is configured"
@@ -152,6 +190,9 @@ type AgentStatus struct {
 	LastRunName    string `json:"lastRunName,omitempty"`
 	RunsCreated    int32  `json:"runsCreated,omitempty"`
 	Restarts       int32  `json:"restarts,omitempty"`
+
+	LastScheduleTime *metav1.Time `json:"lastScheduleTime,omitempty"`
+	NextScheduleTime *metav1.Time `json:"nextScheduleTime,omitempty"`
 
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }

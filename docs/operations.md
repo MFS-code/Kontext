@@ -18,6 +18,9 @@ Kontext maintains and tests the following paths:
   bounded terminal result and measured usage in status.
 - An `Agent` in `Service` mode keeps one active child `AgentRun`. When that run
   ends or its Pod disappears, the controller creates a new run with backoff.
+- An `Agent` in `Scheduled` mode creates one-shot children from standard
+  five-field cron slots. It supports IANA time zones, starting deadlines,
+  `Allow`/`Forbid` overlap policy, suspension, and completed-run history limits.
 - Runtime images may write a versioned termination envelope directly or opt
   into `Stdout` result capture with an explicit command.
 - `budget.wallclock` is validated at admission and enforced by the controller.
@@ -25,16 +28,20 @@ Kontext maintains and tests the following paths:
 - The maintained Go reference runtime supports its documented fake, Anthropic,
   OpenAI, and OpenAI-compatible paths and bounded tool loop.
 
-The following fields exist in the alpha API but do not have controller
+The following mode exists in the alpha API but does not have controller
 behavior:
 
 - `Agent` mode `Task`
-- `Agent` mode `Scheduled`
-- `spec.schedule`
 
-The controller accepts these modes and reports an `UnsupportedMode` condition.
-It does not create an `AgentRun` for them. Callers that need one-shot work must
-create an `AgentRun` directly.
+The controller reports an `UnsupportedMode` condition for Task. Callers that
+need one-shot work outside a schedule must create an `AgentRun` directly.
+
+Scheduled mode intentionally does not provide catch-up bursts. After downtime,
+only the latest due slot is considered and only while it remains within
+`startingDeadlineSeconds`. `Forbid` skips a slot when any owned run is Pending
+or Running; skipped work is not queued. Changing the Agent generation resets
+the anchor to now. Use `.status.lastScheduleTime`, `.status.nextScheduleTime`,
+and the Ready/Progressing condition reasons when diagnosing dispatch.
 
 Token and dollar budgets are not enforcement controls. Runtimes may report
 those measurements, and Kontext records them in status. Only wallclock is
