@@ -18,7 +18,6 @@ const (
 )
 
 type redactor struct {
-	values         []string
 	sensitiveForms []string
 }
 
@@ -39,7 +38,10 @@ func newRedactor(values []string) redactor {
 			forms = append(forms, escaped)
 		}
 	}
-	return redactor{values: cloned, sensitiveForms: forms}
+	sort.Slice(forms, func(left int, right int) bool {
+		return len(forms[left]) > len(forms[right])
+	})
+	return redactor{sensitiveForms: forms}
 }
 
 func (redactor redactor) clean(value string) string {
@@ -47,10 +49,8 @@ func (redactor redactor) clean(value string) string {
 }
 
 func (redactor redactor) replace(value string) string {
-	for _, sensitive := range redactor.values {
-		if sensitive != "" {
-			value = strings.ReplaceAll(value, sensitive, "[REDACTED]")
-		}
+	for _, sensitive := range redactor.sensitiveForms {
+		value = strings.ReplaceAll(value, sensitive, "[REDACTED]")
 	}
 	return value
 }

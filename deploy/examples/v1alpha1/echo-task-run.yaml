@@ -3,7 +3,7 @@ kind: AgentRun
 metadata:
   name: echo-review
 spec:
-  goal: Summarize the conventions for the owned files.
+  goal: Summarize the failure modes in this release.
   provider: echo
   model: echo-model
   runtime:

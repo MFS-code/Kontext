@@ -12,6 +12,9 @@ func grade(record *Record, grader Grader) Grade {
 	if err != nil {
 		return Grade{Type: grader.Type, Message: err.Error()}
 	}
+	if err := spec.validate(grader); err != nil {
+		return Grade{Type: grader.Type, Message: "invalid grader: " + err.Error()}
+	}
 	result := spec.grade(record, grader)
 	if !result.Pass && result.Message == "" {
 		result.Message = "observed value did not match expectation"
