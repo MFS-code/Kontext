@@ -144,9 +144,22 @@ install_release() {
   fi
 }
 
+# Deleting an AgentRun only waits for the AgentRun object; its Pod is
+# garbage-collected asynchronously. A new AgentRun reusing the name would find
+# the stale Pod it does not own and fail with a Pod name collision, so wait
+# for the Pod too before and after reusing the echo-review name.
+delete_echo_review_run() {
+  kubectl delete agentrun echo-review --ignore-not-found=true --wait=true
+  if ! wait_until 60 1 "echo-review Pod removal" \
+    resource_absent pod run-echo-review; then
+    echo "Pod run-echo-review was not garbage-collected after AgentRun deletion" >&2
+    return 1
+  fi
+}
+
 smoke_release_runtime() {
   local version="$1"
-  kubectl delete agentrun echo-review --ignore-not-found=true --wait=true
+  delete_echo_review_run
   KONTEXT_RELEASE_TAG="${version}" "${APPLY_EXAMPLE}" echo-task-run.yaml
   wait_for_run_phase echo-review Succeeded default 180 1
 
@@ -158,7 +171,7 @@ smoke_release_runtime() {
     echo "unexpected echo runtime image: ${runtime_image}" >&2
     return 1
   fi
-  kubectl delete agentrun echo-review --wait=true
+  delete_echo_review_run
 }
 
 CURRENT_IDENTITY="$(manifest_identity "${CURRENT_MANIFEST}")"
