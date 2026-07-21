@@ -79,6 +79,13 @@ mirrors, `llms.txt`, and `llms-full.txt`. The verification checks byte
 identity between source Markdown and raw output plus required Task, Scheduled,
 API, and webhook terms in the generated corpus.
 
+## Releasing
+
+The `public release references use the declared version` test in
+`docs-site/tests/content-integrity.test.mjs` enforces documented release
+versions and image tags. When bumping the release version, update its references
+and let that test verify completeness.
+
 ## Generated files
 
 Changes under `api/v1alpha1` may require regenerated deep-copy code, CRDs, and

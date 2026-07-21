@@ -39,13 +39,6 @@ a classic `PACKAGES_TOKEN` repository secret with `write:packages`; the
 workflow uses it only for the visibility operation. Publication fails before a
 GitHub release is created if anonymous access cannot be verified.
 
-## Release checklist
-
-- [ ] Bump the documented release version in `README.md`, `SECURITY.md`,
-  `docs/quickstart.md`, `docs/releases.md`, `docs/scheduled-workload.md`,
-  `docs/service-workload.md`, `docs/task-workload.md`, `website/index.html`,
-  `deploy/examples/v1alpha1/README.md`, and `.github/ISSUE_TEMPLATE/bug_report.yml`.
-
 ## Install
 
 Install a tagged release on an existing cluster without cloning the repository
