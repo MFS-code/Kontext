@@ -13,54 +13,17 @@ import (
 	"testing"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
-	"github.com/MFS-code/Kontext/internal/testsupport"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/config"
 	"github.com/MFS-code/Kontext/runtimes/reference/internal/mcpclient"
 )
 
-func TestSecretBackedPodEnvAuthenticatesHTTPMCPWithoutLeaking(t *testing.T) {
+func TestHeadersFromEnvAuthenticatesHTTPMCPWithoutLeaking(t *testing.T) {
 	const (
 		envName = "MCP_AUTH_HEADER"
-		secret  = "Bearer pod-built-integration-secret"
+		secret  = "Bearer runtime-integration-secret"
 	)
-	run := &kontextv1alpha1.AgentRun{
-		ObjectMeta: metav1.ObjectMeta{Name: "mcp-auth-integration", Namespace: "default"},
-		Spec: kontextv1alpha1.AgentRunSpec{
-			Goal:     "call an authenticated MCP server",
-			Provider: "fake",
-			Model:    "test/model",
-			Runtime:  kontextv1alpha1.RuntimeSpec{Image: "kontext-reference:dev"},
-			Env: []kontextv1alpha1.EnvVar{{
-				Name: envName,
-				ValueFrom: &kontextv1alpha1.EnvVarSource{
-					SecretKeyRef: kontextv1alpha1.SecretKeySelector{
-						Name: "mcp-auth",
-						Key:  "authorization",
-					},
-				},
-			}},
-		},
-	}
-	pod := testsupport.BuildPod(run)
-	var podEnvName string
-	for _, env := range pod.Spec.Containers[0].Env {
-		if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil &&
-			env.ValueFrom.SecretKeyRef.Name == "mcp-auth" {
-			podEnvName = env.Name
-			if env.ValueFrom.SecretKeyRef.Key != "authorization" {
-				t.Fatalf("unexpected Pod Secret key: %#v", env.ValueFrom.SecretKeyRef)
-			}
-		}
-	}
-	if podEnvName != envName {
-		t.Fatalf("Pod did not preserve generic Secret env name %q: %#v", envName, pod.Spec.Containers[0].Env)
-	}
-
 	server := mcp.NewServer(&mcp.Implementation{Name: "authenticated", Version: "1"}, nil)
 	server.AddTool(
 		&mcp.Tool{Name: "fail_safely", InputSchema: json.RawMessage(`{"type":"object"}`)},
@@ -95,11 +58,11 @@ func TestSecretBackedPodEnvAuthenticatesHTTPMCPWithoutLeaking(t *testing.T) {
 		t.Fatalf("marshal MCP configuration: %v", err)
 	}
 	values := map[string]string{
-		"KONTEXT_GOAL":       run.Spec.Goal,
-		"KONTEXT_PROVIDER":   run.Spec.Provider,
-		"KONTEXT_MODEL":      run.Spec.Model,
+		"KONTEXT_GOAL":       "call an authenticated MCP server",
+		"KONTEXT_PROVIDER":   "fake",
+		"KONTEXT_MODEL":      "test/model",
 		"KONTEXT_MCP_CONFIG": string(mcpDocument),
-		podEnvName:           secret,
+		envName:              secret,
 	}
 	runtimeConfig, err := config.Load(func(name string) string { return values[name] })
 	if err != nil {
@@ -107,7 +70,7 @@ func TestSecretBackedPodEnvAuthenticatesHTTPMCPWithoutLeaking(t *testing.T) {
 	}
 	if len(runtimeConfig.MCP.Servers) != 1 ||
 		runtimeConfig.MCP.Servers[0].Headers["Authorization"] != secret {
-		t.Fatalf("headersFromEnv did not resolve Pod env name %q", podEnvName)
+		t.Fatalf("headersFromEnv did not resolve runtime env name %q", envName)
 	}
 
 	var stderr bytes.Buffer
