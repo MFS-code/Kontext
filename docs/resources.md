@@ -19,7 +19,8 @@ model, budgets, and related fields.
   restored across recasts.
 - **Task** — reusable one-shot template. Creating the Agent does not execute
   it. A user explicitly triggers work by creating a named `AgentRun` that
-  references it. Task controller status reconciliation remains reserved.
+  references it. Admission resolves the immutable execution snapshot before
+  storage, and the controller projects retained child status.
 - **Scheduled** — cron-style one-shot execution. The controller evaluates a
   standard five-field expression in the configured IANA time zone and mints at
   most the latest eligible slot. `Forbid` is the default overlap policy;
@@ -44,11 +45,11 @@ progress; `currentRunName`, `restarts`, and backoff apply only to Service mode.
 cleared when history limits prune every child. `lastScheduleTime` remains the
 historical latest observed slot even after that child is pruned.
 
-### Future Task invocation requests
+### Task invocation requests
 
 A Task Agent configures exactly one static `goal` or parameterized
-`goalTemplate`. Once the Task CREATE webhook is installed, its sparse request
-shape contains only `agentRef` and optional string `parameters`:
+`goalTemplate`. Its sparse request shape contains only `agentRef` and optional
+string `parameters`:
 
 ```yaml
 apiVersion: kontext.dev/v1alpha1
@@ -69,13 +70,11 @@ references, environment, and the concrete goal are locked to the Agent
 template. Use a standalone run or another Agent definition when those fields
 must differ.
 
-This YAML is an admission request shape, not a valid persisted AgentRun in the
-current release. Kubernetes runs mutating admission before final CRD
-validation, so #84 will resolve the request before the API server validates and
-stores it. Persisted AgentRuns always contain `goal`, `model`, and
-`runtime.image`. Until the webhook infrastructure and mutator from #83/#84 are
-installed, the API server rejects sparse CREATE requests; use standalone runs
-for end-to-end execution.
+Kubernetes runs mutating admission before final CRD validation. The webhook
+resolves this request against the same-namespace Task Agent, and the API server
+validates and stores only the complete snapshot. Persisted AgentRuns always
+contain `goal`, `model`, and `runtime.image`. If admission cannot resolve a
+matching sparse request, creation fails closed with an actionable error.
 
 Task runs are user-named and can execute concurrently. For Task status,
 `lastRunName` means the newest retained owned run by creation time, while

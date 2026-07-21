@@ -52,10 +52,77 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	case kontextv1alpha1.AgentModeScheduled:
 		return r.reconcileScheduled(ctx, &agent)
 	case kontextv1alpha1.AgentModeTask:
-		return ctrl.Result{}, r.setAgentStatus(ctx, &agent, agent.Status, conditions.UnsupportedMode(string(agent.Spec.Mode))...)
+		return r.reconcileTask(ctx, &agent)
 	default:
 		return ctrl.Result{}, r.setAgentStatus(ctx, &agent, agent.Status, conditions.InvalidMode(string(agent.Spec.Mode))...)
 	}
+}
+
+func (r *AgentReconciler) reconcileTask(
+	ctx context.Context,
+	agent *kontextv1alpha1.Agent,
+) (ctrl.Result, error) {
+	var children kontextv1alpha1.AgentRunList
+	if err := r.List(ctx, &children, client.InNamespace(agent.Namespace)); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	var newest *kontextv1alpha1.AgentRun
+	var retained int32
+	for i := range children.Items {
+		run := &children.Items[i]
+		if !metav1.IsControlledBy(run, agent) {
+			continue
+		}
+		if retained == maxRunSuffix {
+			return ctrl.Result{}, fmt.Errorf(
+				"Task Agent %s/%s owns more than %d retained AgentRuns",
+				agent.Namespace,
+				agent.Name,
+				maxRunSuffix,
+			)
+		}
+		retained++
+		if newest == nil ||
+			run.CreationTimestamp.After(newest.CreationTimestamp.Time) ||
+			run.CreationTimestamp.Equal(&newest.CreationTimestamp) && run.Name > newest.Name {
+			newest = run
+		}
+	}
+
+	next := kontextv1alpha1.AgentStatus{
+		RunsCreated:        retained,
+		ObservedGeneration: agent.Generation,
+	}
+	if newest != nil {
+		next.LastRunName = newest.Name
+	}
+
+	if err := runfactory.ValidateTask(agent); err != nil {
+		return ctrl.Result{}, r.setAgentStatus(ctx, agent, next, metav1.Condition{
+			Type:    conditions.Ready,
+			Status:  metav1.ConditionFalse,
+			Reason:  "InvalidTemplate",
+			Message: err.Error(),
+		}, metav1.Condition{
+			Type:    conditions.Progressing,
+			Status:  metav1.ConditionFalse,
+			Reason:  "InvalidTemplate",
+			Message: "Task invocations are blocked until the template is valid.",
+		})
+	}
+
+	return ctrl.Result{}, r.setAgentStatus(ctx, agent, next, metav1.Condition{
+		Type:    conditions.Ready,
+		Status:  metav1.ConditionTrue,
+		Reason:  "TemplateReady",
+		Message: "Task template is ready for invocations.",
+	}, metav1.Condition{
+		Type:    conditions.Progressing,
+		Status:  metav1.ConditionFalse,
+		Reason:  "Idle",
+		Message: "Task Agents run only when an AgentRun is created.",
+	})
 }
 
 func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1alpha1.Agent) (ctrl.Result, error) {

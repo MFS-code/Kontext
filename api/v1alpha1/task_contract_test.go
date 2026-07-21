@@ -7,11 +7,11 @@ import (
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 )
 
-func TestSparseTaskCreateRequestDecodesForFutureMutation(t *testing.T) {
+func TestSparseTaskCreateRequestDecodesForAdmissionMutation(t *testing.T) {
 	// Kubernetes invokes mutating admission before it validates the final
-	// object against the CRD. The future Task webhook can therefore decode this
-	// request shape, resolve it in memory, and return a complete object. It must
-	// never marshal or persist this unresolved value.
+	// object against the CRD. The Task webhook decodes this request shape,
+	// resolves it in memory, and returns a complete object. It must never
+	// marshal or persist this unresolved value.
 	data := []byte(`{"agentRef":{"name":"task"},"parameters":{"input":"value"}}`)
 	var invocation kontextv1alpha1.AgentRunSpec
 	if err := json.Unmarshal(data, &invocation); err != nil {

@@ -20,9 +20,9 @@ type AgentRef struct {
 }
 
 // AgentRunSpec defines the desired state of AgentRun. Persisted specs are
-// always complete. A future CREATE mutating webhook may decode a sparse Task
-// request into this type, but it must resolve the required execution fields
-// before API-server schema validation and persistence.
+// always complete. The CREATE mutating webhook decodes sparse Task requests
+// into this type and resolves required execution fields before API-server
+// schema validation and persistence.
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="AgentRun spec is immutable"
 // +kubebuilder:validation:XValidation:rule="has(self.agentRef) || !has(self.parameters)",message="parameters require agentRef"
 // +kubebuilder:validation:XValidation:rule="has(self.goal) && has(self.model) && has(self.runtime)",message="persisted AgentRun spec must contain a complete execution snapshot"

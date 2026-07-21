@@ -51,9 +51,9 @@ spec:
           spec:
             description: |-
               AgentRunSpec defines the desired state of AgentRun. Persisted specs are
-              always complete. A future CREATE mutating webhook may decode a sparse Task
-              request into this type, but it must resolve the required execution fields
-              before API-server schema validation and persistence.
+              always complete. The CREATE mutating webhook decodes sparse Task requests
+              into this type and resolves required execution fields before API-server
+              schema validation and persistence.
             properties:
               agentRef:
                 description: AgentRef links an AgentRun to its owning Agent.

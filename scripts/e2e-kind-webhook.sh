@@ -18,7 +18,11 @@ cleanup() {
     kill "${pid}" >/dev/null 2>&1 || true
   done
   kubectl scale deployment "${DEPLOYMENT}" -n "${NAMESPACE}" --replicas=1 >/dev/null 2>&1 || true
+  kubectl delete agent webhook-task -n default \
+    --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
   kubectl delete agentrun webhook-complete-bypass webhook-complete-broken-trust \
+    webhook-task-bootstrap webhook-task-rotating webhook-task-rotated \
+    webhook-task-restarted webhook-task-ha \
     -n default --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
   rm -rf "${TMP_DIR}"
 }
@@ -55,6 +59,33 @@ leaf_fingerprint() {
   secret_value 'tls\.crt' | openssl x509 -noout -fingerprint -sha256
 }
 
+create_task_invocation() {
+  local name="$1"
+  kubectl create -f - <<EOF
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: ${name}
+  namespace: default
+spec:
+  agentRef:
+    name: webhook-task
+EOF
+}
+
+create_task_invocation_retry() {
+  local name="$1"
+  for _ in $(seq 1 60); do
+    if create_task_invocation "${name}" >"${TMP_DIR}/${name}.out" 2>&1; then
+      cat "${TMP_DIR}/${name}.out"
+      return 0
+    fi
+    sleep 1
+  done
+  cat "${TMP_DIR}/${name}.out" >&2
+  return 1
+}
+
 echo "==> verifying fresh trusted bootstrap"
 kubectl rollout status deployment/"${DEPLOYMENT}" -n "${NAMESPACE}" --timeout=180s
 kubectl get service webhook-service -n "${NAMESPACE}" >/dev/null
@@ -71,7 +102,32 @@ if [[ "${secret_ca}" != "${registered_ca}" ]]; then
   exit 1
 fi
 
-echo "==> proving sparse validation and nonmatching bypass"
+echo "==> proving real sparse Task mutation and nonmatching bypass"
+cat <<EOF | kubectl apply -f -
+apiVersion: kontext.dev/v1alpha1
+kind: Agent
+metadata:
+  name: webhook-task
+  namespace: default
+spec:
+  mode: Task
+  goal: Exercise webhook lifecycle admission.
+  provider: echo
+  model: echo-model
+  runtime:
+    image: ${ECHO_IMAGE}
+EOF
+if [[ "$(kubectl get agentrun -l kontext.dev/agent=webhook-task -o name)" != "" ]]; then
+  echo "Task Agent creation minted a run" >&2
+  exit 1
+fi
+create_task_invocation webhook-task-bootstrap
+wait_for_run_phase webhook-task-bootstrap Succeeded
+if [[ "$(kubectl get agentrun webhook-task-bootstrap -o jsonpath='{.spec.goal}')" != \
+  "Exercise webhook lifecycle admission." ]]; then
+  echo "bootstrap Task invocation was not resolved" >&2
+  exit 1
+fi
 cat <<EOF | kubectl apply -f -
 apiVersion: kontext.dev/v1alpha1
 kind: AgentRun
@@ -95,11 +151,11 @@ spec:
     name: reserved-task
 EOF
 then
-  echo "sparse AgentRun unexpectedly persisted without #84" >&2
+  echo "missing Task Agent unexpectedly passed admission" >&2
   exit 1
 fi
-if ! grep -Eq 'Required value|must contain a complete execution snapshot' "${TMP_DIR}/sparse.out"; then
-  echo "sparse request did not reach schema validation through trusted TLS" >&2
+if ! grep -q 'MissingAgent' "${TMP_DIR}/sparse.out"; then
+  echo "sparse request did not return actionable Task admission failure" >&2
   cat "${TMP_DIR}/sparse.out" >&2
   exit 1
 fi
@@ -178,6 +234,7 @@ kubectl patch secret "${SECRET}" -n "${NAMESPACE}" --type=json -p="$(
   printf '[{"op":"replace","path":"/data/tls.crt","value":"%s"},{"op":"replace","path":"/data/tls.key","value":"%s"}]' \
     "${near_cert}" "${near_key}"
 )"
+create_task_invocation webhook-task-rotating
 near_fingerprint="$(openssl x509 -in "${TMP_DIR}/near.crt" -noout -fingerprint -sha256)"
 for _ in $(seq 1 120); do
   new_fingerprint="$(leaf_fingerprint)"
@@ -188,6 +245,9 @@ if [[ "${new_fingerprint}" == "${old_fingerprint}" || "${new_fingerprint}" == "$
   echo "near-expiry certificate was not renewed" >&2
   exit 1
 fi
+create_task_invocation webhook-task-rotated
+wait_for_run_phase webhook-task-rotating Succeeded
+wait_for_run_phase webhook-task-rotated Succeeded
 
 echo "==> verifying restart reuse"
 renewed_fingerprint="${new_fingerprint}"
@@ -197,6 +257,8 @@ if [[ "$(leaf_fingerprint)" != "${renewed_fingerprint}" ]]; then
   echo "controller restart replaced valid shared certificate" >&2
   exit 1
 fi
+create_task_invocation_retry webhook-task-restarted
+wait_for_run_phase webhook-task-restarted Succeeded
 
 echo "==> verifying two-replica convergence"
 kubectl scale deployment "${DEPLOYMENT}" -n "${NAMESPACE}" --replicas=2
@@ -235,5 +297,7 @@ if [[ "${#fingerprints[@]}" -ne 2 || "${fingerprints[0]}" != "${fingerprints[1]}
   echo "two replicas do not serve the same shared certificate" >&2
   exit 1
 fi
+create_task_invocation webhook-task-ha
+wait_for_run_phase webhook-task-ha Succeeded
 
 echo "focused webhook TLS and HA acceptance passed"

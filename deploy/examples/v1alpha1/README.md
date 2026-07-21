@@ -52,6 +52,15 @@ results are opt-in.
 `/kontext/knowledge`. It is useful for small fixtures and operating
 instructions; it is not production retrieval or RAG.
 
+## Task mode
+
+Apply `echo-task-agent.yaml`, then `echo-task-invocation.yaml`. The first
+manifest creates a reusable parameterized definition and no run. The second is
+a sparse invocation: admission renders `${subject}`, preserves `$${subject}` as
+literal text, snapshots the Agent execution fields, and attaches ownership.
+Inspect the complete stored spec with
+`kubectl get agentrun echo-task-docs -o yaml`.
+
 ## Service mode
 
 `echo-service-agent.yaml` is intentionally long-running. It omits

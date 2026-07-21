@@ -136,6 +136,10 @@ kind-install: docker-build docker-build-echo docker-build-reporter docker-build-
 test-webhook-kind: ## Run focused webhook TLS and HA acceptance on the current cluster.
 	./scripts/e2e-kind-webhook.sh
 
+.PHONY: test-task-kind
+test-task-kind: ## Run focused Task admission and execution acceptance on the current cluster.
+	./scripts/e2e-kind-task.sh
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
