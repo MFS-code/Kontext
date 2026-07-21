@@ -10,7 +10,7 @@ Service mode keeps an agent available the way a Deployment keeps a Pod
 available. The controller owns one live `AgentRun` for the `Agent` and mints a
 replacement when that run exits.
 
-> **Note:** The example uses the published `v0.1.0-alpha.1` echo image. Pin a
+> **Note:** The example uses the published `v0.1.0-alpha.2` echo image. Pin a
 > release tag or digest in your own manifests.
 
 ## Apply a Service Agent
@@ -26,7 +26,7 @@ spec:
   provider: echo
   model: echo-model
   runtime:
-    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1
+    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.2
     command: ["/entrypoint.sh"]
   env:
     - name: KONTEXT_MODE

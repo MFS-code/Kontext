@@ -13,7 +13,7 @@ After the kind quickstart, map placeholders to the loaded local images:
 To apply an example with published images instead:
 
 ```bash
-KONTEXT_RELEASE_TAG=v0.1.0-alpha.1 \
+KONTEXT_RELEASE_TAG=v0.1.0-alpha.2 \
   ./scripts/apply-example.sh deploy/examples/v1alpha1/reference-fake-run.yaml
 ```
 

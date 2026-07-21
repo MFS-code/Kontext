@@ -6,7 +6,7 @@ and should not be treated as a hardened multi-tenant sandbox.
 ## Supported versions
 
 Security fixes target the latest published alpha release, currently
-`v0.1.0-alpha.1`. The `main` branch is development code, not a supported
+`v0.1.0-alpha.2`. The `main` branch is development code, not a supported
 distribution. Older alpha releases may not receive patches.
 
 ## Reporting a vulnerability
