@@ -36,6 +36,40 @@ validate_release_tag() {
   [[ "${tag}" =~ ${release_pattern} && "${#tag}" -le 63 ]]
 }
 
+wait_until() {
+  local attempts="${1:-}"
+  local interval_seconds="${2:-}"
+  local description="${3:-}"
+  local attempt
+
+  if [[ ! "${attempts}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "poll attempts must be a positive whole number: ${attempts}" >&2
+    return 2
+  fi
+  if [[ ! "${interval_seconds}" =~ ^[0-9]+([.][0-9]+)?$ ||
+    "${interval_seconds}" =~ ^0+([.]0+)?$ ]]; then
+    echo "poll interval must be a positive number of seconds: ${interval_seconds}" >&2
+    return 2
+  fi
+  if [[ -z "${description}" || "$#" -lt 4 ]]; then
+    echo "usage: wait_until <attempts> <interval_seconds> <description> cmd args..." >&2
+    return 2
+  fi
+  shift 3
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if "$@"; then
+      return 0
+    fi
+    if ((attempt < attempts)); then
+      sleep "${interval_seconds}"
+    fi
+  done
+
+  echo "timed out waiting for ${description} after ${attempts} attempts" >&2
+  return 1
+}
+
 wait_for_run_phase() {
   local name="${1:?AgentRun name is required}"
   local expected="${2:?expected AgentRun phase is required}"

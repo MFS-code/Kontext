@@ -22,16 +22,16 @@ need kubectl jq
 cleanup
 mkdir -p "${TMP_DIR}"
 
+agent_count_is() {
+  local expected="$1"
+  local count=""
+  count="$(kubectl get agent echo-task -o jsonpath='{.status.runsCreated}' 2>/dev/null || true)"
+  [[ "${count:-0}" == "${expected}" ]]
+}
+
 wait_for_agent_count() {
   local expected="$1"
-  for _ in $(seq 1 120); do
-    local count=""
-    count="$(kubectl get agent echo-task -o jsonpath='{.status.runsCreated}' 2>/dev/null || true)"
-    [[ "${count:-0}" == "${expected}" ]] && return 0
-    sleep 1
-  done
-  echo "timed out waiting for Task runsCreated=${expected}" >&2
-  return 1
+  wait_until 120 1 "Task runsCreated=${expected}" agent_count_is "${expected}"
 }
 
 expect_rejected() {

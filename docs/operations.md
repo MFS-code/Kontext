@@ -225,29 +225,8 @@ repeating one-shot work is safe.
 - Deleting either CRD deletes every resource of that kind across the cluster.
 
 To remove the controller while retaining CRDs and resources outside
-`kontext-system`:
-
-```bash
-kubectl delete clusterrolebinding kontext-manager-rolebinding \
-  --ignore-not-found=true
-kubectl delete clusterrole kontext-manager-role \
-  --ignore-not-found=true
-kubectl delete mutatingwebhookconfiguration \
-  kontext-task-agentrun-mutator.kontext.dev --ignore-not-found=true
-kubectl delete clusterrolebinding kontext-webhook-registration-manager \
-  --ignore-not-found=true
-kubectl delete clusterrole kontext-webhook-registration-manager \
-  --ignore-not-found=true
-# Also clean identities used before the kontext- prefix.
-kubectl delete mutatingwebhookconfiguration \
-  task-agentrun-mutator.kontext.dev --ignore-not-found=true
-kubectl delete clusterrolebinding manager-rolebinding \
-  webhook-registration-manager --ignore-not-found=true
-kubectl delete clusterrole manager-role \
-  webhook-registration-manager --ignore-not-found=true
-kubectl delete namespace kontext-system \
-  --ignore-not-found=true --wait=true
-```
+`kontext-system`, follow the canonical
+[control-plane-only uninstall procedure](/docs/releases#uninstall).
 
 A complete uninstall deletes the release manifest:
 

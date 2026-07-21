@@ -31,25 +31,27 @@ trap cleanup EXIT
 
 need kubectl openssl curl
 
+jsonpath_equals() {
+  local resource="$1"
+  local expression="$2"
+  local expected="$3"
+  local namespace="${4:-}"
+  local value=""
+  if [[ -n "${namespace}" ]]; then
+    value="$(kubectl get "${resource}" -n "${namespace}" -o "jsonpath=${expression}" 2>/dev/null || true)"
+  else
+    value="$(kubectl get "${resource}" -o "jsonpath=${expression}" 2>/dev/null || true)"
+  fi
+  [[ "${value}" == "${expected}" ]]
+}
+
 wait_for_jsonpath() {
   local resource="$1"
   local expression="$2"
   local expected="$3"
   local namespace="${4:-}"
-  for _ in $(seq 1 120); do
-    local value=""
-    if [[ -n "${namespace}" ]]; then
-      value="$(kubectl get "${resource}" -n "${namespace}" -o "jsonpath=${expression}" 2>/dev/null || true)"
-    else
-      value="$(kubectl get "${resource}" -o "jsonpath=${expression}" 2>/dev/null || true)"
-    fi
-    if [[ "${value}" == "${expected}" ]]; then
-      return 0
-    fi
-    sleep 1
-  done
-  echo "timed out waiting for ${resource} ${expression}=${expected}" >&2
-  return 1
+  wait_until 120 1 "${resource} ${expression}=${expected}" \
+    jsonpath_equals "${resource}" "${expression}" "${expected}" "${namespace}"
 }
 
 secret_value() {
@@ -74,15 +76,18 @@ spec:
 EOF
 }
 
+create_task_invocation_captured() {
+  local name="$1"
+  create_task_invocation "${name}" >"${TMP_DIR}/${name}.out" 2>&1
+}
+
 create_task_invocation_retry() {
   local name="$1"
-  for _ in $(seq 1 60); do
-    if create_task_invocation "${name}" >"${TMP_DIR}/${name}.out" 2>&1; then
-      cat "${TMP_DIR}/${name}.out"
-      return 0
-    fi
-    sleep 1
-  done
+  if wait_until 60 1 "Task invocation ${name} creation" \
+    create_task_invocation_captured "${name}"; then
+    cat "${TMP_DIR}/${name}.out"
+    return 0
+  fi
   cat "${TMP_DIR}/${name}.out" >&2
   return 1
 }

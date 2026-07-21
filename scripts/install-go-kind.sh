@@ -15,6 +15,16 @@ STDOUT_FIXTURE_IMAGE="${KONTEXT_STDOUT_FIXTURE_IMAGE:-kontext-stdout-fixture:dev
 
 need docker kind kubectl
 
+controller_pod_replaced() {
+  local previous_uid="$1"
+  CONTROLLER_POD_UID_AFTER="$(
+    kubectl get pods -n kontext-system -l control-plane=controller-manager \
+      -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}'
+  )"
+  [[ -n "${CONTROLLER_POD_UID_AFTER}" &&
+    "${CONTROLLER_POD_UID_AFTER}" != *"${previous_uid}"* ]]
+}
+
 case "${IMAGE_SET}" in
   full|network-policy) ;;
   *)
@@ -94,19 +104,8 @@ kubectl rollout status deployment/kontext-controller-manager -n kontext-system -
 if [[ -n "${CONTROLLER_POD_UID_BEFORE}" &&
   "${DEPLOYED_IMAGE_ID_BEFORE}" != "${OPERATOR_IMAGE_ID}" ]]; then
   CONTROLLER_POD_UID_AFTER=""
-  for _ in $(seq 1 30); do
-    CONTROLLER_POD_UID_AFTER="$(
-      kubectl get pods -n kontext-system -l control-plane=controller-manager \
-        -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}'
-    )"
-    if [[ -n "${CONTROLLER_POD_UID_AFTER}" &&
-      "${CONTROLLER_POD_UID_AFTER}" != *"${CONTROLLER_POD_UID_BEFORE}"* ]]; then
-      break
-    fi
-    sleep 1
-  done
-  if [[ -z "${CONTROLLER_POD_UID_AFTER}" ||
-    "${CONTROLLER_POD_UID_AFTER}" == *"${CONTROLLER_POD_UID_BEFORE}"* ]]; then
+  if ! wait_until 30 1 "replacement controller Pod" \
+    controller_pod_replaced "${CONTROLLER_POD_UID_BEFORE}"; then
     echo "controller image changed but no new ready Pod was observed" >&2
     exit 1
   fi

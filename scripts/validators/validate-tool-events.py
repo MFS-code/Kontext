@@ -4,6 +4,10 @@
 import json
 import sys
 
+EVENT_API_VERSION = "kontext.dev/event/v1alpha1"
+EVENT_FIELDS = {"apiVersion", "timestamp", "type", "data"}
+EVENT_TYPES = {"lifecycle", "output", "usage", "tool", "error"}
+
 
 def main() -> None:
     (
@@ -17,13 +21,62 @@ def main() -> None:
     ) = sys.argv[1:]
     events = []
     with open(path, encoding="utf-8") as stream:
-        for line in stream:
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
+        for line_number, line in enumerate(stream, start=1):
+            stripped = line.strip()
+            if not stripped or not stripped.startswith("{"):
                 continue
+            try:
+                event = json.loads(stripped)
+            except json.JSONDecodeError as error:
+                raise SystemExit(
+                    f"malformed JSON event on line {line_number}: {error.msg}"
+                ) from error
+            if not isinstance(event, dict) or set(event) != EVENT_FIELDS:
+                raise SystemExit(
+                    f"invalid event envelope on line {line_number}: "
+                    f"expected fields {sorted(EVENT_FIELDS)!r}"
+                )
+            if event["apiVersion"] != EVENT_API_VERSION:
+                raise SystemExit(
+                    f"unsupported event apiVersion on line {line_number}: "
+                    f"{event['apiVersion']!r}"
+                )
+            if event["type"] not in EVENT_TYPES:
+                raise SystemExit(
+                    f"unsupported event type on line {line_number}: {event['type']!r}"
+                )
+            if not isinstance(event["timestamp"], str) or not event["timestamp"]:
+                raise SystemExit(
+                    f"event timestamp is required on line {line_number}"
+                )
             if event.get("type") == "tool":
-                events.append(event["data"])
+                data = event["data"]
+                if not isinstance(data, dict):
+                    raise SystemExit(
+                        f"tool event data must be an object on line {line_number}"
+                    )
+                required = {"name", "count", "isError", "truncated"}
+                if not required.issubset(data):
+                    raise SystemExit(
+                        f"tool event data is missing required fields on line {line_number}"
+                    )
+                if not isinstance(data["name"], str) or not data["name"].strip():
+                    raise SystemExit(
+                        f"tool event name is required on line {line_number}"
+                    )
+                if type(data["count"]) is not int or data["count"] < 1:
+                    raise SystemExit(
+                        f"tool event count must be at least 1 on line {line_number}"
+                    )
+                if type(data["isError"]) is not bool:
+                    raise SystemExit(
+                        f"tool event isError must be boolean on line {line_number}"
+                    )
+                if type(data["truncated"]) is not bool:
+                    raise SystemExit(
+                        f"tool event truncated must be boolean on line {line_number}"
+                    )
+                events.append(data)
 
     expected_count = int(count)
     if len(events) != expected_count:
