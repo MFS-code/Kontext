@@ -1,0 +1,9 @@
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: echo-task-docs
+spec:
+  agentRef:
+    name: echo-task
+  parameters:
+    subject: Task admission

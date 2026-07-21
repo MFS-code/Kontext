@@ -57,10 +57,44 @@ kubectl get agentrun review -o jsonpath='{.status.result}{"\n"}'
 a special "reasoning" channel. `.status.result` is the bounded terminal
 summary projected onto the custom resource.
 
+## Reuse a Task template
+
+Create a Task Agent and a sparse invocation:
+
+```yaml
+apiVersion: kontext.dev/v1alpha1
+kind: Agent
+metadata:
+  name: echo-task
+spec:
+  mode: Task
+  goalTemplate: "Summarize ${subject}"
+  provider: echo
+  model: echo-model
+  runtime:
+    image: ghcr.io/mfs-code/kontext-echo:v0.1.0-alpha.1
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: echo-task-release
+spec:
+  agentRef:
+    name: echo-task
+  parameters:
+    subject: this release
+```
+
+Creating the Agent alone starts no Pod. Creating the sparse `AgentRun` causes
+admission to render the goal and copy the Agent's execution fields into one
+immutable, owned snapshot. Inspect the stored form with
+`kubectl get agentrun echo-task-release -o yaml`.
+
 ## Clean up this demo
 
 ```bash
 kubectl delete agentrun review --ignore-not-found=true
+kubectl delete agent echo-task --ignore-not-found=true
 ```
 
 Uninstalling the control plane is covered in [Releases](/docs/releases).

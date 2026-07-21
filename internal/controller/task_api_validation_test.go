@@ -200,9 +200,9 @@ func TestAgentRunParametersAndSpecAreImmutable(t *testing.T) {
 }
 
 func TestAgentRunReconcilerCannotObserveAdmittedSparseSpec(t *testing.T) {
-	// Kubernetes mutating admission runs before final CRD validation. Until the
-	// future Task mutator is installed, this sparse CREATE must fail validation,
-	// leaving no object for the AgentRun controller to reconcile.
+	// This controller-only envtest intentionally installs no webhook. The CRD
+	// must reject a sparse CREATE by itself, leaving no unresolved object for
+	// the AgentRun controller to observe if admission is absent.
 	ctx := context.Background()
 	name := "sparse-run-never-admitted"
 	run := unstructuredAgentRun(name, map[string]any{

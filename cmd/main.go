@@ -110,7 +110,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	webhookServer.Register(webhooktls.DefaultWebhookPath, webhooktls.Handler())
+	webhookServer.Register(
+		webhooktls.DefaultWebhookPath,
+		webhooktls.Handler(mgr.GetAPIReader(), mgr.GetScheme()),
+	)
 	if err := mgr.Add(certificateLifecycle); err != nil {
 		setupLog.Error(err, "unable to add webhook certificate lifecycle")
 		os.Exit(1)

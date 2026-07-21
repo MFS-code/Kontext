@@ -139,28 +139,25 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 
 
 When created from an `Agent`, execution fields are snapshotted so the run does
-not drift if the `Agent` changes later. Service and future Scheduled
-controllers continue to create fully resolved runs. Standalone runs continue
-to provide a complete execution spec directly.
+not drift if the `Agent` changes later. Service and Scheduled controllers
+create fully resolved runs. Standalone runs provide a complete execution spec
+directly.
 
 ### Task invocation and resolution
 
-Creating a Task `Agent` never starts work. Once Task CREATE admission is
-installed, a user explicitly triggers it by submitting a user-named
-`AgentRun` whose `spec.agentRef.name` names that Task Agent. Runs may be
-submitted concurrently; there is no generated-name or single-active-run
-restriction.
+Creating a Task `Agent` never starts work. A user explicitly triggers it by
+submitting a user-named `AgentRun` whose `spec.agentRef.name` names that Task
+Agent. Runs may be submitted concurrently; there is no generated-name or
+single-active-run restriction.
 
 A Task invocation request is sparse: it may contain only `agentRef` and
 optional `parameters`. Kubernetes
 [invokes mutating admission first](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/)
-and then validates the final object against the CRD. Future CREATE admission
-therefore receives the sparse request, resolves it in memory, and returns the
-complete immutable execution snapshot that the API server validates and
-stores. The persisted `AgentRun.spec` always includes `goal`, `model`, and
-`runtime.image`; an unresolved sparse object is never valid stored state.
-Without the Task webhook infrastructure and mutator from #83/#84, the API
-server rejects the sparse request as missing required fields.
+and then validates the final object against the CRD. Task CREATE admission
+receives the sparse request, resolves it in memory, and returns the complete
+immutable execution snapshot that the API server validates and stores. The
+persisted `AgentRun.spec` always includes `goal`, `model`, and `runtime.image`;
+an unresolved sparse object is never valid stored state.
 
 Resolution copies runtime, provider, model, tools, budget, service account,
 Secret reference, knowledge ConfigMap reference, and environment from the
@@ -189,10 +186,11 @@ maps, slices, pointers, and nested values are isolated from later mutation.
 Provider defaults and aliases are normalized while the execution snapshot is
 built, once at this boundary.
 
-The pure resolver in `internal/runfactory` defines these semantics for future
-admission code. This version does not register a webhook, so sparse Task
-CREATE requests remain schema-invalid and cannot reach the AgentRun
-controller.
+The pure resolver in `internal/runfactory` defines these semantics. The CREATE
+webhook fetches the referenced same-namespace Agent through the API reader,
+rejects invalid requests, and returns the resolver's complete object as the
+admission patch. Complete standalone and controller-created runs do not match
+the sparse webhook and remain independent of Task admission.
 
 ### `status`
 
@@ -227,9 +225,8 @@ For Task Agents, `status.lastRunName` is the newest retained owned Task run by
 creation time. `status.runsCreated` is the exact number of currently retained
 owned Task runs, not a lifetime counter. Deleting an owned run can therefore
 decrease `runsCreated` and can move or clear `lastRunName`. These Task meanings
-do not change the existing Service status semantics. Task status
-reconciliation is intentionally deferred; this section defines the contract
-it must implement.
+do not change the existing Service status semantics. `currentRunName` and
+`restarts` stay empty for Task Agents.
 
 ### Contract evolution policy
 

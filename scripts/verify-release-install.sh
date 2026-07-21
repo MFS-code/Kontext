@@ -110,6 +110,11 @@ fi
 echo "==> running registry-backed keyless acceptance"
 KONTEXT_RELEASE_TAG="${CURRENT_VERSION}" "${ROOT_DIR}/scripts/e2e-kind.sh"
 
+echo "==> running registry-backed Task acceptance"
+KONTEXT_RELEASE_TAG="${CURRENT_VERSION}" \
+  KONTEXT_ECHO_IMAGE="$(kontext_image kontext-echo):${CURRENT_VERSION}" \
+  "${ROOT_DIR}/scripts/e2e-kind-task.sh"
+
 echo "==> running registry-backed Scheduled acceptance"
 KONTEXT_ECHO_IMAGE="$(kontext_image kontext-echo):${CURRENT_VERSION}" \
   "${ROOT_DIR}/scripts/e2e-kind-scheduled.sh"
@@ -118,7 +123,7 @@ echo "==> running registry-backed webhook TLS and HA acceptance"
 KONTEXT_ECHO_IMAGE="$(kontext_image kontext-echo):${CURRENT_VERSION}" \
   "${ROOT_DIR}/scripts/e2e-kind-webhook.sh"
 
-echo "==> verifying control-plane removal with CR retention"
+echo "==> verifying Task result and control-plane removal with CR retention"
 cat <<EOF | kubectl apply -f -
 apiVersion: kontext.dev/v1alpha1
 kind: Agent
@@ -128,10 +133,29 @@ metadata:
 spec:
   mode: Task
   goal: Verify custom-resource retention during control-plane removal.
+  provider: echo
   model: echo-model
   runtime:
     image: $(kontext_image kontext-echo):${CURRENT_VERSION}
+---
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: retained-install-invocation
+  namespace: default
+spec:
+  agentRef:
+    name: retained-install-check
 EOF
+wait_for_run_phase retained-install-invocation Succeeded default 180 1
+retained_result="$(
+  kubectl get agentrun retained-install-invocation -n default \
+    -o jsonpath='{.status.result}'
+)"
+if [[ "${retained_result}" != *"Verify custom-resource retention during control-plane removal."* ]]; then
+  echo "release Task invocation did not produce the expected terminal result" >&2
+  exit 1
+fi
 
 kubectl delete clusterrolebinding manager-rolebinding --ignore-not-found=true
 kubectl delete clusterrole manager-role --ignore-not-found=true
@@ -142,11 +166,23 @@ kubectl delete namespace kontext-system --ignore-not-found=true --wait=true
 
 kubectl get crd agents.kontext.dev agentruns.kontext.dev >/dev/null
 kubectl get agent retained-install-check -n default >/dev/null
+kubectl get agentrun retained-install-invocation -n default >/dev/null
 
 echo "==> reinstalling after retained-CRD removal"
 install_release "${CURRENT_MANIFEST}" true
 kubectl get agent retained-install-check -n default >/dev/null
+kubectl get agentrun retained-install-invocation -n default >/dev/null
 kubectl delete agent retained-install-check -n default --wait=true
+for _ in $(seq 1 120); do
+  if ! kubectl get agentrun retained-install-invocation -n default >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if kubectl get agentrun retained-install-invocation -n default >/dev/null 2>&1; then
+  echo "retained Task Agent deletion did not cascade to its invocation" >&2
+  exit 1
+fi
 
 echo "==> verifying complete uninstall"
 kubectl delete -f "${CURRENT_MANIFEST}" --ignore-not-found=true --wait=true

@@ -25,7 +25,7 @@ Kontext adds two custom resources under `kontext.dev/v1alpha1`, deliberately mir
 | Kontext | Kubernetes analogue | Behavior |
 |---|---|---|
 | `Agent` (mode `Service`) | `Deployment` | Always-on. The controller keeps one live `AgentRun` and re-casts it with backoff when it exits. |
-| `Agent` (mode `Task`) | reusable template | Schema available; the controller reports `UnsupportedMode`. Create a standalone `AgentRun` for one-shot work. |
+| `Agent` (mode `Task`) | reusable template | Creating the Agent runs nothing. A sparse, user-named `AgentRun` resolves the template and starts one immutable execution. |
 | `Agent` (mode `Scheduled`) | `CronJob` | Mints one-shot `AgentRun`s from a standard five-field cron schedule with deadlines, concurrency policy, suspension, and bounded history. |
 | `AgentRun` | `Job` / `Pod` | One bounded execution. Owns exactly one Pod, holds the immutable spec snapshot, the final `.status.result`, and usage. |
 
@@ -276,10 +276,9 @@ scripts/                   kind install + e2e
 
 The current public release is `v0.1.0-alpha.1`. Its GitHub release contains
 the digest-pinned install manifest and versioned multi-architecture images.
-`v1alpha1` is alpha on purpose: the API shape is allowed to evolve. `Service`,
-`Scheduled`, and standalone `AgentRun` paths are implemented and covered by
-envtest and kind e2e. `Task` remains a reserved reusable template; create a
-standalone `AgentRun` for one-shot work.
+`v1alpha1` is alpha on purpose: the API shape is allowed to evolve. `Task`,
+`Service`, `Scheduled`, and standalone `AgentRun` paths are implemented and
+covered by envtest and kind e2e.
 
 ## License
 

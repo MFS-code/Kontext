@@ -152,6 +152,26 @@ func ResolveTask(
 	return resolved, nil
 }
 
+// ValidateTask reports whether a Task Agent can resolve invocations. Missing
+// invocation parameters are expected here; template syntax and mode are not.
+func ValidateTask(agent *kontextv1alpha1.Agent) error {
+	if agent == nil {
+		return &ResolutionError{Code: ErrorMissingAgent}
+	}
+	if agent.Spec.Mode != kontextv1alpha1.AgentModeTask {
+		return &ResolutionError{
+			Code:      ErrorWrongMode,
+			AgentName: agent.Name,
+			Mode:      agent.Spec.Mode,
+		}
+	}
+	_, err := resolveGoal(agent.Spec, nil)
+	if resolutionErr, ok := err.(*ResolutionError); ok && resolutionErr.Code == ErrorMissingParameters {
+		return nil
+	}
+	return err
+}
+
 func lockedInvocationFields(spec kontextv1alpha1.AgentRunSpec) []string {
 	fields := make([]string, 0, 10)
 	if spec.Goal != "" {

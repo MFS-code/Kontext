@@ -18,6 +18,9 @@ Kontext maintains and tests the following paths:
   bounded terminal result and measured usage in status.
 - An `Agent` in `Service` mode keeps one active child `AgentRun`. When that run
   ends or its Pod disappears, the controller creates a new run with backoff.
+- An `Agent` in `Task` mode creates no work by itself. A sparse, user-named
+  `AgentRun` resolves through fail-closed admission into an immutable owned
+  snapshot; concurrent invocations are supported.
 - An `Agent` in `Scheduled` mode creates one-shot children from standard
   five-field cron slots. It supports IANA time zones, starting deadlines,
   `Allow`/`Forbid` overlap policy, suspension, and completed-run history limits.
@@ -27,14 +30,6 @@ Kontext maintains and tests the following paths:
 - Release images support `linux/amd64` and `linux/arm64`.
 - The maintained Go reference runtime supports its documented fake, Anthropic,
   OpenAI, and OpenAI-compatible paths and bounded tool loop.
-
-The following mode exists in the alpha API but does not have controller
-behavior:
-
-- `Agent` mode `Task`
-
-The controller reports an `UnsupportedMode` condition for Task. Callers that
-need one-shot work outside a schedule must create an `AgentRun` directly.
 
 Scheduled mode intentionally does not provide catch-up bursts. After downtime,
 only the latest due slot is considered and only while it remains within
@@ -275,8 +270,11 @@ kubectl describe agentrun <name> -n <namespace>
 
 Inspect `status.phase`, `status.message`, `status.conditions`, `status.podName`,
 and the completion timestamps. For an `Agent`, inspect `Ready` and
-`Progressing`. `UnsupportedMode` means the mode is reserved but not
-implemented.
+`Progressing`. For Task admission failures, inspect the API error for the
+stable resolution class (`MissingAgent`, `WrongMode`, `InvalidTemplate`,
+`MissingParameters`, `UnusedParameters`, or `ConflictingFields`). A matching
+sparse request fails closed while the webhook is unavailable; complete
+standalone and controller-created runs do not depend on that webhook.
 
 ### Check the workload Pod
 

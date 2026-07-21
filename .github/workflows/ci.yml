@@ -193,6 +193,9 @@ jobs:
       - name: Run keyless kind end-to-end scenarios
         run: ./scripts/e2e-kind.sh
 
+      - name: Run Task mode kind scenario
+        run: ./scripts/e2e-kind-task.sh
+
       - name: Run Scheduled mode kind scenario
         run: ./scripts/e2e-kind-scheduled.sh
 
