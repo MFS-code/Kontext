@@ -71,6 +71,24 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 	if err := lifecycle.Ensure(ctx); err != nil {
 		t.Fatalf("bootstrap self-managed TLS: %v", err)
 	}
+	var registration admissionv1.MutatingWebhookConfiguration
+	if err := k8sClient.Get(ctx, client.ObjectKey{Name: DefaultWebhookName}, &registration); err != nil {
+		t.Fatalf("get converged registration: %v", err)
+	}
+	resourceVersion := registration.ResourceVersion
+	if err := lifecycle.Ensure(ctx); err != nil {
+		t.Fatalf("repeat self-managed TLS reconciliation: %v", err)
+	}
+	if err := k8sClient.Get(ctx, client.ObjectKey{Name: DefaultWebhookName}, &registration); err != nil {
+		t.Fatalf("get registration after repeated reconciliation: %v", err)
+	}
+	if registration.ResourceVersion != resourceVersion {
+		t.Fatalf(
+			"unchanged registration was written again: resourceVersion %s became %s",
+			resourceVersion,
+			registration.ResourceVersion,
+		)
+	}
 
 	server := webhook.NewServer(webhook.Options{
 		Host: testEnvironment.WebhookInstallOptions.LocalServingHost,
@@ -88,7 +106,6 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 	}()
 	waitForWebhookServer(t, server)
 
-	var registration admissionv1.MutatingWebhookConfiguration
 	if err := k8sClient.Get(ctx, client.ObjectKey{Name: DefaultWebhookName}, &registration); err != nil {
 		t.Fatalf("get registration: %v", err)
 	}

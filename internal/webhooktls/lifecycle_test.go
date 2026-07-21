@@ -4,16 +4,23 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/yaml"
 )
 
 type testClock struct {
@@ -178,6 +185,39 @@ func TestPromotionRetriesWhenRegistrationChanges(t *testing.T) {
 	}
 }
 
+func TestDesiredRegistrationMatchesManagerManifest(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(
+		"..", "..", "config", "manager", "mutating_webhook_configuration.yaml",
+	))
+	if err != nil {
+		t.Fatalf("read webhook registration manifest: %v", err)
+	}
+	var manifest admissionv1.MutatingWebhookConfiguration
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("parse webhook registration manifest: %v", err)
+	}
+
+	// config/default applies this prefix to resource names and service references.
+	const namePrefix = "kontext-"
+	manifest.Name = namePrefix + manifest.Name
+	for index := range manifest.Webhooks {
+		service := manifest.Webhooks[index].ClientConfig.Service
+		if service != nil {
+			service.Name = namePrefix + service.Name
+		}
+	}
+
+	lifecycle := NewLifecycle(nil, nil, DefaultOptions())
+	desired := lifecycle.desiredRegistration(nil)
+	if !reflect.DeepEqual(manifest, *desired) {
+		t.Fatalf(
+			"manager manifest and runtime webhook registration differ:\nmanifest: %#v\ndesired:  %#v",
+			manifest,
+			*desired,
+		)
+	}
+}
+
 func TestServingRenewalPreservesStagedCARotation(t *testing.T) {
 	ctx := context.Background()
 	clock := &testClock{now: time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)}
@@ -269,7 +309,48 @@ func newFakeClient(t *testing.T, objects ...client.Object) client.Client {
 	if err := admissionv1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add admission scheme: %v", err)
 	}
-	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+	var applyMu sync.Mutex
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(objects...).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(
+				ctx context.Context,
+				k8sClient client.WithWatch,
+				obj client.Object,
+				patch client.Patch,
+				_ ...client.PatchOption,
+			) error {
+				if patch.Type() != types.ApplyPatchType {
+					return k8sClient.Patch(ctx, obj, patch)
+				}
+				desired, ok := obj.(*admissionv1.MutatingWebhookConfiguration)
+				if !ok {
+					t.Fatalf("unexpected apply object type %T", obj)
+				}
+
+				applyMu.Lock()
+				defer applyMu.Unlock()
+				var existing admissionv1.MutatingWebhookConfiguration
+				err := k8sClient.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
+				if apierrors.IsNotFound(err) {
+					return k8sClient.Create(ctx, desired.DeepCopy())
+				}
+				if err != nil {
+					return err
+				}
+				existing.TypeMeta = desired.TypeMeta
+				if existing.Labels == nil {
+					existing.Labels = map[string]string{}
+				}
+				for key, value := range desired.Labels {
+					existing.Labels[key] = value
+				}
+				existing.Webhooks = desired.DeepCopy().Webhooks
+				return k8sClient.Update(ctx, &existing)
+			},
+		}).
+		Build()
 }
 
 func getSecret(t *testing.T, k8sClient client.Client) *corev1.Secret {
