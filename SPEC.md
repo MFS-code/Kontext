@@ -75,8 +75,8 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | -------------------- | ----------- | ------------------------------------ |
 | `conditions`         | []Condition | `Ready`, `Progressing`.              |
 | `currentRunName`     | string      | `Service`: the live run.             |
-| `lastRunName`        | string      | `Task`: most recent run. `Scheduled`: newest retained owned run; empty when all children are pruned. |
-| `runsCreated`        | int         | Mode-specific observed run count.   |
+| `lastRunName`        | string      | `Task`: newest retained owned run by creation time. `Scheduled`: newest retained owned run by slot; empty when no child is retained. |
+| `runsCreated`        | int         | `Task`: current retained owned-run count. `Scheduled`: monotonic creation sequence. `Service`: monotonic run suffix. |
 | `restarts`           | int         | `Service`: re-cast count.            |
 | `lastScheduleTime`   | timestamp   | `Scheduled`: latest observed slot that minted a run; retained after child pruning. |
 | `nextScheduleTime`   | timestamp   | `Scheduled`: next slot the controller will evaluate. |
@@ -108,6 +108,29 @@ history is pruned independently by outcome, active runs are never pruned, and
 Agent ownership gives all children normal Kubernetes deletion cascading.
 `currentRunName`, `restarts`, and Service backoff remain Service-only.
 
+Task and Scheduled status intentionally use different counting semantics. For
+Task, deleting an owned run immediately decreases `runsCreated`; deleting the
+newest run moves `lastRunName` to the next newest retained child, and deleting
+all owned runs clears it. Creation timestamp determines Task recency, with
+lexically greater run name as the deterministic tie-breaker. For Scheduled,
+each new run receives an increasing sequence. `runsCreated` never decreases
+when history pruning or a user deletes a child. `lastRunName` remains a live
+reference and can move or clear as retained history changes.
+
+### Agent condition reasons
+
+The controller publishes `Ready` and `Progressing` conditions with these
+mode-specific reasons:
+
+- Task: `TemplateReady` and `Idle` for a valid template;
+  `InvalidTemplate` when invocations are blocked by template validation.
+- Scheduled: `ScheduleInitialized`, `ScheduleUpdated`,
+  `WaitingForSchedule`, `RunCreated`, `Suspended`, `MissedDeadline`,
+  `OverlapSkipped`, and `InvalidSchedule`.
+- Service: `Recasting`, `RunActive`, and `MissingGoal`.
+- Unknown stored mode values: `InvalidMode`. The CRD enum rejects unknown
+  values on normal writes.
+
 
 ---
 
@@ -120,7 +143,7 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 
 | Field                | Type     | Req | Notes                                            |
 | -------------------- | -------- | --- | ------------------------------------------------ |
-| `agentRef.name`      | string   | no  | Owning `Agent`. With Task CREATE admission installed, a user-created reference is an explicit execution trigger. Omitted = standalone ad-hoc run. |
+| `agentRef.name`      | string   | no  | Owning `Agent`. Task CREATE admission treats a sparse user-created reference as an explicit execution trigger. Omitted = standalone ad-hoc run. |
 | `parameters`         | map[string]string | no | Immutable Task invocation parameters retained with the resolved snapshot. Requires `agentRef`. |
 | `goal`               | string   | yes | Concrete, fully-resolved goal.                   |
 | `provider`           | string   | no  | Resolved from Agent at creation.                 |
@@ -191,6 +214,26 @@ webhook fetches the referenced same-namespace Agent through the API reader,
 rejects invalid requests, and returns the resolver's complete object as the
 admission patch. Complete standalone and controller-created runs do not match
 the sparse webhook and remain independent of Task admission.
+
+The installed `MutatingWebhookConfiguration` matches namespaced
+`kontext.dev/v1alpha1` `AgentRun` CREATE requests only when `agentRef` is
+present and at least one required execution field is absent. It uses
+`failurePolicy: Fail`, a five-second timeout, `matchPolicy: Equivalent`,
+`sideEffects: None`, and no reinvocation. Matching sparse requests therefore
+fail closed when admission is unavailable; complete requests bypass the
+webhook.
+
+Every rejected Task resolution includes one stable class:
+
+- `MissingAgent`: the same-namespace referenced Agent does not exist.
+- `WrongMode`: the reference names a non-Task Agent.
+- `InvalidTemplate`: the Task definition has invalid goal/template shape or
+  placeholder syntax.
+- `MissingParameters`: required placeholder names have no supplied value.
+- `UnusedParameters`: supplied names are unused, including any parameter map
+  on a static goal.
+- `ConflictingFields`: the invocation supplies one or more locked execution
+  fields.
 
 ### `status`
 

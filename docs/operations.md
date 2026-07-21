@@ -96,7 +96,9 @@ keys live only in the namespaced `webhook-server-cert` Secret and controller
 memory; release YAML contains no key material. Every replica loads the shared
 Secret, verifies the Service DNS SANs, repairs the admission CA bundle, renews
 the serving certificate before expiry, and reloads it without a process
-restart.
+restart. TLS reconciliation runs on every replica rather than behind leader
+election. Conflicting Secret or registration updates retry until replicas
+converge.
 
 CA replacement uses a staged overlap. The admission registration trusts both
 the new and previous CA before any replica promotes the new serving
@@ -106,9 +108,13 @@ Secret, so replicas converge instead of replacing one another's keys.
 Readiness requires both a serving webhook listener and byte-for-byte agreement
 between the loaded CA bundle and the MutatingWebhookConfiguration. Liveness
 does not depend on admission trust, allowing a running replica to repair it.
-The webhook matches only sparse referenced AgentRun CREATE requests. Complete
-standalone and controller-created runs bypass it. Until Task mutation ships,
-the plumbing handler returns no patch and the CRD rejects sparse requests.
+The registration uses `failurePolicy: Fail`, `matchPolicy: Equivalent`,
+`sideEffects: None`, no reinvocation, and a five-second timeout. Its
+`matchConditions` expression selects namespaced `kontext.dev/v1alpha1`
+`AgentRun` CREATE requests that have `agentRef` and lack at least one required
+execution field. The webhook resolves those sparse Task invocations into
+complete immutable snapshots. Complete standalone and controller-created runs
+bypass it.
 
 ### Workload identity
 
@@ -157,6 +163,11 @@ Kontext does not create a default NetworkPolicy for workloads. Runtime Pods
 have whatever ingress and egress the cluster, namespace, and CNI allow. On many
 clusters that means unrestricted egress.
 
+The release does install `controller-manager-webhook`, an ingress-only policy
+in `kontext-system`. It selects controller Pods and allows only webhook port
+9443 and health port 8081. It does not select `AgentRun` Pods, restrict
+controller egress, or provide workload isolation.
+
 Tool declarations do not restrict network traffic. Apply an enforced
 NetworkPolicy when a runtime must reach only DNS, a provider endpoint, the
 Kubernetes API, or a named in-cluster service. kindnet does not enforce
@@ -201,9 +212,13 @@ repeating one-shot work is safe.
 
 - An `AgentRun` owns its Pod. Deleting the run removes the Pod through
   Kubernetes garbage collection.
-- A Service `Agent` owns its child runs. Deleting the Agent removes those runs
-  and their Pods.
-- Completed run history remains until a user or another controller deletes it.
+- Every `Agent` owns the runs created from it. Deleting the Agent removes
+  those runs and their Pods.
+- Task history remains until a user or another controller deletes it.
+  `runsCreated` counts retained owned runs and can decrease.
+- Scheduled history is pruned by its separate success and failure limits.
+  `runsCreated` remains monotonic even when children are pruned or deleted.
+- Service run history remains until a user or another controller deletes it.
 - Removing only the controller retains the CRDs and custom resources in other
   namespaces.
 - Deleting either CRD deletes every resource of that kind across the cluster.
@@ -270,11 +285,25 @@ kubectl describe agentrun <name> -n <namespace>
 
 Inspect `status.phase`, `status.message`, `status.conditions`, `status.podName`,
 and the completion timestamps. For an `Agent`, inspect `Ready` and
-`Progressing`. For Task admission failures, inspect the API error for the
-stable resolution class (`MissingAgent`, `WrongMode`, `InvalidTemplate`,
-`MissingParameters`, `UnusedParameters`, or `ConflictingFields`). A matching
-sparse request fails closed while the webhook is unavailable; complete
-standalone and controller-created runs do not depend on that webhook.
+`Progressing`.
+
+Agent condition reasons are mode-specific:
+
+- Task uses `TemplateReady`/`Idle`, or `InvalidTemplate` when invocation is
+  blocked.
+- Scheduled uses `ScheduleInitialized`, `ScheduleUpdated`,
+  `WaitingForSchedule`, `RunCreated`, `Suspended`, `MissedDeadline`,
+  `OverlapSkipped`, or `InvalidSchedule`.
+- Service uses `Recasting`, `RunActive`, or `MissingGoal`.
+- `InvalidMode` means an unknown mode reached reconciliation. Normal API
+  writes cannot create one because the CRD enum accepts only Task, Service,
+  and Scheduled.
+
+For Task admission failures, inspect the API error for the stable resolution
+class (`MissingAgent`, `WrongMode`, `InvalidTemplate`, `MissingParameters`,
+`UnusedParameters`, or `ConflictingFields`). A matching sparse request fails
+closed while the webhook is unavailable; complete standalone and
+controller-created runs do not depend on that webhook.
 
 ### Check the workload Pod
 

@@ -59,6 +59,20 @@ truncation metadata. Kubernetes RBAC, ServiceAccounts, mounts, container
 security, and enforced NetworkPolicy remain authoritative even when the
 runtime allows a tool.
 
+## Task and Scheduled workloads
+
+Task invocations and Scheduled slots both produce one-shot `AgentRun`s. Their
+images should perform the goal, emit any terminal result, and exit. Kontext
+sets the Pod restart policy to `Never`; it does not restart a failed process
+inside the same run.
+
+A Task `Agent` is a reusable template. Admission resolves each sparse,
+user-named invocation into a complete immutable run before storage. A
+Scheduled `Agent` builds the same complete one-shot snapshot in the
+controller, using a slot-derived run name. Runtime images receive a concrete
+`KONTEXT_GOAL` in both cases and do not need to know which path created the
+run.
+
 ## Service workloads
 
 A Service image must stay alive. Omit `budget.wallclock` when the service has

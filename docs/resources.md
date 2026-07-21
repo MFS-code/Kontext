@@ -44,6 +44,9 @@ progress; `currentRunName`, `restarts`, and backoff apply only to Service mode.
 `status.lastRunName` points to the newest retained scheduled child and is
 cleared when history limits prune every child. `lastScheduleTime` remains the
 historical latest observed slot even after that child is pruned.
+`status.runsCreated` is a monotonic Scheduled creation sequence recovered from
+retained child metadata. Pruning or manually deleting children never decreases
+it.
 
 ### Task invocation requests
 
@@ -79,7 +82,9 @@ matching sparse request, creation fails closed with an actionable error.
 Task runs are user-named and can execute concurrently. For Task status,
 `lastRunName` means the newest retained owned run by creation time, while
 `runsCreated` is the number of currently retained owned runs. It is not a
-lifetime counter.
+lifetime counter. Deleting the newest run moves `lastRunName` to the next
+newest retained run; deleting every run clears it and resets `runsCreated` to
+zero. Lexically greater run name breaks equal creation-time ties.
 
 ## Status and logs
 

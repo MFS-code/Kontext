@@ -10,8 +10,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/emit-llm-files.mjs",
     "preview": "vite preview",
+    "pretypecheck": "npm run sync",
     "typecheck": "tsc -b --noEmit",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "verify:build": "node scripts/verify-build.mjs"
   },
   "dependencies": {
     "highlight.js": "^11.11.1",

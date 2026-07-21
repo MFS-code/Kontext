@@ -65,6 +65,20 @@ references use the immutable digests recorded in `image-digests.json`, while
 `app.kubernetes.io/version` and `kontext.dev/release` retain the human-readable
 release tag.
 
+The registration matches only sparse referenced `AgentRun` CREATE requests.
+It fails matching requests closed, uses a five-second timeout, and leaves
+complete standalone and controller-created runs outside the webhook. Every
+controller replica reconciles the shared TLS Secret and registration, reloads
+renewed serving certificates, and must agree with the registered CA bundle
+before becoming ready.
+
+Webhook permissions are split from controller reconciliation and leader
+election. A namespaced Role manages only the TLS Secret. A separate
+ClusterRole manages only the named `MutatingWebhookConfiguration`, except that
+Kubernetes RBAC cannot name-scope the create verb. The release NetworkPolicy
+is ingress-only and selects controller Pods for webhook port 9443 and health
+port 8081. It does not restrict `AgentRun` workloads or controller egress.
+
 Given a downloaded digest manifest, the release artifact is reproducible from
 the tagged source:
 

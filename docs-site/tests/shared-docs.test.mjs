@@ -92,6 +92,18 @@ test("page metadata covers every navigation page with stable paths", () => {
       rawPath: "/raw/docs/resources.md",
       githubPath: "docs/resources.md",
     },
+    "docs/task-workload": {
+      srcFile: "docs/task-workload.md",
+      routePath: "/docs/task-workload",
+      rawPath: "/raw/docs/task-workload.md",
+      githubPath: "docs/task-workload.md",
+    },
+    "docs/scheduled-workload": {
+      srcFile: "docs/scheduled-workload.md",
+      routePath: "/docs/scheduled-workload",
+      rawPath: "/raw/docs/scheduled-workload.md",
+      githubPath: "docs/scheduled-workload.md",
+    },
     "docs/service-workload": {
       srcFile: "docs/service-workload.md",
       routePath: "/docs/service-workload",
