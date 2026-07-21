@@ -28,7 +28,7 @@ func TestRunnerCompletesFakeConversation(t *testing.T) {
 		result.Envelope.Execution.Model != "vendor/model@2026:beta" {
 		t.Fatalf("model identifier changed: %#v", result.Envelope.Execution)
 	}
-	if got := resultv1alpha1.ProjectLegacyResult(result.Envelope.Output); got !=
+	if got := resultv1alpha1.PlainText(result.Envelope.Output); got !=
 		"Fake provider completed goal: explain the contract" {
 		t.Fatalf("unexpected output %q", got)
 	}

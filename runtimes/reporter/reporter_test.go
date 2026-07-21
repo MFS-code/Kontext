@@ -21,7 +21,7 @@ func TestEnvelopeFromLastLine(t *testing.T) {
 	if success.Outcome != resultv1alpha1.OutcomeSucceeded {
 		t.Fatalf("expected success, got %s", success.Outcome)
 	}
-	if got := resultv1alpha1.ProjectLegacyResult(success.Output); got != "final answer" {
+	if got := resultv1alpha1.PlainText(success.Output); got != "final answer" {
 		t.Fatalf("unexpected output %q", got)
 	}
 
@@ -36,7 +36,7 @@ func TestEnvelopeFromLastLine(t *testing.T) {
 	if failure.Error == nil || failure.Error.Code != "agent_process_exit" {
 		t.Fatalf("unexpected process error %#v", failure.Error)
 	}
-	if got := resultv1alpha1.ProjectLegacyResult(failure.Output); got != "partial answer" {
+	if got := resultv1alpha1.PlainText(failure.Output); got != "partial answer" {
 		t.Fatalf("unexpected partial output %q", got)
 	}
 
@@ -170,7 +170,7 @@ func TestRunReporterPreservesLogsAndChildExit(t *testing.T) {
 	if envelope.Error == nil || envelope.Error.Code != "agent_process_exit" {
 		t.Fatalf("unexpected error %#v", envelope.Error)
 	}
-	if got := resultv1alpha1.ProjectLegacyResult(envelope.Output); got != "final answer" {
+	if got := resultv1alpha1.PlainText(envelope.Output); got != "final answer" {
 		t.Fatalf("unexpected final output %q", got)
 	}
 }

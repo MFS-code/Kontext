@@ -25,8 +25,8 @@ func TestParseVersionedEnvelopeWithArbitraryJSONOutput(t *testing.T) {
 	if legacy {
 		t.Fatalf("expected versioned envelope, got %#v", parsed)
 	}
-	if got := resultv1alpha1.ProjectLegacyResult(parsed.Output); got != `{"answer":42,"items":[true,null]}` {
-		t.Fatalf("unexpected legacy projection %q", got)
+	if got := resultv1alpha1.PlainText(parsed.Output); got != `{"answer":42,"items":[true,null]}` {
+		t.Fatalf("unexpected plain-text projection %q", got)
 	}
 	if parsed.Usage == nil || parsed.Usage.InputTokens == nil || *parsed.Usage.InputTokens != 0 {
 		t.Fatalf("expected measured zero input tokens, got %#v", parsed.Usage)
@@ -50,7 +50,7 @@ func TestParseLegacyPayload(t *testing.T) {
 	if !legacy || parsed.APIVersion != resultv1alpha1.APIVersion {
 		t.Fatalf("expected legacy payload, got %#v", parsed)
 	}
-	if got := resultv1alpha1.ProjectLegacyResult(parsed.Output); got != "done" {
+	if got := resultv1alpha1.PlainText(parsed.Output); got != "done" {
 		t.Fatalf("expected done, got %q", got)
 	}
 	if parsed.Usage == nil || parsed.Usage.TotalTokens == nil || *parsed.Usage.TotalTokens != 0 {
@@ -125,7 +125,7 @@ func TestParseClassifiesLegacyPayloadsByKnownKeys(t *testing.T) {
 			if !legacy {
 				t.Fatal("expected legacy wire format")
 			}
-			if got := resultv1alpha1.ProjectLegacyResult(envelope.Output); got != test.wantResult {
+			if got := resultv1alpha1.PlainText(envelope.Output); got != test.wantResult {
 				t.Fatalf("expected legacy result %q, got %q", test.wantResult, got)
 			}
 		})
@@ -175,7 +175,7 @@ func TestParsePlainText(t *testing.T) {
 	if parsed.Outcome != resultv1alpha1.OutcomeSucceeded {
 		t.Fatalf("expected explicit successful outcome, got %q", parsed.Outcome)
 	}
-	if got := resultv1alpha1.ProjectLegacyResult(parsed.Output); got != "plain answer" {
+	if got := resultv1alpha1.PlainText(parsed.Output); got != "plain answer" {
 		t.Fatalf("expected plain answer, got %q", got)
 	}
 }

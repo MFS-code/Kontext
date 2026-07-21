@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// LegacyPayload is the pre-versioned Kontext termination contract.
-type LegacyPayload struct {
+type legacyPayload struct {
 	Result      string   `json:"result"`
 	TokensUsed  *int64   `json:"tokensUsed,omitempty"`
 	DollarsUsed *float64 `json:"dollarsUsed,omitempty"`
@@ -52,7 +51,7 @@ func Parse(message string) (Envelope, bool, error) {
 		return Envelope{}, false, errors.New("decode termination payload: unrecognized JSON object")
 	}
 
-	var legacy LegacyPayload
+	var legacy legacyPayload
 	if err := json.Unmarshal([]byte(message), &legacy); err != nil {
 		return Envelope{}, false, fmt.Errorf("decode legacy termination payload: %w", err)
 	}
@@ -89,9 +88,9 @@ func ParseVersioned(message string) (Envelope, error) {
 	return envelope, nil
 }
 
-// ProjectLegacyResult deterministically projects structured output into the
-// backward-compatible AgentRun status.result string.
-func ProjectLegacyResult(output *Output) string {
+// PlainText deterministically projects structured output into the plain-text
+// form used for AgentRun status.result.
+func PlainText(output *Output) string {
 	if output == nil || len(bytes.TrimSpace(output.Value)) == 0 {
 		return ""
 	}
@@ -127,7 +126,7 @@ func outputFromText(value string) *Output {
 	}
 }
 
-func usageFromLegacy(payload LegacyPayload) *Usage {
+func usageFromLegacy(payload legacyPayload) *Usage {
 	if payload.TokensUsed == nil && payload.DollarsUsed == nil {
 		return nil
 	}
