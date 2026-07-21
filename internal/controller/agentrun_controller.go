@@ -16,6 +16,7 @@ import (
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/conditions"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
+	"github.com/MFS-code/Kontext/internal/scheduler"
 	"github.com/MFS-code/Kontext/internal/status"
 )
 
@@ -25,6 +26,7 @@ type AgentRunReconciler struct {
 	APIReader     client.Reader
 	Scheme        *runtime.Scheme
 	ReporterImage string
+	Clock         scheduler.Clock
 }
 
 // +kubebuilder:rbac:groups=kontext.dev,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
@@ -38,7 +40,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if status.IsTerminalPhase(run.Status.Phase) {
+	if run.Status.Phase.IsTerminal() {
 		if run.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
 			return ctrl.Result{}, r.deleteBudgetExceededPod(ctx, &run)
 		}
@@ -105,7 +107,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	wallclockResult, err := r.enforceWallclock(ctx, &run, pod, wallclockLimit)
-	if err != nil || status.IsTerminalPhase(run.Status.Phase) {
+	if err != nil || run.Status.Phase.IsTerminal() {
 		return wallclockResult, err
 	}
 
@@ -232,11 +234,11 @@ func (r *AgentRunReconciler) syncPodObservation(ctx context.Context, run *kontex
 		if next.StartTime == nil && observation.Phase == kontextv1alpha1.AgentRunPhaseRunning {
 			next.StartTime = observation.StartedAt
 			if next.StartTime == nil {
-				next.StartTime = nowPtr()
+				next.StartTime = r.nowPtr()
 			}
 		}
-		if status.IsTerminalPhase(observation.Phase) && next.CompletionTime == nil {
-			next.CompletionTime = nowPtr()
+		if observation.Phase.IsTerminal() && next.CompletionTime == nil {
+			next.CompletionTime = r.nowPtr()
 		}
 		setStatusConditions(
 			&next.Conditions,
@@ -317,7 +319,7 @@ func (r *AgentRunReconciler) enforceWallclock(
 		return ctrl.Result{}, nil
 	}
 
-	elapsed := time.Since(startedAt.Time)
+	elapsed := r.now().Sub(startedAt.Time)
 	if elapsed <= *limit {
 		remaining := *limit - elapsed
 		return ctrl.Result{RequeueAfter: remaining + time.Second}, nil
@@ -356,9 +358,9 @@ func (r *AgentRunReconciler) transitionRun(
 		if update != nil {
 			update(next)
 		}
-		if status.IsTerminalPhase(phase) {
+		if phase.IsTerminal() {
 			if next.CompletionTime == nil {
-				next.CompletionTime = nowPtr()
+				next.CompletionTime = r.nowPtr()
 			}
 		} else {
 			next.CompletionTime = nil
@@ -378,6 +380,18 @@ func (r *AgentRunReconciler) patchRunStatus(ctx context.Context, run *kontextv1a
 		return err
 	}
 	return nil
+}
+
+func (r *AgentRunReconciler) now() time.Time {
+	if r.Clock != nil {
+		return r.Clock.Now()
+	}
+	return time.Now()
+}
+
+func (r *AgentRunReconciler) nowPtr() *metav1.Time {
+	now := metav1.NewTime(r.now())
+	return &now
 }
 
 // SetupWithManager sets up the controller with the Manager.

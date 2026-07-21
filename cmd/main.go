@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	"github.com/MFS-code/Kontext/internal/admission"
 	"github.com/MFS-code/Kontext/internal/controller"
 	"github.com/MFS-code/Kontext/internal/webhooktls"
 )
@@ -112,8 +113,8 @@ func main() {
 	}
 
 	webhookServer.Register(
-		webhooktls.DefaultWebhookPath,
-		webhooktls.Handler(mgr.GetAPIReader(), mgr.GetScheme()),
+		admission.DefaultWebhookPath,
+		admission.Handler(mgr.GetAPIReader(), mgr.GetScheme()),
 	)
 	if err := mgr.Add(certificateLifecycle); err != nil {
 		setupLog.Error(err, "unable to add webhook certificate lifecycle")

@@ -93,6 +93,16 @@ type AgentRunStatus struct {
 // +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;BudgetExceeded
 type AgentRunPhase string
 
+// IsTerminal reports whether the phase represents a finished AgentRun.
+func (p AgentRunPhase) IsTerminal() bool {
+	switch p {
+	case AgentRunPhaseSucceeded, AgentRunPhaseFailed, AgentRunPhaseBudgetExceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=ar

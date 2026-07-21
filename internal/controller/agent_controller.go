@@ -18,7 +18,6 @@ import (
 	"github.com/MFS-code/Kontext/internal/conditions"
 	"github.com/MFS-code/Kontext/internal/runfactory"
 	"github.com/MFS-code/Kontext/internal/scheduler"
-	"github.com/MFS-code/Kontext/internal/status"
 )
 
 const (
@@ -140,7 +139,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 		})
 	}
 
-	if runs.current != nil && !status.IsTerminalPhase(runs.current.Status.Phase) {
+	if runs.current != nil && !runs.current.Status.Phase.IsTerminal() {
 		return ctrl.Result{}, r.setAgentStatus(ctx, agent, runs.status(agent.Generation), metav1.Condition{
 			Type:    conditions.Ready,
 			Status:  metav1.ConditionTrue,
@@ -154,10 +153,10 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *kontextv1
 		})
 	}
 
-	if runs.current != nil && status.IsTerminalPhase(runs.current.Status.Phase) &&
+	if runs.current != nil && runs.current.Status.Phase.IsTerminal() &&
 		runs.current.Status.CompletionTime != nil {
 		delay := r.backoffDelay(*agent, runs.maxSuffix-1)
-		if since := time.Since(runs.current.Status.CompletionTime.Time); since < delay {
+		if since := r.now().Sub(runs.current.Status.CompletionTime.Time); since < delay {
 			logger.Info("waiting before service recast", "delay", delay-since, "run", runs.current.Name)
 			if err := r.setAgentStatus(ctx, agent, runs.status(agent.Generation)); err != nil {
 				return ctrl.Result{}, err
@@ -214,19 +213,11 @@ func (r *AgentReconciler) handleServiceRunAlreadyExists(
 	agent *kontextv1alpha1.Agent,
 	runName string,
 ) (ctrl.Result, error) {
-	if r.APIReader == nil {
-		return ctrl.Result{}, fmt.Errorf("cannot verify existing AgentRun %s/%s: APIReader is not configured", agent.Namespace, runName)
-	}
-
-	var existing kontextv1alpha1.AgentRun
-	if err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: agent.Namespace, Name: runName}, &existing); err != nil {
-		if apierrors.IsNotFound(err) {
-			return ctrl.Result{Requeue: true}, nil
-		}
+	existing, accepted, err := r.verifyExistingOwnedRun(ctx, agent, runName, nil)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
-
-	if metav1.IsControlledBy(&existing, agent) {
+	if existing == nil || accepted {
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -237,6 +228,39 @@ func (r *AgentReconciler) handleServiceRunAlreadyExists(
 		agent.Namespace,
 		agent.Name,
 	)
+}
+
+func (r *AgentReconciler) verifyExistingOwnedRun(
+	ctx context.Context,
+	agent *kontextv1alpha1.Agent,
+	runName string,
+	accept func(*kontextv1alpha1.AgentRun) bool,
+) (*kontextv1alpha1.AgentRun, bool, error) {
+	if r.APIReader == nil {
+		return nil, false, fmt.Errorf(
+			"cannot verify existing AgentRun %s/%s: APIReader is not configured",
+			agent.Namespace,
+			runName,
+		)
+	}
+
+	var existing kontextv1alpha1.AgentRun
+	if err := r.APIReader.Get(
+		ctx,
+		client.ObjectKey{Namespace: agent.Namespace, Name: runName},
+		&existing,
+	); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	accepted := metav1.IsControlledBy(&existing, agent)
+	if accepted && accept != nil {
+		accepted = accept(&existing)
+	}
+	return &existing, accepted, nil
 }
 
 type observedServiceRuns struct {

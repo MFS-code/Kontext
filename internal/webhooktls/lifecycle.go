@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -18,6 +17,8 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/MFS-code/Kontext/internal/admission"
 )
 
 const (
@@ -25,17 +26,9 @@ const (
 	DefaultSecretName        = "webhook-server-cert"
 	DefaultWebhookName       = "kontext-task-agentrun-mutator.kontext.dev"
 	DefaultServiceName       = "kontext-webhook-service"
-	DefaultWebhookPath       = "/mutate-kontext-dev-v1alpha1-agentrun"
 	DefaultReconcileInterval = 30 * time.Second
 	registrationFieldOwner   = "kontext-webhooktls"
-
-	nextCAKey     = "next-ca.crt"
-	nextCAKeyPEM  = "next-ca.key"
-	nextTLSKey    = "next-tls.crt"
-	nextTLSKeyPEM = "next-tls.key"
 )
-
-var errRegistrationChanged = errors.New("webhook registration changed during CA promotion")
 
 type Clock func() time.Time
 
@@ -60,7 +53,7 @@ func DefaultOptions() Options {
 		SecretName:         DefaultSecretName,
 		WebhookName:        DefaultWebhookName,
 		ServiceName:        DefaultServiceName,
-		WebhookPath:        DefaultWebhookPath,
+		WebhookPath:        admission.DefaultWebhookPath,
 		ReconcileInterval:  DefaultReconcileInterval,
 		CAValidity:         10 * 365 * 24 * time.Hour,
 		ServingValidity:    365 * 24 * time.Hour,
@@ -117,31 +110,6 @@ func (l *Lifecycle) Ensure(ctx context.Context) error {
 			return fmt.Errorf("validate reconciled webhook Secret: %w", err)
 		}
 
-		next := nextBundleFromSecret(secret)
-		if len(next.CACert) > 0 {
-			nextParsed, err := parse(next, l.dnsNames(), l.opts.Clock())
-			if err != nil {
-				if err := l.clearNext(ctx, secret); err != nil {
-					if apierrors.IsConflict(err) {
-						continue
-					}
-					return err
-				}
-				continue
-			}
-			if err := l.reconcileRegistration(ctx, next.CACert); err != nil {
-				return err
-			}
-			if err := l.promoteNext(ctx, secret, next); err != nil {
-				if apierrors.IsConflict(err) || errors.Is(err, errRegistrationChanged) {
-					continue
-				}
-				return err
-			}
-			l.store.load(nextParsed)
-			return nil
-		}
-
 		if parsed.ca.NotAfter.Sub(l.opts.Clock()) <= l.opts.CARenewBefore {
 			next, err := Generate(CertificateOptions{
 				DNSNames:         l.dnsNames(),
@@ -154,13 +122,26 @@ func (l *Lifecycle) Ensure(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if err := l.stageNext(ctx, secret, next); err != nil {
+			nextParsed, err := parse(next, l.dnsNames(), l.opts.Clock())
+			if err != nil {
+				return fmt.Errorf("validate rotated webhook certificates: %w", err)
+			}
+			if err := l.publishRotationTrust(ctx, next.CACert); err != nil {
+				return err
+			}
+			updated := secret.DeepCopy()
+			updated.Data = secretData(next)
+			if err := l.client.Update(ctx, updated); err != nil {
 				if apierrors.IsConflict(err) {
 					continue
 				}
 				return err
 			}
-			continue
+			if err := l.reconcileRegistration(ctx, next.CACert); err != nil {
+				return err
+			}
+			l.store.load(nextParsed)
+			return nil
 		}
 
 		if err := l.reconcileRegistration(ctx, current.CACert); err != nil {
@@ -291,38 +272,41 @@ func (l *Lifecycle) registeredCABundle(ctx context.Context) ([]byte, error) {
 	return append([]byte(nil), registration.Webhooks[0].ClientConfig.CABundle...), nil
 }
 
-func (l *Lifecycle) stageNext(ctx context.Context, secret *corev1.Secret, next Bundle) error {
-	updated := secret.DeepCopy()
-	if updated.Data == nil {
-		updated.Data = map[string][]byte{}
-	}
-	updated.Data[nextCAKey] = next.CACert
-	updated.Data[nextCAKeyPEM] = next.CAKey
-	updated.Data[nextTLSKey] = next.TLSCert
-	updated.Data[nextTLSKeyPEM] = next.TLSKey
-	return l.client.Update(ctx, updated)
-}
+func (l *Lifecycle) publishRotationTrust(ctx context.Context, nextCABundle []byte) error {
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		var registration admissionv1.MutatingWebhookConfiguration
+		if err := l.client.Get(
+			ctx,
+			client.ObjectKey{Name: l.opts.WebhookName},
+			&registration,
+		); err != nil {
+			return err
+		}
+		if len(registration.Webhooks) != 1 {
+			return fmt.Errorf(
+				"publish webhook CA rotation trust: registration %s has %d webhooks",
+				l.opts.WebhookName,
+				len(registration.Webhooks),
+			)
+		}
 
-func (l *Lifecycle) promoteNext(ctx context.Context, secret *corev1.Secret, next Bundle) error {
-	var registration admissionv1.MutatingWebhookConfiguration
-	if err := l.client.Get(ctx, client.ObjectKey{Name: l.opts.WebhookName}, &registration); err != nil {
-		return fmt.Errorf("verify webhook registration before CA promotion: %w", err)
-	}
-	if len(registration.Webhooks) != 1 || !bytes.Equal(registration.Webhooks[0].ClientConfig.CABundle, next.CACert) {
-		return errRegistrationChanged
-	}
-	updated := secret.DeepCopy()
-	updated.Data = secretData(next)
-	return l.client.Update(ctx, updated)
-}
+		combined := append([]byte(nil), nextCABundle...)
+		current := registration.Webhooks[0].ClientConfig.CABundle
+		if len(current) > 0 && !bytes.Contains(combined, current) {
+			combined = append(combined, current...)
+		}
+		if bytes.Equal(current, combined) {
+			return nil
+		}
 
-func (l *Lifecycle) clearNext(ctx context.Context, secret *corev1.Secret) error {
-	updated := secret.DeepCopy()
-	delete(updated.Data, nextCAKey)
-	delete(updated.Data, nextCAKeyPEM)
-	delete(updated.Data, nextTLSKey)
-	delete(updated.Data, nextTLSKeyPEM)
-	return l.client.Update(ctx, updated)
+		before := registration.DeepCopy()
+		registration.Webhooks[0].ClientConfig.CABundle = combined
+		return l.client.Patch(
+			ctx,
+			&registration,
+			client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}),
+		)
+	})
 }
 
 func (l *Lifecycle) reconcileRegistration(ctx context.Context, caBundle []byte) error {
@@ -456,15 +440,6 @@ func bundleFromSecret(secret *corev1.Secret) Bundle {
 		CAKey:   secret.Data[CAKeyKey],
 		TLSCert: secret.Data[TLSCertKey],
 		TLSKey:  secret.Data[TLSKeyKey],
-	}
-}
-
-func nextBundleFromSecret(secret *corev1.Secret) Bundle {
-	return Bundle{
-		CACert:  secret.Data[nextCAKey],
-		CAKey:   secret.Data[nextCAKeyPEM],
-		TLSCert: secret.Data[nextTLSKey],
-		TLSKey:  secret.Data[nextTLSKeyPEM],
 	}
 }
 

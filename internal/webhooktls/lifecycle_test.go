@@ -3,6 +3,7 @@ package webhooktls
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"errors"
 	"os"
 	"path/filepath"
@@ -136,7 +137,8 @@ func TestLifecycleRecoversInvalidSecretWithoutLeakingMaterial(t *testing.T) {
 func TestLifecycleCARotationPublishesOverlapBeforePromotion(t *testing.T) {
 	ctx := context.Background()
 	clock := &testClock{now: time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)}
-	k8sClient := newFakeClient(t)
+	baseClient := newFakeClient(t)
+	k8sClient := &secretUpdateInterceptor{Client: baseClient}
 	options := testOptions(clock)
 	options.CAValidity = 2 * time.Hour
 	options.CARenewBefore = time.Hour
@@ -147,9 +149,28 @@ func TestLifecycleCARotationPublishesOverlapBeforePromotion(t *testing.T) {
 	original := getSecret(t, k8sClient)
 	originalCA := append([]byte(nil), original.Data[CACertKey]...)
 
+	observedTrustBeforeSwap := false
+	k8sClient.beforeUpdate = func(ctx context.Context, secret *corev1.Secret) error {
+		var registration admissionv1.MutatingWebhookConfiguration
+		if err := baseClient.Get(
+			ctx,
+			client.ObjectKey{Name: DefaultWebhookName},
+			&registration,
+		); err != nil {
+			return err
+		}
+		if len(registration.Webhooks) == 1 &&
+			bytes.Equal(registration.Webhooks[0].ClientConfig.CABundle, secret.Data[CACertKey]) {
+			observedTrustBeforeSwap = true
+		}
+		return nil
+	}
 	clock.Advance(61 * time.Minute)
 	if err := lifecycle.Ensure(ctx); err != nil {
 		t.Fatalf("rotate CA: %v", err)
+	}
+	if !observedTrustBeforeSwap {
+		t.Fatal("CA rotation swapped the Secret before publishing admission trust")
 	}
 	rotated := getSecret(t, k8sClient)
 	if bytes.Equal(originalCA, rotated.Data[CACertKey]) {
@@ -167,21 +188,68 @@ func TestLifecycleCARotationPublishesOverlapBeforePromotion(t *testing.T) {
 	}
 }
 
-func TestPromotionRetriesWhenRegistrationChanges(t *testing.T) {
+func TestLifecycleCARotationCrashBeforeSecretSwapPreservesTrust(t *testing.T) {
 	ctx := context.Background()
 	clock := &testClock{now: time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)}
-	k8sClient := newFakeClient(t)
-	lifecycle := NewLifecycle(k8sClient, &Store{}, testOptions(clock))
+	baseClient := newFakeClient(t)
+	k8sClient := &secretUpdateInterceptor{Client: baseClient}
+	options := testOptions(clock)
+	options.CAValidity = 2 * time.Hour
+	options.CARenewBefore = time.Hour
+	store := &Store{}
+	lifecycle := NewLifecycle(k8sClient, store, options)
 	if err := lifecycle.Ensure(ctx); err != nil {
 		t.Fatalf("bootstrap lifecycle: %v", err)
 	}
-	secret := getSecret(t, k8sClient)
-	next, err := lifecycle.generate(secret.Data[CACertKey])
-	if err != nil {
-		t.Fatalf("generate staged certificates: %v", err)
+	original := getSecret(t, k8sClient)
+	originalCA := append([]byte(nil), original.Data[CACertKey]...)
+	originalTLS := append([]byte(nil), original.Data[TLSCertKey]...)
+
+	swapErr := errors.New("injected crash before Secret swap")
+	k8sClient.beforeUpdate = func(context.Context, *corev1.Secret) error {
+		return swapErr
 	}
-	if err := lifecycle.promoteNext(ctx, secret, next); !errors.Is(err, errRegistrationChanged) {
-		t.Fatalf("registration race should be retryable, got %v", err)
+	clock.Advance(61 * time.Minute)
+	if err := lifecycle.Ensure(ctx); !errors.Is(err, swapErr) {
+		t.Fatalf("expected injected Secret swap failure, got %v", err)
+	}
+
+	unchanged := getSecret(t, k8sClient)
+	if !bytes.Equal(unchanged.Data[CACertKey], originalCA) ||
+		!bytes.Equal(unchanged.Data[TLSCertKey], originalTLS) {
+		t.Fatal("failed Secret swap changed the active serving material")
+	}
+	var registration admissionv1.MutatingWebhookConfiguration
+	if err := baseClient.Get(ctx, client.ObjectKey{Name: DefaultWebhookName}, &registration); err != nil {
+		t.Fatalf("get webhook registration after failed swap: %v", err)
+	}
+	publishedTrust := registration.Webhooks[0].ClientConfig.CABundle
+	if bytes.Equal(publishedTrust, originalCA) || !bytes.Contains(publishedTrust, originalCA) {
+		t.Fatal("registration did not retain old trust while publishing the replacement CA")
+	}
+	parsed, err := parse(bundleFromSecret(unchanged), lifecycle.dnsNames(), clock.Now())
+	if err != nil {
+		t.Fatalf("parse unchanged serving material: %v", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(publishedTrust) {
+		t.Fatal("published registration trust is not valid PEM")
+	}
+	if _, err := parsed.leaf.Verify(x509.VerifyOptions{
+		DNSName:     lifecycle.dnsNames()[2],
+		Roots:       roots,
+		CurrentTime: clock.Now(),
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}); err != nil {
+		t.Fatalf("old serving certificate stopped working before Secret swap: %v", err)
+	}
+
+	k8sClient.beforeUpdate = nil
+	if err := lifecycle.Ensure(ctx); err != nil {
+		t.Fatalf("recover rotation after failed Secret swap: %v", err)
+	}
+	if err := lifecycle.ReadinessCheck(nil); err != nil {
+		t.Fatalf("webhook did not converge after rotation retry: %v", err)
 	}
 }
 
@@ -218,39 +286,12 @@ func TestDesiredRegistrationMatchesManagerManifest(t *testing.T) {
 	}
 }
 
-func TestServingRenewalPreservesStagedCARotation(t *testing.T) {
-	ctx := context.Background()
-	clock := &testClock{now: time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)}
-	k8sClient := newFakeClient(t)
-	lifecycle := NewLifecycle(k8sClient, &Store{}, testOptions(clock))
-	if err := lifecycle.Ensure(ctx); err != nil {
-		t.Fatalf("bootstrap lifecycle: %v", err)
-	}
-	secret := getSecret(t, k8sClient)
-	next, err := lifecycle.generate(secret.Data[CACertKey])
-	if err != nil {
-		t.Fatalf("generate staged certificates: %v", err)
-	}
-	if err := lifecycle.stageNext(ctx, secret, next); err != nil {
-		t.Fatalf("stage CA rotation: %v", err)
-	}
-
-	clock.Advance(91 * time.Minute)
-	if _, err := lifecycle.ensureSecret(ctx); err != nil {
-		t.Fatalf("renew serving certificate with staged CA: %v", err)
-	}
-	renewed := getSecret(t, k8sClient)
-	if !bytes.Equal(renewed.Data[nextCAKey], next.CACert) ||
-		!bytes.Equal(renewed.Data[nextTLSKey], next.TLSCert) {
-		t.Fatal("serving renewal discarded staged CA rotation")
-	}
-}
-
 func TestTwoLifecycleReplicasConverge(t *testing.T) {
 	ctx := context.Background()
 	clock := &testClock{now: time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)}
 	k8sClient := newFakeClient(t)
 	options := testOptions(clock)
+	options.ServingValidity = 72 * time.Hour
 	stores := []*Store{{}, {}}
 	lifecycles := []*Lifecycle{
 		NewLifecycle(k8sClient, stores[0], options),
@@ -287,6 +328,34 @@ func TestTwoLifecycleReplicasConverge(t *testing.T) {
 	if !bytes.Equal(first.Certificate[0], second.Certificate[0]) {
 		t.Fatal("replicas did not converge on shared serving certificate")
 	}
+
+	clock.Advance(47*time.Hour + time.Minute)
+	results = make(chan error, len(lifecycles))
+	for _, lifecycle := range lifecycles {
+		wait.Add(1)
+		go func(current *Lifecycle) {
+			defer wait.Done()
+			results <- current.Ensure(ctx)
+		}(lifecycle)
+	}
+	wait.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatalf("concurrent CA rotation: %v", err)
+		}
+	}
+	if !bytes.Equal(stores[0].CABundle(), stores[1].CABundle()) {
+		t.Fatal("replicas did not converge after concurrent CA rotation")
+	}
+	rotated := getSecret(t, k8sClient)
+	var registration admissionv1.MutatingWebhookConfiguration
+	if err := k8sClient.Get(ctx, client.ObjectKey{Name: DefaultWebhookName}, &registration); err != nil {
+		t.Fatalf("get registration after concurrent rotation: %v", err)
+	}
+	if !bytes.Equal(registration.Webhooks[0].ClientConfig.CABundle, rotated.Data[CACertKey]) {
+		t.Fatal("concurrent CA rotation left serving material and admission trust mismatched")
+	}
 }
 
 func testOptions(clock *testClock) Options {
@@ -298,6 +367,24 @@ func testOptions(clock *testClock) Options {
 	options.ServingRenewBefore = 30 * time.Minute
 	options.Backdate = time.Minute
 	return options
+}
+
+type secretUpdateInterceptor struct {
+	client.Client
+	beforeUpdate func(context.Context, *corev1.Secret) error
+}
+
+func (c *secretUpdateInterceptor) Update(
+	ctx context.Context,
+	object client.Object,
+	options ...client.UpdateOption,
+) error {
+	if secret, ok := object.(*corev1.Secret); ok && c.beforeUpdate != nil {
+		if err := c.beforeUpdate(ctx, secret); err != nil {
+			return err
+		}
+	}
+	return c.Client.Update(ctx, object, options...)
 }
 
 func newFakeClient(t *testing.T, objects ...client.Object) client.Client {

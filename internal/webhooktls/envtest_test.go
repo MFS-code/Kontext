@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	"github.com/MFS-code/Kontext/internal/admission"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
 )
 
@@ -97,7 +98,7 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 			TLSOption(store),
 		},
 	})
-	server.Register(DefaultWebhookPath, Handler(k8sClient, scheme))
+	server.Register(admission.DefaultWebhookPath, admission.Handler(k8sClient, scheme))
 	serverContext, cancelServer := context.WithCancel(ctx)
 	t.Cleanup(cancelServer)
 	serverErrors := make(chan error, 1)
@@ -112,7 +113,7 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 	url := fmt.Sprintf(
 		"https://localhost:%d%s",
 		testEnvironment.WebhookInstallOptions.LocalServingPort,
-		DefaultWebhookPath,
+		admission.DefaultWebhookPath,
 	)
 	registration.Webhooks[0].ClientConfig.Service = nil
 	registration.Webhooks[0].ClientConfig.URL = &url
