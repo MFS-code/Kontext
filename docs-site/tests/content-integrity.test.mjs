@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -25,11 +26,39 @@ function filesUnder(directory, extension, ignoredDirectories = new Set()) {
   return files;
 }
 
-const markdownFiles = filesUnder(
-  repoRoot,
-  ".md",
-  new Set([".git", "content", "dist", "node_modules"]),
+function trackedFiles(pathspecs) {
+  return execFileSync("git", ["ls-files", "--", ...pathspecs], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  })
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((file) => path.join(repoRoot, file));
+}
+
+const markdownFiles = trackedFiles(["*.md"]);
+
+const releaseVersionSource = fs.readFileSync(
+  path.join(repoRoot, "docs/releases.md"),
+  "utf8",
 );
+const releaseVersionMatch = releaseVersionSource.match(
+  /^The current public release is `(v\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)`\./m,
+);
+assert.ok(releaseVersionMatch, "docs/releases.md declares the public release");
+const releaseVersion = releaseVersionMatch[1];
+
+const releaseVersionFiles = [
+  ...trackedFiles(["docs/*.md"]),
+  ...[
+    "README.md",
+    "SECURITY.md",
+    "website/index.html",
+    "deploy/examples/v1alpha1/README.md",
+    ".github/ISSUE_TEMPLATE/bug_report.yml",
+  ].map((file) => path.join(repoRoot, file)),
+];
 
 const routeSources = new Map(
   [...pageMetadataById.values()].map((metadata) => [
@@ -123,6 +152,35 @@ test("public docs contain no stale mode language", () => {
         source,
         pattern,
         `${path.relative(repoRoot, file)} contains stale public language`,
+      );
+    }
+  }
+});
+
+test("public release references use the declared version", () => {
+  const releaseVersionPattern =
+    /v\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?/g;
+  const echoImagePattern =
+    /ghcr\.io\/mfs-code\/kontext-echo:([A-Za-z0-9._-]+)/g;
+
+  for (const file of releaseVersionFiles) {
+    const source = fs.readFileSync(file, "utf8");
+    for (const match of source.matchAll(releaseVersionPattern)) {
+      const prefix = source.slice(Math.max(0, match.index - 32), match.index);
+      if (/Kubernetes\s*$/.test(prefix)) {
+        continue;
+      }
+      assert.equal(
+        match[0],
+        releaseVersion,
+        `${path.relative(repoRoot, file)} uses release version ${match[0]}`,
+      );
+    }
+    for (const match of source.matchAll(echoImagePattern)) {
+      assert.equal(
+        match[1],
+        releaseVersion,
+        `${path.relative(repoRoot, file)} uses kontext-echo tag ${match[1]}`,
       );
     }
   }

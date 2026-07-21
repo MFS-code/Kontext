@@ -8,6 +8,7 @@ dist/
 # Environment and local secrets
 .env
 .env.*
+.venv/
 
 # IDE and OS files
 .DS_Store
