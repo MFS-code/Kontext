@@ -94,6 +94,7 @@ func main() {
 
 	if err := (&controller.AgentRunReconciler{
 		Client:        mgr.GetClient(),
+		APIReader:     mgr.GetAPIReader(),
 		Scheme:        mgr.GetScheme(),
 		ReporterImage: reporterImage,
 	}).SetupWithManager(mgr); err != nil {

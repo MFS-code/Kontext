@@ -10,12 +10,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
+	"github.com/MFS-code/Kontext/internal/conditions"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
 	"github.com/MFS-code/Kontext/internal/testsupport"
 )
@@ -314,6 +316,72 @@ func TestAgentRunReconcilerFailsWhenPodLost(t *testing.T) {
 	}
 }
 
+func TestAgentRunReconcilerDoesNotFailWhenCachedPodReadIsStale(t *testing.T) {
+	ctx := context.Background()
+	runName := "stale-pod-read"
+	podName := podbuilder.PodNameForRun(runName)
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: runName, Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
+		Phase:   kontextv1alpha1.AgentRunPhasePending,
+		PodName: podName,
+	}); err != nil {
+		t.Fatalf("update run status: %v", err)
+	}
+
+	pod := buildOwnedPod(t, run)
+	if err := k8sClient.Create(ctx, pod); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+	podKey := types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}
+	if err := k8sClient.Get(ctx, podKey, pod); err != nil {
+		t.Fatalf("get pod: %v", err)
+	}
+	started := metav1.Now()
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: podbuilder.RuntimeContainerName,
+		State: corev1.ContainerState{
+			Running: &corev1.ContainerStateRunning{StartedAt: started},
+		},
+	}}
+	if err := k8sClient.Status().Update(ctx, pod); err != nil {
+		t.Fatalf("update pod status: %v", err)
+	}
+
+	reconciler := newAgentRunReconciler()
+	reconciler.Client = &stalePodGetClient{
+		Client:   k8sClient,
+		omitName: podKey,
+	}
+	if _, err := reconciler.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: run.Name, Namespace: run.Namespace},
+	}); err != nil {
+		t.Fatalf("reconcile with stale Pod read: %v", err)
+	}
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(run), &updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseRunning {
+		t.Fatalf("expected live Pod to keep run healthy, got %s", updated.Status.Phase)
+	}
+	if updated.Status.CompletionTime != nil {
+		t.Fatalf("healthy run was marked complete: %#v", updated.Status)
+	}
+}
+
 func TestAgentRunReconcilerRejectsPodNameCollision(t *testing.T) {
 	ctx := context.Background()
 	run := &kontextv1alpha1.AgentRun{
@@ -424,6 +492,78 @@ func TestAgentRunReconcilerPreservesTerminalStatusOnForeignPodReuse(t *testing.T
 		updated.Status.CompletionTime == nil ||
 		!updated.Status.CompletionTime.Equal(&completed) {
 		t.Fatalf("terminal status changed after foreign Pod reuse: %#v", updated.Status)
+	}
+}
+
+func TestAgentRunReconcilerPreservesTerminalStatusWithRunningPod(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "terminal-running-pod",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:     "hello",
+			Provider: "echo",
+			Model:    "echo-model",
+			Runtime:  echoRuntimeSpec(),
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	completed := metav1.NewTime(time.Now().Truncate(time.Second))
+	terminalConditions := conditions.ForAgentRunPhase(kontextv1alpha1.AgentRunPhaseSucceeded)
+	for i := range terminalConditions {
+		terminalConditions[i].LastTransitionTime = completed
+		terminalConditions[i].ObservedGeneration = run.Generation
+	}
+	if err := updateAgentRunStatus(ctx, run, kontextv1alpha1.AgentRunStatus{
+		Phase:          kontextv1alpha1.AgentRunPhaseSucceeded,
+		PodName:        podbuilder.PodNameForRun(run.Name),
+		Result:         "final result",
+		Message:        "Run completed successfully.",
+		CompletionTime: &completed,
+		Conditions:     terminalConditions,
+	}); err != nil {
+		t.Fatalf("update run status: %v", err)
+	}
+
+	pod := buildOwnedPod(t, run)
+	if err := k8sClient.Create(ctx, pod); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+		t.Fatalf("get pod: %v", err)
+	}
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: podbuilder.RuntimeContainerName,
+		State: corev1.ContainerState{
+			Running: &corev1.ContainerStateRunning{StartedAt: metav1.Now()},
+		},
+	}}
+	if err := k8sClient.Status().Update(ctx, pod); err != nil {
+		t.Fatalf("update pod status: %v", err)
+	}
+
+	reconcileAgentRun(ctx, t, client.ObjectKeyFromObject(run))
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(run), &updated); err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseSucceeded ||
+		updated.Status.Result != "final result" ||
+		updated.Status.Message != "Run completed successfully." ||
+		updated.Status.CompletionTime == nil ||
+		!updated.Status.CompletionTime.Equal(&completed) {
+		t.Fatalf("terminal status regressed from stale Pod state: %#v", updated.Status)
+	}
+	for _, condition := range updated.Status.Conditions {
+		if condition.Type == conditions.Complete && condition.Status != metav1.ConditionTrue {
+			t.Fatalf("terminal Complete condition regressed: %#v", updated.Status.Conditions)
+		}
 	}
 }
 
@@ -910,6 +1050,24 @@ type deleteErrorClient struct {
 
 func (c *deleteErrorClient) Delete(context.Context, client.Object, ...client.DeleteOption) error {
 	return c.err
+}
+
+type stalePodGetClient struct {
+	client.Client
+	omitName types.NamespacedName
+}
+
+func (c *stalePodGetClient) Get(
+	ctx context.Context,
+	key client.ObjectKey,
+	obj client.Object,
+	opts ...client.GetOption,
+) error {
+	if _, isPod := obj.(*corev1.Pod); isPod && key == c.omitName {
+		c.omitName = types.NamespacedName{}
+		return apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, key.Name)
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
 }
 
 // legacyWallclockClient simulates a persisted object created before CRD
