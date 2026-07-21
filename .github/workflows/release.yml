@@ -264,9 +264,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
-
       - name: Download image metadata
         uses: actions/download-artifact@v4
         with:
@@ -288,9 +285,7 @@ jobs:
             }' image-metadata/*.json >image-digests.json
 
       - name: Render pinned install manifest
-        run: |
-          make release-manifest IMAGE_DIGESTS=image-digests.json
-          kubectl create --dry-run=client -f dist/install.yaml -o name
+        run: make release-manifest IMAGE_DIGESTS=image-digests.json
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
