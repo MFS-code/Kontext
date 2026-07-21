@@ -31,5 +31,7 @@ for ad-hoc dispatch and demos.
 
 1. [Install without cloning](/docs/quickstart)
 2. Learn the [resource model](/docs/resources)
-3. Run a [Service-mode agent](/docs/service-workload)
-4. Read the [API spec](/SPEC)
+3. Invoke a reusable [Task workload](/docs/task-workload)
+4. Run a [Scheduled workload](/docs/scheduled-workload)
+5. Keep a [Service workload](/docs/service-workload) available
+6. Read the [API spec](/SPEC)

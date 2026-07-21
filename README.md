@@ -42,7 +42,8 @@ backward-compatible text projection. The full versioned contract is in
 ## Install a tagged release
 
 An existing Kubernetes cluster needs only kubectl and permission to create
-CRDs, cluster-scoped RBAC, a Namespace, and a Deployment. Install the published
+CRDs, cluster-scoped RBAC, a Namespace, a Deployment, a Service, a
+NetworkPolicy, and a MutatingWebhookConfiguration. Install the published
 `v0.1.0-alpha.1` release directly from GitHub:
 
 ```bash
@@ -55,7 +56,9 @@ kubectl rollout status deployment/controller-manager \
 ```
 
 The release manifest pins the operator and trusted reporter images by digest.
-It does not require Docker, kind, or a repository clone. See
+The controller creates and rotates the webhook TLS Secret and keeps the
+admission CA bundle synchronized; the manifest contains no private key. It
+does not require Docker, kind, or a repository clone. See
 [`docs/releases.md`](docs/releases.md) (also on [docs.kontext.run](https://docs.kontext.run/docs/releases))
 before upgrading or uninstalling because deleting the CRDs also deletes every
 `Agent` and `AgentRun`.
@@ -73,14 +76,18 @@ make kind-install       # build operator + echo images, load into kind, install 
 ./scripts/eval-kind.sh  # deterministic evals against the same cluster
 ```
 
-The e2e script proves four core behaviors:
+Pull-request CI proves these core behaviors across the keyless kind jobs:
 
 - a standalone `AgentRun` runs to completion and lands `.status.result`
 - unmodified images can expose last-line or structured stdout results
 - child exit codes and SIGTERM behavior survive reporter injection
 - a `Service`-mode `Agent` re-casts its run after the Pod is deleted
+- a Task Agent resolves sparse, concurrent invocations and retains owned status
+- a Scheduled Agent mints slot-derived one-shot runs and enforces `Forbid`
+- self-managed webhook TLS bootstraps, renews, repairs trust, and converges
+  across two replicas while matching requests fail closed
 
-### Run a one-shot task
+### Run a standalone one-shot AgentRun
 
 ```bash
 ./scripts/apply-example.sh deploy/examples/v1alpha1/echo-task-run.yaml
@@ -88,6 +95,21 @@ kubectl get agentrun echo-review -w
 kubectl logs -f run-echo-review
 kubectl get agentrun echo-review -o jsonpath='{.status.result}'
 ```
+
+A standalone `AgentRun` carries its complete execution spec and does not
+reference an Agent. A Task Agent is different: applying the Agent creates no
+run, and each sparse user-named `AgentRun` invokes its reusable template:
+
+```bash
+./scripts/apply-example.sh deploy/examples/v1alpha1/echo-task-agent.yaml
+./scripts/apply-example.sh deploy/examples/v1alpha1/echo-task-invocation.yaml
+kubectl get agentrun echo-task-docs -w
+kubectl get agent echo-task \
+  -o jsonpath='{.status.lastRunName}{"\n"}'
+```
+
+See the [Task workload guide](docs/task-workload.md) for template parameters,
+admission failures, retained-run status, and cleanup.
 
 ### Run a persistent service agent
 
@@ -239,7 +261,12 @@ make build             # compile operator binary to bin/manager
 make run               # run the controller locally against your kubeconfig
 ```
 
-Pull requests and pushes to `main` run validate (including `make vulncheck`), Dockerfile smoke for every shipped image, and keyless kind e2e via `.github/workflows/ci.yml`. After a failed local kind run, collect cluster state with `./scripts/collect-kind-diagnostics.sh`.
+Pull requests and pushes to `main` run Go validation (including
+`make vulncheck`), docs-site tests/typecheck/build and generated-corpus checks,
+Dockerfile smoke for every shipped image, focused Task/Scheduled/webhook
+acceptance, and keyless kind e2e via `.github/workflows/ci.yml`. After a failed
+local kind run, collect cluster state with
+`./scripts/collect-kind-diagnostics.sh`.
 
 ## Layout
 
@@ -262,6 +289,8 @@ scripts/                   kind install + e2e
 | Doc | Purpose |
 |---|---|
 | [`SPEC.md`](SPEC.md) | API and runtime-image contract |
+| [`docs/task-workload.md`](docs/task-workload.md) | Reusable Task templates, sparse invocation, and retained-run status |
+| [`docs/scheduled-workload.md`](docs/scheduled-workload.md) | Cron scheduling, overlap policy, history, and scheduler status |
 | [`docs/operations.md`](docs/operations.md) | Alpha support matrix, security boundaries, troubleshooting, and lifecycle |
 | [`docs/releases.md`](docs/releases.md) | Release tags, installation, upgrades, and uninstall |
 | [`docs/runtimes.md`](docs/runtimes.md) | Runtime roles, result paths, static context, and tools |

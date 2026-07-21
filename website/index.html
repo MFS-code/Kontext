@@ -57,9 +57,11 @@
     <p>
       Scheduling, secrets, RBAC, budgets, logs, restarts: agents need what
       Kubernetes already does. Kontext adds two resources, <code>Agent</code> and
-      <code>AgentRun</code>, and leaves the rest to the cluster. Service agents are
-      re-cast automatically when they die. Wallclock budgets are enforced by the
-      controller. Results live in <code>status</code>, queryable like any other object.
+      <code>AgentRun</code>, and leaves the rest to the cluster. Task agents are
+      reusable one-shot templates. Scheduled agents mint one-shot runs from cron
+      slots. Service agents are re-cast automatically when they die. Wallclock
+      budgets are enforced by the controller. Results live in <code>status</code>,
+      queryable like any other object.
     </p>
   </section>
 

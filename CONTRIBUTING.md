@@ -16,6 +16,7 @@ review and safer to test than broad rewrites.
 Required tools:
 
 - Go 1.26.5
+- Node.js 22 for the hosted docs site
 - Docker with Buildx
 - kubectl
 - kind for end-to-end tests
@@ -39,12 +40,44 @@ make kind-install
 ./scripts/eval-kind.sh
 ```
 
+Run the focused mode and admission acceptance scripts against the same
+installed cluster:
+
+```bash
+./scripts/e2e-kind-task.sh
+./scripts/e2e-kind-scheduled.sh
+./scripts/e2e-kind-webhook.sh
+```
+
+The Task script covers sparse mutation, rejection classes, immutable
+snapshots, concurrent invocations, retained status, and ownership. The
+Scheduled script covers a real cron tick, status, `Forbid`, and ownership. The
+webhook script covers fresh TLS bootstrap, fail-closed matching, complete-run
+bypass, trust repair, renewal, restart reuse, and two-replica convergence.
+
 NetworkPolicy acceptance creates a separate disposable kind cluster with
 Calico:
 
 ```bash
 ./scripts/e2e-kind-network-policy.sh
 ```
+
+For documentation changes, use Node.js 22 and run the same docs-site checks as
+CI:
+
+```bash
+cd docs-site
+npm ci
+npm test
+npm run typecheck
+npm run build
+npm run verify:build
+```
+
+The build synchronizes repository Markdown into the hosted site and emits raw
+mirrors, `llms.txt`, and `llms-full.txt`. The verification checks byte
+identity between source Markdown and raw output plus required Task, Scheduled,
+API, and webhook terms in the generated corpus.
 
 ## Generated files
 

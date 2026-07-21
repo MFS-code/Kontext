@@ -56,7 +56,7 @@ body:
     attributes:
       label: Resource and mode
       description: State whether this is a standalone AgentRun or an Agent mode
-      placeholder: standalone AgentRun
+      placeholder: Task Agent invocation, Scheduled Agent, Service Agent, or standalone AgentRun
     validations:
       required: true
 

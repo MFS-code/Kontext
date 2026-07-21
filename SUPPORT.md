@@ -20,7 +20,8 @@ Bug reports are in scope when they reproduce against:
 - the latest published alpha release;
 - release-provided operator or reporter images;
 - the maintained reference and echo runtimes;
-- standalone `AgentRun` or `Agent` mode `Service`;
+- standalone `AgentRun` and `Agent` modes `Task`, `Scheduled`, and `Service`;
+- self-managed Task admission TLS and the narrow fail-closed webhook path;
 - the documented install and upgrade paths.
 
 The project can help identify whether a bring-your-own runtime follows the

@@ -45,6 +45,39 @@ jobs:
       - name: Scan for known Go vulnerabilities
         run: make vulncheck
 
+  docs-site:
+    name: Docs site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: docs-site
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Install docs dependencies
+        run: npm ci
+
+      - name: Test docs sources and navigation
+        run: npm test
+
+      - name: Typecheck docs site
+        run: npm run typecheck
+
+      - name: Build docs and emit LLM files
+        run: npm run build
+
+      - name: Verify raw mirrors and LLM corpora
+        run: npm run verify:build
+
   # Smoke maintained support and runtime images independently before kind.
   image-smoke:
     name: Image smoke

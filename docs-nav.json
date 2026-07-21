@@ -9,6 +9,8 @@
           "docs/index",
           "docs/quickstart",
           "docs/resources",
+          "docs/task-workload",
+          "docs/scheduled-workload",
           "docs/service-workload"
         ]
       },
@@ -23,10 +25,7 @@
       },
       {
         "group": "Reference",
-        "pages": [
-          "SPEC",
-          "docs/when-not-to-use-agents"
-        ]
+        "pages": ["SPEC", "docs/when-not-to-use-agents"]
       }
     ]
   }
