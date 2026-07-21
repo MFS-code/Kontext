@@ -138,14 +138,14 @@ func (c *ownerIndexedClient) List(
 	); err != nil {
 		return err
 	}
-	expected := make(map[string]struct{})
+	expected := make(map[string]string)
 	for i := range liveRuns.Items {
 		owner := metav1.GetControllerOf(&liveRuns.Items[i])
 		if owner != nil &&
 			owner.APIVersion == kontextv1alpha1.GroupVersion.String() &&
 			owner.Kind == "Agent" &&
 			string(owner.UID) == ownerUID {
-			expected[liveRuns.Items[i].Name] = struct{}{}
+			expected[liveRuns.Items[i].Name] = liveRuns.Items[i].ResourceVersion
 		}
 	}
 
@@ -154,7 +154,7 @@ func (c *ownerIndexedClient) List(
 		if err := c.indexedReader.List(ctx, runs, opts...); err != nil {
 			return err
 		}
-		if indexedRunNamesMatch(runs.Items, expected) {
+		if indexedRunsMatch(runs.Items, expected) {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -168,15 +168,16 @@ func (c *ownerIndexedClient) List(
 	}
 }
 
-func indexedRunNamesMatch(
+func indexedRunsMatch(
 	actual []kontextv1alpha1.AgentRun,
-	expected map[string]struct{},
+	expected map[string]string,
 ) bool {
 	if len(actual) != len(expected) {
 		return false
 	}
 	for i := range actual {
-		if _, ok := expected[actual[i].Name]; !ok {
+		resourceVersion, ok := expected[actual[i].Name]
+		if !ok || actual[i].ResourceVersion != resourceVersion {
 			return false
 		}
 	}
