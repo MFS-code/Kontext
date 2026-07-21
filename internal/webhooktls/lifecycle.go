@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"reflect"
 	"time"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
@@ -28,6 +27,7 @@ const (
 	DefaultServiceName       = "kontext-webhook-service"
 	DefaultWebhookPath       = "/mutate-kontext-dev-v1alpha1-agentrun"
 	DefaultReconcileInterval = 30 * time.Second
+	registrationFieldOwner   = "kontext-webhooktls"
 
 	nextCAKey     = "next-ca.crt"
 	nextCAKeyPEM  = "next-ca.key"
@@ -327,37 +327,13 @@ func (l *Lifecycle) clearNext(ctx context.Context, secret *corev1.Secret) error 
 
 func (l *Lifecycle) reconcileRegistration(ctx context.Context, caBundle []byte) error {
 	desired := l.desiredRegistration(caBundle)
-	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		var existing admissionv1.MutatingWebhookConfiguration
-		err := l.client.Get(ctx, client.ObjectKey{Name: l.opts.WebhookName}, &existing)
-		if apierrors.IsNotFound(err) {
-			if createErr := l.client.Create(ctx, desired.DeepCopy()); apierrors.IsAlreadyExists(createErr) {
-				return apierrors.NewConflict(
-					admissionv1.Resource("mutatingwebhookconfigurations"),
-					l.opts.WebhookName,
-					createErr,
-				)
-			} else {
-				return createErr
-			}
-		}
-		if err != nil {
-			return err
-		}
-		if reflect.DeepEqual(existing.Webhooks, desired.Webhooks) &&
-			existing.Labels["app.kubernetes.io/name"] == "kontext" &&
-			existing.Labels["app.kubernetes.io/managed-by"] == "kontext" {
-			return nil
-		}
-		desired.ObjectMeta = *existing.ObjectMeta.DeepCopy()
-		if desired.Labels == nil {
-			desired.Labels = map[string]string{}
-		}
-		for key, value := range managedLabels() {
-			desired.Labels[key] = value
-		}
-		return l.client.Update(ctx, desired.DeepCopy())
-	})
+	return l.client.Patch(
+		ctx,
+		desired,
+		client.Apply,
+		client.FieldOwner(registrationFieldOwner),
+		client.ForceOwnership,
+	)
 }
 
 func (l *Lifecycle) desiredRegistration(caBundle []byte) *admissionv1.MutatingWebhookConfiguration {
@@ -369,6 +345,10 @@ func (l *Lifecycle) desiredRegistration(caBundle []byte) *admissionv1.MutatingWe
 	never := admissionv1.NeverReinvocationPolicy
 	timeout := int32(5)
 	return &admissionv1.MutatingWebhookConfiguration{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: admissionv1.SchemeGroupVersion.String(),
+			Kind:       "MutatingWebhookConfiguration",
+		},
 		ObjectMeta: metav1.ObjectMeta{Name: l.opts.WebhookName, Labels: managedLabels()},
 		Webhooks: []admissionv1.MutatingWebhook{{
 			Name: l.opts.WebhookName,
