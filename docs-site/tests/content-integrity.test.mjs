@@ -160,8 +160,8 @@ test("public docs contain no stale mode language", () => {
 test("public release references use the declared version", () => {
   const releaseVersionPattern =
     /v\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?/g;
-  const echoImagePattern =
-    /ghcr\.io\/mfs-code\/kontext-echo:([A-Za-z0-9._-]+)/g;
+  const releaseImagePattern =
+    /ghcr\.io\/mfs-code\/kontext-(?:operator|echo|reporter|reference):([A-Za-z0-9._-]+)/g;
 
   for (const file of releaseVersionFiles) {
     const source = fs.readFileSync(file, "utf8");
@@ -176,11 +176,11 @@ test("public release references use the declared version", () => {
         `${path.relative(repoRoot, file)} uses release version ${match[0]}`,
       );
     }
-    for (const match of source.matchAll(echoImagePattern)) {
+    for (const match of source.matchAll(releaseImagePattern)) {
       assert.equal(
         match[1],
         releaseVersion,
-        `${path.relative(repoRoot, file)} uses kontext-echo tag ${match[1]}`,
+        `${path.relative(repoRoot, file)} uses release image tag ${match[1]}`,
       );
     }
   }
