@@ -38,6 +38,66 @@ const routeSources = new Map(
   ]),
 );
 
+function decodeLinkPath(rawTarget) {
+  const encodedPathname = rawTarget.split("#", 1)[0].split("?", 1)[0];
+  try {
+    return { ok: true, pathname: decodeURIComponent(encodedPathname) };
+  } catch (error) {
+    if (!(error instanceof URIError)) {
+      throw error;
+    }
+    return {
+      ok: false,
+      reason: "malformed percent escape in link target",
+    };
+  }
+}
+
+function collectInternalLinkFailures({ documents, root, routes }) {
+  const failures = [];
+  const linkPattern = /!?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
+
+  for (const { file, source } of documents) {
+    for (const match of source.matchAll(linkPattern)) {
+      const rawTarget = match[1].replace(/^<|>$/g, "");
+      if (rawTarget.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(rawTarget)) {
+        continue;
+      }
+
+      const decoded = decodeLinkPath(rawTarget);
+      if (!decoded.ok) {
+        failures.push(
+          `${path.relative(root, file)} -> ${rawTarget}: ${decoded.reason}`,
+        );
+        continue;
+      }
+      if (!decoded.pathname) {
+        continue;
+      }
+
+      let target;
+      if (decoded.pathname.startsWith("/")) {
+        const sourceFile = routes.get(decoded.pathname);
+        if (!sourceFile) {
+          failures.push(
+            `${path.relative(root, file)} -> unknown docs route ${decoded.pathname}`,
+          );
+          continue;
+        }
+        target = path.join(root, sourceFile);
+      } else {
+        target = path.resolve(path.dirname(file), decoded.pathname);
+      }
+
+      if (!fs.existsSync(target)) {
+        failures.push(`${path.relative(root, file)} -> ${rawTarget}`);
+      }
+    }
+  }
+
+  return failures;
+}
+
 test("public docs contain no stale mode language", () => {
   const publicFiles = [
     ...filesUnder(path.join(repoRoot, "docs"), ".md"),
@@ -69,45 +129,73 @@ test("public docs contain no stale mode language", () => {
 });
 
 test("internal Markdown links resolve", () => {
-  const failures = [];
-  const linkPattern = /!?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
-
-  for (const file of markdownFiles) {
-    const source = fs.readFileSync(file, "utf8");
-    for (const match of source.matchAll(linkPattern)) {
-      const rawTarget = match[1].replace(/^<|>$/g, "");
-      if (rawTarget.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(rawTarget)) {
-        continue;
-      }
-
-      const pathname = decodeURIComponent(
-        rawTarget.split("#", 1)[0].split("?", 1)[0],
-      );
-      if (!pathname) {
-        continue;
-      }
-
-      let target;
-      if (pathname.startsWith("/")) {
-        const sourceFile = routeSources.get(pathname);
-        if (!sourceFile) {
-          failures.push(
-            `${path.relative(repoRoot, file)} -> unknown docs route ${pathname}`,
-          );
-          continue;
-        }
-        target = path.join(repoRoot, sourceFile);
-      } else {
-        target = path.resolve(path.dirname(file), pathname);
-      }
-
-      if (!fs.existsSync(target)) {
-        failures.push(`${path.relative(repoRoot, file)} -> ${rawTarget}`);
-      }
-    }
-  }
+  const failures = collectInternalLinkFailures({
+    documents: markdownFiles.map((file) => ({
+      file,
+      source: fs.readFileSync(file, "utf8"),
+    })),
+    root: repoRoot,
+    routes: routeSources,
+  });
 
   assert.deepEqual(failures, []);
+});
+
+test("link target decoding preserves encoded path characters", () => {
+  assert.deepEqual(decodeLinkPath("notes%20complete.md?raw=1#summary"), {
+    ok: true,
+    pathname: "notes complete.md",
+  });
+  assert.deepEqual(decodeLinkPath("chapter%23one.md#heading"), {
+    ok: true,
+    pathname: "chapter#one.md",
+  });
+  assert.deepEqual(decodeLinkPath("query%3Fname.md?download=1"), {
+    ok: true,
+    pathname: "query?name.md",
+  });
+  assert.deepEqual(decodeLinkPath("notes-100%.md"), {
+    ok: false,
+    reason: "malformed percent escape in link target",
+  });
+});
+
+test("link failures aggregate malformed and missing targets", (context) => {
+  const fixtureRoot = fs.mkdtempSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "links-"),
+  );
+  context.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  for (const file of ["notes complete.md", "chapter#one.md", "query?name.md"]) {
+    fs.writeFileSync(path.join(fixtureRoot, file), "");
+  }
+  const fixtureFile = path.join(fixtureRoot, "fixture.md");
+  const source = [
+    "[literal percent](notes-100%.md)",
+    "[valid encoded path](notes%20complete.md?raw=1#summary)",
+    "[encoded fragment marker](chapter%23one.md#heading)",
+    "[encoded query marker](query%3Fname.md?download=1)",
+    "[first missing](missing-one.md)",
+    "[second missing](missing-two.md)",
+    "[anchor](#local)",
+    "[external](https://example.com/notes-100%.md)",
+    "[mail](mailto:docs@example.com)",
+    "[raw mirror](https://docs.kontext.run/raw/docs/index.md)",
+    "[GitHub source](https://github.com/MFS-code/Kontext/blob/main/README.md)",
+  ].join("\n");
+
+  assert.deepEqual(
+    collectInternalLinkFailures({
+      documents: [{ file: fixtureFile, source }],
+      root: fixtureRoot,
+      routes: new Map(),
+    }),
+    [
+      "fixture.md -> notes-100%.md: malformed percent escape in link target",
+      "fixture.md -> missing-one.md",
+      "fixture.md -> missing-two.md",
+    ],
+  );
 });
 
 test("referenced example paths exist", () => {
