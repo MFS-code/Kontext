@@ -4,3 +4,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - manager.yaml
+  - webhook_service.yaml
+  - mutating_webhook_configuration.yaml
+  - webhook_network_policy.yaml

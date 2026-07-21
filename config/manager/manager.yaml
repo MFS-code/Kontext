@@ -29,6 +29,8 @@ spec:
           image: controller:latest
           command:
             - /manager
+          args:
+            - --leader-elect
           env:
             - name: KONTEXT_REPORTER_IMAGE
               value: reporter:latest
@@ -44,6 +46,8 @@ spec:
           ports:
             - containerPort: 8081
               name: health
+            - containerPort: 9443
+              name: webhook
           livenessProbe:
             httpGet:
               path: /healthz

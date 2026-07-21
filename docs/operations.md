@@ -58,6 +58,7 @@ Installing the release manifest requires permission to create:
 - CustomResourceDefinitions
 - a Namespace and namespaced controller resources
 - a ClusterRole and ClusterRoleBinding
+- a MutatingWebhookConfiguration
 
 Every cluster node that runs the controller or a workload must be able to pull
 the referenced image for its architecture. Release manifests pin the operator
@@ -84,6 +85,35 @@ it to:
 These permissions are cluster-wide because Kontext reconciles namespaced
 resources in every namespace. Runtime Pods do not inherit the controller's
 ServiceAccount or RBAC permissions.
+
+The separate `webhook-certificate-manager` Role can create Secrets only in
+`kontext-system` and can read or update only `webhook-server-cert`. The
+`webhook-registration-manager` ClusterRole can read or update only
+`task-agentrun-mutator.kontext.dev`; Kubernetes authorization cannot constrain
+the name of a create request, so its create permission is resource-scoped but
+not name-scoped. Leader-election Lease access is isolated in the namespaced
+`leader-election-manager` Role and is not part of either webhook Role.
+
+### Admission webhook TLS
+
+Kontext generates its webhook CA and serving key inside the cluster. Private
+keys live only in the namespaced `webhook-server-cert` Secret and controller
+memory; release YAML contains no key material. Every replica loads the shared
+Secret, verifies the Service DNS SANs, repairs the admission CA bundle, renews
+the serving certificate before expiry, and reloads it without a process
+restart.
+
+CA replacement uses a staged overlap. The admission registration trusts both
+the new and previous CA before any replica promotes the new serving
+certificate. Conflicting bootstrap or renewal writes retry against the shared
+Secret, so replicas converge instead of replacing one another's keys.
+
+Readiness requires both a serving webhook listener and byte-for-byte agreement
+between the loaded CA bundle and the MutatingWebhookConfiguration. Liveness
+does not depend on admission trust, allowing a running replica to repair it.
+The webhook matches only sparse referenced AgentRun CREATE requests. Complete
+standalone and controller-created runs bypass it. Until Task mutation ships,
+the plumbing handler returns no patch and the CRD rejects sparse requests.
 
 ### Workload identity
 
@@ -190,6 +220,12 @@ To remove the controller while retaining CRDs and resources outside
 kubectl delete clusterrolebinding manager-rolebinding \
   --ignore-not-found=true
 kubectl delete clusterrole manager-role \
+  --ignore-not-found=true
+kubectl delete mutatingwebhookconfiguration \
+  task-agentrun-mutator.kontext.dev --ignore-not-found=true
+kubectl delete clusterrolebinding webhook-registration-manager \
+  --ignore-not-found=true
+kubectl delete clusterrole webhook-registration-manager \
   --ignore-not-found=true
 kubectl delete namespace kontext-system \
   --ignore-not-found=true --wait=true

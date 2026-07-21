@@ -220,6 +220,56 @@ jobs:
         if: always()
         run: kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
 
+  webhook-e2e:
+    name: Kind webhook TLS and HA
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs:
+      - validate
+    env:
+      KIND_CLUSTER_NAME: kontext-webhook-ci
+      KONTEXT_OPERATOR_IMAGE: kontext-operator:dev
+      KONTEXT_ECHO_IMAGE: kontext-echo:dev
+      KONTEXT_REPORTER_IMAGE: kontext-reporter:dev
+      KONTEXT_REFERENCE_IMAGE: kontext-reference:dev
+      KONTEXT_STDOUT_FIXTURE_IMAGE: kontext-stdout-fixture:dev
+      KONTEXT_DIAG_DIR: ${{ github.workspace }}/.ci-diagnostics
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build webhook acceptance images
+        uses: ./.github/actions/build-core-images
+        with:
+          image-set: full
+          cache-scope: webhook-
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          wait: 120s
+
+      - name: Install Kontext with self-managed webhook TLS
+        run: ./scripts/install-go-kind.sh
+
+      - name: Run focused TLS, fail-closed, and HA acceptance
+        run: ./scripts/e2e-kind-webhook.sh
+
+      - name: Preserve diagnostics
+        if: failure()
+        uses: ./.github/actions/kind-diagnostics
+        with:
+          diagnostics-dir: ${{ env.KONTEXT_DIAG_DIR }}
+          artifact-name: webhook-diagnostics-${{ github.run_id }}
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
+
   # kindnet does not enforce NetworkPolicy. This focused job installs pinned,
   # checksum-verified Calico before treating connectivity results as evidence.
   network-policy-e2e:

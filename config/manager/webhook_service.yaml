@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-service
+  namespace: kontext-system
+  labels:
+    app.kubernetes.io/name: kontext
+spec:
+  selector:
+    control-plane: controller-manager
+  ports:
+    - name: webhook
+      port: 443
+      targetPort: webhook

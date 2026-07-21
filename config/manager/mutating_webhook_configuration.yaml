@@ -1,0 +1,40 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: task-agentrun-mutator.kontext.dev
+  labels:
+    app.kubernetes.io/name: kontext
+    app.kubernetes.io/managed-by: kontext
+webhooks:
+  - name: task-agentrun-mutator.kontext.dev
+    admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: webhook-service
+        namespace: kontext-system
+        path: /mutate-kontext-dev-v1alpha1-agentrun
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    reinvocationPolicy: Never
+    sideEffects: None
+    timeoutSeconds: 5
+    matchConditions:
+      - name: sparse-referenced-agent-run
+        expression: >-
+          has(object.spec.agentRef) &&
+          (!has(object.spec.goal) || object.spec.goal == '' ||
+          !has(object.spec.model) || object.spec.model == '' ||
+          !has(object.spec.runtime) || !has(object.spec.runtime.image) ||
+          object.spec.runtime.image == '')
+    rules:
+      - operations:
+          - CREATE
+        apiGroups:
+          - kontext.dev
+        apiVersions:
+          - v1alpha1
+        resources:
+          - agentruns
+        scope: Namespaced

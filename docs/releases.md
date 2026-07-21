@@ -57,10 +57,13 @@ kubectl apply -f \
   "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml"
 ```
 
-`install.yaml` contains the CRDs, Namespace, RBAC, and controller Deployment.
-Its operator and trusted reporter references use the immutable digests recorded
-in `image-digests.json`, while `app.kubernetes.io/version` and
-`kontext.dev/release` retain the human-readable release tag.
+`install.yaml` contains the CRDs, Namespace, RBAC, controller Deployment,
+webhook Service, NetworkPolicy, and narrow admission registration. It contains
+no certificate or private key. The controller creates and rotates the
+namespaced TLS Secret after installation. Its operator and trusted reporter
+references use the immutable digests recorded in `image-digests.json`, while
+`app.kubernetes.io/version` and `kontext.dev/release` retain the human-readable
+release tag.
 
 Given a downloaded digest manifest, the release artifact is reproducible from
 the tagged source:
@@ -92,11 +95,15 @@ kubectl rollout status deployment/controller-manager \
   --timeout=180s
 ```
 
-Kubernetes updates the CRDs, RBAC, and Deployment declaratively; existing
-`Agent` and `AgentRun` resources remain. Downgrades are not supported. Release
-CI installs the previous published manifest when available, runs a workload,
-applies the candidate manifest in place, and runs the registry-backed suite
-before publishing the new GitHub release.
+Kubernetes updates the CRDs, RBAC, Deployment, and webhook registration
+declaratively; existing `Agent`, `AgentRun`, and valid webhook TLS Secret
+remain. Downgrades are not supported as an API compatibility guarantee. Release
+CI nevertheless applies the previous manifest after the candidate as a
+rollback safety check, verifies baseline workloads remain available, and then
+restores the candidate. Applying an older manifest does not prune newer
+webhook objects; its narrow match keeps complete AgentRuns independent, while
+sparse Task requests remain fail closed until the current controller is
+restored.
 
 ## Uninstall
 
@@ -107,6 +114,12 @@ resources in other namespaces:
 kubectl delete clusterrolebinding manager-rolebinding \
   --ignore-not-found=true
 kubectl delete clusterrole manager-role \
+  --ignore-not-found=true
+kubectl delete mutatingwebhookconfiguration \
+  task-agentrun-mutator.kontext.dev --ignore-not-found=true
+kubectl delete clusterrolebinding webhook-registration-manager \
+  --ignore-not-found=true
+kubectl delete clusterrole webhook-registration-manager \
   --ignore-not-found=true
 kubectl delete namespace kontext-system \
   --ignore-not-found=true --wait=true

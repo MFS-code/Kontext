@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -9,6 +10,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -16,6 +18,7 @@ import (
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/controller"
+	"github.com/MFS-code/Kontext/internal/webhooktls"
 )
 
 var (
@@ -51,16 +54,34 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	config := ctrl.GetConfigOrDie()
+	directClient, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "unable to create webhook bootstrap client")
+		os.Exit(1)
+	}
+	certificateStore := &webhooktls.Store{}
+	certificateLifecycle := webhooktls.NewLifecycle(
+		directClient,
+		certificateStore,
+		webhooktls.DefaultOptions(),
+	)
+	if err := certificateLifecycle.Ensure(context.Background()); err != nil {
+		setupLog.Error(err, "unable to bootstrap webhook certificates")
+		os.Exit(1)
+	}
+
+	webhookServer := webhook.NewServer(webhook.Options{
+		TLSOpts: []func(*tls.Config){disableHTTP2, webhooktls.TLSOption(certificateStore)},
+	})
+	mgr, err := ctrl.NewManager(config, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:   metricsAddr,
 			SecureServing: secureMetrics,
 			TLSOpts:       []func(*tls.Config){disableHTTP2},
 		},
-		WebhookServer: webhook.NewServer(webhook.Options{
-			TLSOpts: []func(*tls.Config){disableHTTP2},
-		}),
+		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "kontext.dev",
@@ -69,6 +90,7 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+	webhookServer = mgr.GetWebhookServer()
 
 	if err := (&controller.AgentRunReconciler{
 		Client:        mgr.GetClient(),
@@ -88,11 +110,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	webhookServer.Register(webhooktls.DefaultWebhookPath, webhooktls.Handler())
+	if err := mgr.Add(certificateLifecycle); err != nil {
+		setupLog.Error(err, "unable to add webhook certificate lifecycle")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err := mgr.AddReadyzCheck("webhook-server", webhookServer.StartedChecker()); err != nil {
+		setupLog.Error(err, "unable to set up webhook server ready check")
+		os.Exit(1)
+	}
+	if err := mgr.AddReadyzCheck("webhook-trust", certificateLifecycle.ReadinessCheck); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
