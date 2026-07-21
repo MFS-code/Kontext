@@ -63,9 +63,10 @@ func TestParseLegacyPayload(t *testing.T) {
 
 func TestParseClassifiesLegacyPayloadsByKnownKeys(t *testing.T) {
 	tests := []struct {
-		name      string
-		message   string
-		wantError bool
+		name       string
+		message    string
+		wantError  bool
+		wantResult string
 	}{
 		{
 			name:      "typoed envelope",
@@ -78,8 +79,9 @@ func TestParseClassifiesLegacyPayloadsByKnownKeys(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name:    "result only",
-			message: `{"result":"done"}`,
+			name:       "result only",
+			message:    `{"result":"done"}`,
+			wantResult: "done",
 		},
 		{
 			name:    "tokens used only",
@@ -94,14 +96,20 @@ func TestParseClassifiesLegacyPayloadsByKnownKeys(t *testing.T) {
 			message: `{"error":"diagnostic"}`,
 		},
 		{
-			name:    "existing legacy payload",
-			message: `{"result":"done","tokensUsed":12,"dollarsUsed":1.5,"error":"diagnostic"}`,
+			name:       "existing legacy payload",
+			message:    `{"result":"done","tokensUsed":12,"dollarsUsed":1.5,"error":"diagnostic"}`,
+			wantResult: "done",
+		},
+		{
+			name:       "case folded legacy key",
+			message:    `{"Result":"done"}`,
+			wantResult: "done",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, legacy, err := resultv1alpha1.Parse(test.message)
+			envelope, legacy, err := resultv1alpha1.Parse(test.message)
 			if test.wantError {
 				if err == nil {
 					t.Fatal("expected unrecognized payload error")
@@ -116,6 +124,9 @@ func TestParseClassifiesLegacyPayloadsByKnownKeys(t *testing.T) {
 			}
 			if !legacy {
 				t.Fatal("expected legacy wire format")
+			}
+			if got := resultv1alpha1.ProjectLegacyResult(envelope.Output); got != test.wantResult {
+				t.Fatalf("expected legacy result %q, got %q", test.wantResult, got)
 			}
 		})
 	}

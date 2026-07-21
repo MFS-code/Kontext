@@ -66,9 +66,11 @@ func Parse(message string) (Envelope, bool, error) {
 }
 
 func hasLegacyField(fields map[string]json.RawMessage) bool {
-	for _, key := range [...]string{"result", "tokensUsed", "dollarsUsed", "error"} {
-		if _, ok := fields[key]; ok {
-			return true
+	for field := range fields {
+		for _, key := range [...]string{"result", "tokensUsed", "dollarsUsed", "error"} {
+			if strings.EqualFold(field, key) {
+				return true
+			}
 		}
 	}
 	return false
