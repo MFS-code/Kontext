@@ -156,13 +156,26 @@ spec:
 apiVersion: kontext.dev/v1alpha1
 kind: Agent
 metadata:
-  name: task-wrong-mode
+  name: task-delivery-disabled
 spec:
   mode: Service
   goal: Stay running.
   model: echo-model
   runtime:
     image: ${KONTEXT_ECHO_IMAGE:-kontext-echo:dev}
+---
+apiVersion: kontext.dev/v1alpha1
+kind: Agent
+metadata:
+  name: task-wrong-mode
+spec:
+  mode: Scheduled
+  goal: Run on schedule.
+  model: echo-model
+  runtime:
+    image: ${KONTEXT_ECHO_IMAGE:-kontext-echo:dev}
+  schedule:
+    expression: '0 * * * *'
 EOF
 expect_rejected missing-agent MissingAgent kubectl create -f - <<'EOF'
 apiVersion: kontext.dev/v1alpha1
@@ -172,6 +185,15 @@ metadata:
 spec:
   agentRef:
     name: missing
+EOF
+expect_rejected delivery-disabled DeliveryDisabled kubectl create -f - <<'EOF'
+apiVersion: kontext.dev/v1alpha1
+kind: AgentRun
+metadata:
+  name: task-reject-delivery-disabled
+spec:
+  agentRef:
+    name: task-delivery-disabled
 EOF
 expect_rejected wrong-mode WrongMode kubectl create -f - <<'EOF'
 apiVersion: kontext.dev/v1alpha1
