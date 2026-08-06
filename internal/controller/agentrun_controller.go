@@ -10,8 +10,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	controllerconfig "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/conditions"
@@ -23,10 +26,11 @@ import (
 // AgentRunReconciler reconciles an AgentRun object.
 type AgentRunReconciler struct {
 	client.Client
-	APIReader     client.Reader
-	Scheme        *runtime.Scheme
-	ReporterImage string
-	Clock         scheduler.Clock
+	APIReader      client.Reader
+	Scheme         *runtime.Scheme
+	ReporterImage  string
+	Clock          scheduler.Clock
+	DeliveryClient HTTPDoer
 }
 
 // +kubebuilder:rbac:groups=kontext.dev,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
@@ -40,6 +44,9 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if run.Spec.Delivery != nil {
+		return r.reconcileDelivery(ctx, &run)
+	}
 	if run.Status.Phase.IsTerminal() {
 		if run.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
 			return ctrl.Result{}, r.deleteBudgetExceededPod(ctx, &run)
@@ -396,8 +403,35 @@ func (r *AgentRunReconciler) nowPtr() *metav1.Time {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&kontextv1alpha1.AgentRun{}).
+	if err := ctrl.NewControllerManagedBy(mgr).
+		Named("pod-backed-agentrun").
+		For(
+			&kontextv1alpha1.AgentRun{},
+			builder.WithPredicates(predicate.NewPredicateFuncs(isPodBackedAgentRun)),
+		).
 		Owns(&corev1.Pod{}).
-		Complete(r)
+		Complete(r); err != nil {
+		return fmt.Errorf("set up Pod-backed AgentRun controller: %w", err)
+	}
+	if err := ctrl.NewControllerManagedBy(mgr).
+		Named("delivered-agentrun").
+		For(
+			&kontextv1alpha1.AgentRun{},
+			builder.WithPredicates(predicate.NewPredicateFuncs(isDeliveredAgentRun)),
+		).
+		WithOptions(controllerconfig.Options{MaxConcurrentReconciles: maxConcurrentAgentRuns}).
+		Complete(r); err != nil {
+		return fmt.Errorf("set up delivered AgentRun controller: %w", err)
+	}
+	return nil
+}
+
+func isPodBackedAgentRun(object client.Object) bool {
+	run, ok := object.(*kontextv1alpha1.AgentRun)
+	return ok && run.Spec.Delivery == nil
+}
+
+func isDeliveredAgentRun(object client.Object) bool {
+	run, ok := object.(*kontextv1alpha1.AgentRun)
+	return ok && run.Spec.Delivery != nil
 }

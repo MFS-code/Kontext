@@ -110,26 +110,7 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 				Message: fmt.Sprintf("Agent run exited 0 but the termination payload was malformed: %v", parseErr),
 			}
 		}
-		if envelope.Outcome == resultv1alpha1.OutcomeFailed {
-			message := "Agent runtime reported a failed outcome."
-			if envelope.Error != nil {
-				message = fmt.Sprintf("%s %s", message, envelope.Error.Message)
-			}
-			return PodObservation{
-				Phase:   kontextv1alpha1.AgentRunPhaseFailed,
-				Message: message,
-				Result:  legacyResult,
-				Output:  output,
-				Usage:   usage,
-			}
-		}
-		return PodObservation{
-			Phase:   kontextv1alpha1.AgentRunPhaseSucceeded,
-			Message: "Agent run completed successfully.",
-			Result:  legacyResult,
-			Output:  output,
-			Usage:   usage,
-		}
+		return ObserveResultEnvelope(envelope)
 	}
 
 	message = fmt.Sprintf("Agent run exited with code %d.", terminated.ExitCode)
@@ -148,6 +129,26 @@ func observationFromTermination(terminated *corev1.ContainerStateTerminated) Pod
 		Output:  output,
 		Usage:   usage,
 	}
+}
+
+// ObserveResultEnvelope projects a validated terminal result envelope into the
+// status fields shared by Pod-backed and warm-delivered AgentRuns.
+func ObserveResultEnvelope(envelope resultv1alpha1.Envelope) PodObservation {
+	observation := PodObservation{
+		Phase:   kontextv1alpha1.AgentRunPhaseSucceeded,
+		Message: "Agent run completed successfully.",
+		Result:  resultv1alpha1.PlainText(envelope.Output),
+		Output:  outputStatus(envelope),
+		Usage:   usageStatus(envelope),
+	}
+	if envelope.Outcome == resultv1alpha1.OutcomeFailed {
+		observation.Phase = kontextv1alpha1.AgentRunPhaseFailed
+		observation.Message = "Agent runtime reported a failed outcome."
+		if envelope.Error != nil {
+			observation.Message = fmt.Sprintf("%s %s", observation.Message, envelope.Error.Message)
+		}
+	}
+	return observation
 }
 
 func outputStatus(envelope resultv1alpha1.Envelope) *kontextv1alpha1.OutputStatus {
