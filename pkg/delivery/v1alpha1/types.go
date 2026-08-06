@@ -8,6 +8,9 @@ package v1alpha1
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +22,10 @@ import (
 const (
 	APIVersion   = "kontext.dev/delivery/v1alpha1"
 	EndpointPath = "/kontext.dev/v1alpha1/agent-runs"
+
+	ChallengeHeader = "Kontext-Delivery-Challenge"
+	SignatureHeader = "Kontext-Delivery-Signature"
+	TokenEnvName    = "KONTEXT_DELIVERY_TOKEN"
 
 	MaxResponseBytes = resultv1alpha1.MaxTerminationMessageBytes
 )
@@ -90,4 +97,39 @@ func Parse(data []byte) (Request, error) {
 		return Request{}, err
 	}
 	return request, nil
+}
+
+// ResponseSignature authenticates an exact response body for one delivery
+// challenge and AgentRun UID without sending the shared Pod credential.
+func ResponseSignature(token []byte, challenge string, runUID string, body []byte) string {
+	mac := responseMAC(token, challenge, runUID, body)
+	return base64.RawURLEncoding.EncodeToString(mac)
+}
+
+// VerifyResponseSignature reports whether signature authenticates the exact
+// response body for one delivery challenge and AgentRun UID.
+func VerifyResponseSignature(
+	token []byte,
+	challenge string,
+	runUID string,
+	body []byte,
+	signature string,
+) bool {
+	decoded, err := base64.RawURLEncoding.DecodeString(signature)
+	if err != nil {
+		return false
+	}
+	return hmac.Equal(decoded, responseMAC(token, challenge, runUID, body))
+}
+
+func responseMAC(token []byte, challenge string, runUID string, body []byte) []byte {
+	mac := hmac.New(sha256.New, token)
+	mac.Write([]byte(APIVersion))
+	mac.Write([]byte{0})
+	mac.Write([]byte(challenge))
+	mac.Write([]byte{0})
+	mac.Write([]byte(runUID))
+	mac.Write([]byte{0})
+	mac.Write(body)
+	return mac.Sum(nil)
 }
