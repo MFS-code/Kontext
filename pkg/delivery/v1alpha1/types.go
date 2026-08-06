@@ -26,6 +26,7 @@ const (
 	ChallengeHeader = "Kontext-Delivery-Challenge"
 	SignatureHeader = "Kontext-Delivery-Signature"
 	TokenEnvName    = "KONTEXT_DELIVERY_TOKEN"
+	TokenSecretKey  = "token"
 
 	MaxResponseBytes = resultv1alpha1.MaxTerminationMessageBytes
 )
