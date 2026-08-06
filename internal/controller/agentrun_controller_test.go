@@ -70,7 +70,7 @@ func TestAgentRunReconcilerCreatesPod(t *testing.T) {
 	}
 }
 
-func TestAgentRunReconcilerKeepsDeliverySnapshotsOutOfPodPath(t *testing.T) {
+func TestAgentRunReconcilerKeepsMissingDeliveryTargetOutOfPodPath(t *testing.T) {
 	ctx := context.Background()
 	run := &kontextv1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -99,7 +99,7 @@ func TestAgentRunReconcilerKeepsDeliverySnapshotsOutOfPodPath(t *testing.T) {
 		t.Fatalf("get delivery snapshot: %v", err)
 	}
 	if updated.Status.Phase != kontextv1alpha1.AgentRunPhasePending ||
-		!strings.Contains(updated.Status.Message, "waiting for the warm-delivery controller") {
+		!strings.Contains(updated.Status.Message, "Service Agent service is not available") {
 		t.Fatalf("unexpected delivery safety status: %#v", updated.Status)
 	}
 	var pod corev1.Pod

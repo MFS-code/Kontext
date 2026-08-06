@@ -29,6 +29,7 @@ import (
 
 func TestAgentRunReconcilerDeliversToStandingService(t *testing.T) {
 	var received deliveryv1alpha1.Request
+	var receivedHost string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost || request.URL.Path != deliveryv1alpha1.EndpointPath {
 			t.Errorf("request = %s %s", request.Method, request.URL.Path)
@@ -37,6 +38,7 @@ func TestAgentRunReconcilerDeliversToStandingService(t *testing.T) {
 			request.Header.Get("Accept") != "application/json" {
 			t.Errorf("unexpected delivery headers: %#v", request.Header)
 		}
+		receivedHost = request.Host
 		var err error
 		received, err = deliveryv1alpha1.Parse(readRequestBody(t, request))
 		if err != nil {
@@ -84,6 +86,9 @@ func TestAgentRunReconcilerDeliversToStandingService(t *testing.T) {
 		received.Run.Name != updated.Name ||
 		received.Run.Namespace != updated.Namespace ||
 		received.Run.UID != string(updated.UID) ||
+		received.Target.Name != fixture.pod.Name ||
+		received.Target.UID != string(fixture.pod.UID) ||
+		receivedHost != fixture.pod.Name ||
 		received.Goal != updated.Spec.Goal {
 		t.Fatalf("unexpected delivery request: %#v", received)
 	}
@@ -248,18 +253,14 @@ func TestAgentRunReconcilerRejectsInvalidDeliveryResponses(t *testing.T) {
 
 func TestAgentRunReconcilerRetriesAgainstRecastService(t *testing.T) {
 	requestStarted := make(chan struct{})
-	dropFirstRequest := make(chan struct{})
+	releaseFirstResponse := make(chan struct{})
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if requests.Add(1) == 1 {
 			close(requestStarted)
-			<-dropFirstRequest
-			connection, _, err := writer.(http.Hijacker).Hijack()
-			if err != nil {
-				t.Errorf("hijack first delivery: %v", err)
-				return
-			}
-			_ = connection.Close()
+			<-releaseFirstResponse
+			writer.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(writer, `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"text/plain","value":"stale result"}}`)
 			return
 		}
 		writer.Header().Set("Content-Type", "application/json")
@@ -304,7 +305,7 @@ func TestAgentRunReconcilerRetriesAgainstRecastService(t *testing.T) {
 	if err := k8sClient.Status().Update(ctx, &currentAgent); err != nil {
 		t.Fatalf("publish replacement standing run: %v", err)
 	}
-	close(dropFirstRequest)
+	close(releaseFirstResponse)
 
 	first := <-done
 	if first.err != nil {
@@ -318,7 +319,7 @@ func TestAgentRunReconcilerRetriesAgainstRecastService(t *testing.T) {
 		t.Fatalf("get interrupted delivery: %v", err)
 	}
 	if pending.Status.Phase != kontextv1alpha1.AgentRunPhasePending ||
-		!conditionHasReason(pending.Status.Conditions, "TargetUnreachable") {
+		!conditionHasReason(pending.Status.Conditions, "TargetChanged") {
 		t.Fatalf("interrupted delivery status = %#v", pending.Status)
 	}
 

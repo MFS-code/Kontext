@@ -112,6 +112,27 @@ func (r *AgentRunReconciler) reconcileDelivery(
 	if err := r.setDeliveryRunning(ctx, run, target.pod.Name); err != nil {
 		return ctrl.Result{}, err
 	}
+	confirmedTarget, unavailable, err := r.confirmDeliveryTarget(ctx, run, target)
+	if err != nil {
+		var configurationErr *deliveryConfigurationError
+		if errors.As(err, &configurationErr) {
+			return ctrl.Result{}, r.transitionRun(
+				ctx,
+				run,
+				kontextv1alpha1.AgentRunPhaseFailed,
+				configurationErr.Error(),
+				nil,
+			)
+		}
+		return ctrl.Result{}, err
+	}
+	if unavailable != nil {
+		if err := r.setDeliveryWaiting(ctx, run, unavailable.reason, unavailable.message); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: r.deliveryBackoff(run)}, nil
+	}
+	target = confirmedTarget
 
 	now = r.now()
 	requestDeadline, budgetDeadline = r.deliveryDeadline(run, wallclockLimit, now)
@@ -134,6 +155,27 @@ func (r *AgentRunReconciler) reconcileDelivery(
 		return ctrl.Result{}, nil
 	}
 	*run = latest
+	confirmedTarget, unavailable, err = r.confirmDeliveryTarget(ctx, run, target)
+	if err != nil {
+		var configurationErr *deliveryConfigurationError
+		if errors.As(err, &configurationErr) {
+			return ctrl.Result{}, r.transitionRun(
+				ctx,
+				run,
+				kontextv1alpha1.AgentRunPhaseFailed,
+				configurationErr.Error(),
+				nil,
+			)
+		}
+		return ctrl.Result{}, err
+	}
+	if unavailable != nil {
+		if err := r.setDeliveryWaiting(ctx, run, unavailable.reason, unavailable.message); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: r.deliveryBackoff(run)}, nil
+	}
+	target = confirmedTarget
 
 	if deliveryErr != nil {
 		if !retry {
@@ -268,6 +310,30 @@ func (r *AgentRunReconciler) resolveDeliveryTarget(
 	return &resolvedDeliveryTarget{pod: &pod}, nil, nil
 }
 
+func (r *AgentRunReconciler) confirmDeliveryTarget(
+	ctx context.Context,
+	run *kontextv1alpha1.AgentRun,
+	expected *resolvedDeliveryTarget,
+) (*resolvedDeliveryTarget, *deliveryUnavailable, error) {
+	current, unavailable, err := r.resolveDeliveryTarget(ctx, run)
+	if err != nil || unavailable != nil {
+		return nil, unavailable, err
+	}
+	if expected == nil ||
+		expected.pod == nil ||
+		expected.pod.UID == "" ||
+		current.pod.UID != expected.pod.UID ||
+		current.pod.Namespace != expected.pod.Namespace ||
+		current.pod.Name != expected.pod.Name ||
+		current.pod.Status.PodIP != expected.pod.Status.PodIP {
+		return nil, &deliveryUnavailable{
+			reason:  "TargetChanged",
+			message: "Standing Service Pod identity changed during delivery.",
+		}, nil
+	}
+	return current, nil, nil
+}
+
 func deliveryPodReady(pod *corev1.Pod) bool {
 	if pod.DeletionTimestamp != nil ||
 		pod.Status.Phase != corev1.PodRunning ||
@@ -305,6 +371,10 @@ func (r *AgentRunReconciler) deliver(
 			Namespace: run.Namespace,
 			UID:       string(run.UID),
 		},
+		Target: deliveryv1alpha1.PodIdentity{
+			Name: pod.Name,
+			UID:  string(pod.UID),
+		},
 		Goal: run.Spec.Goal,
 	})
 	if err != nil {
@@ -330,6 +400,7 @@ func (r *AgentRunReconciler) deliver(
 	if err != nil {
 		return resultv1alpha1.Envelope{}, false, fmt.Errorf("build Service delivery request: %w", err)
 	}
+	request.Host = pod.Name
 	request.Header.Set("Content-Type", deliveryContentTypeJSON)
 	request.Header.Set("Accept", deliveryContentTypeJSON)
 
