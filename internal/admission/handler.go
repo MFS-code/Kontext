@@ -16,12 +16,12 @@ import (
 
 const DefaultWebhookPath = "/mutate-kontext-dev-v1alpha1-agentrun"
 
-type TaskHandler struct {
+type InvocationHandler struct {
 	reader client.Reader
 	scheme *runtime.Scheme
 }
 
-func (h *TaskHandler) Handle(ctx context.Context, request webhookadmission.Request) webhookadmission.Response {
+func (h *InvocationHandler) Handle(ctx context.Context, request webhookadmission.Request) webhookadmission.Response {
 	var invocation kontextv1alpha1.AgentRun
 	if err := json.Unmarshal(request.Object.Raw, &invocation); err != nil {
 		return webhookadmission.Errored(http.StatusBadRequest, err)
@@ -32,7 +32,7 @@ func (h *TaskHandler) Handle(ctx context.Context, request webhookadmission.Reque
 		referenceName = invocation.Spec.AgentRef.Name
 	}
 	if referenceName == "" {
-		return webhookadmission.Allowed("AgentRun does not reference a Task Agent")
+		return webhookadmission.Allowed("AgentRun does not reference an Agent")
 	}
 	namespace := request.Namespace
 	if namespace == "" {
@@ -58,7 +58,7 @@ func (h *TaskHandler) Handle(ctx context.Context, request webhookadmission.Reque
 		return webhookadmission.Errored(http.StatusInternalServerError, err)
 	}
 
-	resolved, err := runfactory.ResolveTask(&agent, &invocation, h.scheme)
+	resolved, err := runfactory.ResolveInvocation(&agent, &invocation, h.scheme)
 	if err != nil {
 		return webhookadmission.Denied(err.Error())
 	}
@@ -70,5 +70,5 @@ func (h *TaskHandler) Handle(ctx context.Context, request webhookadmission.Reque
 }
 
 func Handler(reader client.Reader, scheme *runtime.Scheme) http.Handler {
-	return &webhookadmission.Webhook{Handler: &TaskHandler{reader: reader, scheme: scheme}}
+	return &webhookadmission.Webhook{Handler: &InvocationHandler{reader: reader, scheme: scheme}}
 }

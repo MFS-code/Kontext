@@ -80,5 +80,11 @@ no intended lifetime; the controller then does not apply a wallclock deadline.
 If its Pod exits or is deleted, the Service controller creates a fresh
 `AgentRun` with backoff. `echo-service-agent.yaml` is the keyless example.
 
+A Service image may also opt into warm delivery by listening on
+`runtime.delivery.port` and implementing
+`POST /kontext.dev/v1alpha1/agent-runs`. The request carries one resolved goal
+and stable AgentRun identity; the response is a bounded, versioned result
+envelope. The full wire and lifecycle contract is in the [API spec](/SPEC).
+
 Versioned image publication is release work, separate from this runtime
 contract and its source-level acceptance tests.

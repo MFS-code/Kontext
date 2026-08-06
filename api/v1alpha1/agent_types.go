@@ -18,9 +18,10 @@ const (
 )
 
 // AgentSpec defines the desired state of Agent.
-// +kubebuilder:validation:XValidation:rule="self.mode == 'Task' ? has(self.goal) != has(self.goalTemplate) : has(self.goal) && !has(self.goalTemplate)",message="Task agents require exactly one of goal or goalTemplate; Service and Scheduled agents require goal and forbid goalTemplate"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Task' ? has(self.goal) != has(self.goalTemplate) : self.mode == 'Service' ? has(self.goal) && (has(self.runtime.delivery) == has(self.goalTemplate)) : has(self.goal) && !has(self.goalTemplate)",message="Task agents require exactly one of goal or goalTemplate; Service agents require goal and require goalTemplate exactly when runtime.delivery is configured; Scheduled agents require goal and forbid goalTemplate"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'Scheduled' ? has(self.schedule) : !has(self.schedule)",message="schedule is required only for Scheduled agents"
 // +kubebuilder:validation:XValidation:rule="self.mode == 'Service' || !has(self.backoff)",message="backoff is only valid for Service agents"
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Service' || !has(self.runtime.delivery)",message="runtime.delivery is only valid for Service agents"
 type AgentSpec struct {
 	Mode AgentMode `json:"mode"`
 
@@ -97,7 +98,16 @@ type RuntimeSpec struct {
 	Command         []string                `json:"command,omitempty"`
 	Args            []string                `json:"args,omitempty"`
 	Result          *RuntimeResultSpec      `json:"result,omitempty"`
+	Delivery        *RuntimeDeliverySpec    `json:"delivery,omitempty"`
 	SecurityContext *RuntimeSecurityContext `json:"securityContext,omitempty"`
+}
+
+// RuntimeDeliverySpec opts a Service runtime into warm HTTP delivery.
+type RuntimeDeliverySpec struct {
+	// Port is the container port where the runtime accepts delivery requests.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port"`
 }
 
 // RuntimeSecurityContext exposes the portable container hardening fields used

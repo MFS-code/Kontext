@@ -20,17 +20,23 @@ type AgentRef struct {
 }
 
 // AgentRunSpec defines the desired state of AgentRun. Persisted specs are
-// always complete. The CREATE mutating webhook decodes sparse Task requests
-// into this type and resolves required execution fields before API-server
-// schema validation and persistence.
+// always complete. The CREATE mutating webhook decodes sparse referenced
+// requests into this type and resolves required execution fields before
+// API-server schema validation and persistence.
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="AgentRun spec is immutable"
 // +kubebuilder:validation:XValidation:rule="has(self.agentRef) || !has(self.parameters)",message="parameters require agentRef"
+// +kubebuilder:validation:XValidation:rule="has(self.agentRef) || !has(self.delivery)",message="delivery requires agentRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.delivery) || (has(self.runtime.delivery) && self.delivery.port == self.runtime.delivery.port)",message="delivery must match runtime.delivery in the execution snapshot"
 // +kubebuilder:validation:XValidation:rule="has(self.goal) && has(self.model) && has(self.runtime)",message="persisted AgentRun spec must contain a complete execution snapshot"
 type AgentRunSpec struct {
 	AgentRef *AgentRef `json:"agentRef,omitempty"`
 
-	// Parameters are retained with a resolved Task snapshot for auditability.
+	// Parameters are retained with a resolved invocation snapshot for auditability.
 	Parameters map[string]string `json:"parameters,omitempty"`
+
+	// Delivery marks a run that executes through a standing Service runtime
+	// instead of owning a Pod.
+	Delivery *AgentRunDeliverySpec `json:"delivery,omitempty"`
 
 	// +kubebuilder:validation:MinLength=1
 	Goal string `json:"goal"`
@@ -51,6 +57,14 @@ type AgentRunSpec struct {
 	Runtime RuntimeSpec `json:"runtime"`
 
 	Env []EnvVar `json:"env,omitempty"`
+}
+
+// AgentRunDeliverySpec is the immutable warm-delivery target snapshot.
+type AgentRunDeliverySpec struct {
+	// Port is copied from the referenced Service Agent's runtime contract.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port"`
 }
 
 // OutputStatus preserves the runtime's structured terminal output.

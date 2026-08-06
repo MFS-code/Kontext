@@ -70,6 +70,48 @@ func TestAgentRunReconcilerCreatesPod(t *testing.T) {
 	}
 }
 
+func TestAgentRunReconcilerKeepsDeliverySnapshotsOutOfPodPath(t *testing.T) {
+	ctx := context.Background()
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "delivery-awaits-controller",
+			Namespace: "default",
+		},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			AgentRef: &kontextv1alpha1.AgentRef{Name: "service"},
+			Delivery: &kontextv1alpha1.AgentRunDeliverySpec{Port: 8080},
+			Goal:     "handle work",
+			Model:    "test/model",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:    "runtime:test",
+				Delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080},
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, run); err != nil {
+		t.Fatalf("create delivery snapshot: %v", err)
+	}
+
+	reconcileAgentRun(ctx, t, client.ObjectKeyFromObject(run))
+
+	var updated kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(run), &updated); err != nil {
+		t.Fatalf("get delivery snapshot: %v", err)
+	}
+	if updated.Status.Phase != kontextv1alpha1.AgentRunPhasePending ||
+		!strings.Contains(updated.Status.Message, "waiting for the warm-delivery controller") {
+		t.Fatalf("unexpected delivery safety status: %#v", updated.Status)
+	}
+	var pod corev1.Pod
+	err := k8sClient.Get(ctx, types.NamespacedName{
+		Namespace: run.Namespace,
+		Name:      podbuilder.PodNameForRun(run.Name),
+	}, &pod)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("delivery snapshot entered Pod path: pod=%#v error=%v", pod, err)
+	}
+}
+
 func TestAgentRunSpecIsImmutable(t *testing.T) {
 	ctx := context.Background()
 	run := &kontextv1alpha1.AgentRun{

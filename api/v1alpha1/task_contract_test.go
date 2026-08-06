@@ -7,9 +7,9 @@ import (
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 )
 
-func TestSparseTaskCreateRequestDecodesForAdmissionMutation(t *testing.T) {
+func TestSparseReferencedCreateRequestDecodesForAdmissionMutation(t *testing.T) {
 	// Kubernetes invokes mutating admission before it validates the final
-	// object against the CRD. The Task webhook decodes this request shape,
+	// object against the CRD. The invocation webhook decodes this request shape,
 	// resolves it in memory, and returns a complete object. It must never
 	// marshal or persist this unresolved value.
 	data := []byte(`{"agentRef":{"name":"task"},"parameters":{"input":"value"}}`)
@@ -39,5 +39,32 @@ func TestAgentRunParametersDeepCopy(t *testing.T) {
 
 	if copy.Spec.Parameters["input"] != "original" {
 		t.Fatalf("deep copy shares parameters map: %#v", copy.Spec.Parameters)
+	}
+}
+
+func TestDeliverySpecsDeepCopy(t *testing.T) {
+	agent := &kontextv1alpha1.Agent{
+		Spec: kontextv1alpha1.AgentSpec{
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080},
+			},
+		},
+	}
+	run := &kontextv1alpha1.AgentRun{
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Delivery: &kontextv1alpha1.AgentRunDeliverySpec{Port: 8080},
+		},
+	}
+
+	agentCopy := agent.DeepCopy()
+	runCopy := run.DeepCopy()
+	agent.Spec.Runtime.Delivery.Port = 9090
+	run.Spec.Delivery.Port = 9090
+
+	if agentCopy.Spec.Runtime.Delivery.Port != 8080 {
+		t.Fatalf("Agent deep copy shares runtime delivery: %#v", agentCopy.Spec.Runtime.Delivery)
+	}
+	if runCopy.Spec.Delivery.Port != 8080 {
+		t.Fatalf("AgentRun deep copy shares delivery snapshot: %#v", runCopy.Spec.Delivery)
 	}
 }

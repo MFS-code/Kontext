@@ -51,9 +51,9 @@ spec:
           spec:
             description: |-
               AgentRunSpec defines the desired state of AgentRun. Persisted specs are
-              always complete. The CREATE mutating webhook decodes sparse Task requests
-              into this type and resolves required execution fields before API-server
-              schema validation and persistence.
+              always complete. The CREATE mutating webhook decodes sparse referenced
+              requests into this type and resolves required execution fields before
+              API-server schema validation and persistence.
             properties:
               agentRef:
                 description: AgentRef links an AgentRun to its owning Agent.
@@ -81,6 +81,21 @@ spec:
                 - message: wallclock must be empty or a positive duration
                   rule: '!has(self.wallclock) || self.wallclock.size() == 0 || duration(self.wallclock)
                     > duration(''0s'')'
+              delivery:
+                description: |-
+                  Delivery marks a run that executes through a standing Service runtime
+                  instead of owning a Pod.
+                properties:
+                  port:
+                    description: Port is copied from the referenced Service Agent's
+                      runtime contract.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                required:
+                - port
+                type: object
               env:
                 items:
                   description: EnvVar is a name/value or Secret-backed value injected
@@ -133,7 +148,7 @@ spec:
               parameters:
                 additionalProperties:
                   type: string
-                description: Parameters are retained with a resolved Task snapshot
+                description: Parameters are retained with a resolved invocation snapshot
                   for auditability.
                 type: object
               provider:
@@ -150,6 +165,20 @@ spec:
                     items:
                       type: string
                     type: array
+                  delivery:
+                    description: RuntimeDeliverySpec opts a Service runtime into warm
+                      HTTP delivery.
+                    properties:
+                      port:
+                        description: Port is the container port where the runtime
+                          accepts delivery requests.
+                        format: int32
+                        maximum: 65535
+                        minimum: 1
+                        type: integer
+                    required:
+                    - port
+                    type: object
                   image:
                     minLength: 1
                     type: string
@@ -250,6 +279,11 @@ spec:
               rule: self == oldSelf
             - message: parameters require agentRef
               rule: has(self.agentRef) || !has(self.parameters)
+            - message: delivery requires agentRef
+              rule: has(self.agentRef) || !has(self.delivery)
+            - message: delivery must match runtime.delivery in the execution snapshot
+              rule: '!has(self.delivery) || (has(self.runtime.delivery) && self.delivery.port
+                == self.runtime.delivery.port)'
             - message: persisted AgentRun spec must contain a complete execution snapshot
               rule: has(self.goal) && has(self.model) && has(self.runtime)
           status:

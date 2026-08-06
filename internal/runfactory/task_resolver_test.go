@@ -52,7 +52,7 @@ func TestResolveTaskInterpolation(t *testing.T) {
 			agent := taskAgent("task", "", test.template)
 			invocation := taskInvocation("task-run", "task", test.parameters)
 
-			got, err := runfactory.ResolveTask(agent, invocation, taskResolverScheme(t))
+			got, err := runfactory.ResolveInvocation(agent, invocation, taskResolverScheme(t))
 			if test.wantCode != "" {
 				assertResolutionErrorCode(t, err, test.wantCode)
 				if got != nil {
@@ -89,7 +89,7 @@ func TestResolveTaskStaticGoal(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			agent := taskAgent("task", test.goal, test.template)
 			invocation := taskInvocation("task-run", "task", test.parameters)
-			got, err := runfactory.ResolveTask(agent, invocation, taskResolverScheme(t))
+			got, err := runfactory.ResolveInvocation(agent, invocation, taskResolverScheme(t))
 			if test.wantCode != "" {
 				assertResolutionErrorCode(t, err, test.wantCode)
 				return
@@ -99,6 +99,93 @@ func TestResolveTaskStaticGoal(t *testing.T) {
 			}
 			if got.Spec.Goal != test.goal {
 				t.Fatalf("resolved goal = %q, want %q", got.Spec.Goal, test.goal)
+			}
+		})
+	}
+}
+
+func TestResolveServiceDelivery(t *testing.T) {
+	agent := &kontextv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "service",
+			Namespace: "default",
+			UID:       types.UID("service-uid"),
+		},
+		Spec: kontextv1alpha1.AgentSpec{
+			Mode:         kontextv1alpha1.AgentModeService,
+			Goal:         "Serve requests.",
+			GoalTemplate: "Process ${payload}.",
+			Provider:     "fake",
+			Model:        "test/model",
+			Runtime: kontextv1alpha1.RuntimeSpec{
+				Image:    "example/runtime:test",
+				Delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080},
+			},
+		},
+	}
+	invocation := taskInvocation(
+		"delivered-run",
+		agent.Name,
+		map[string]string{"payload": "the request"},
+	)
+
+	got, err := runfactory.ResolveInvocation(agent, invocation, taskResolverScheme(t))
+	if err != nil {
+		t.Fatalf("resolve Service delivery: %v", err)
+	}
+	if got.Spec.Goal != "Process the request." {
+		t.Fatalf("resolved goal = %q", got.Spec.Goal)
+	}
+	if got.Spec.Delivery == nil || got.Spec.Delivery.Port != 8080 {
+		t.Fatalf("delivery snapshot = %#v", got.Spec.Delivery)
+	}
+	if !metav1.IsControlledBy(got, agent) {
+		t.Fatalf("delivered run is not controlled by Service Agent: %#v", got.OwnerReferences)
+	}
+
+	agent.Spec.Runtime.Delivery.Port = 9090
+	if got.Spec.Delivery.Port != 8080 {
+		t.Fatalf("delivery snapshot shares Agent data: %#v", got.Spec.Delivery)
+	}
+}
+
+func TestResolveServiceDeliveryRejectsInvalidContract(t *testing.T) {
+	tests := []struct {
+		name     string
+		goal     string
+		template string
+		port     int32
+		wantCode runfactory.ResolutionErrorCode
+	}{
+		{name: "missing startup goal", template: "${payload}", port: 8080, wantCode: runfactory.ErrorInvalidTemplate},
+		{name: "missing delivery template", goal: "serve", port: 8080, wantCode: runfactory.ErrorInvalidTemplate},
+		{name: "zero port", goal: "serve", template: "${payload}", wantCode: runfactory.ErrorInvalidDelivery},
+		{name: "port above maximum", goal: "serve", template: "${payload}", port: 65536, wantCode: runfactory.ErrorInvalidDelivery},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			agent := &kontextv1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default"},
+				Spec: kontextv1alpha1.AgentSpec{
+					Mode:         kontextv1alpha1.AgentModeService,
+					Goal:         test.goal,
+					GoalTemplate: test.template,
+					Runtime: kontextv1alpha1.RuntimeSpec{
+						Delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: test.port},
+					},
+				},
+			}
+			invocation := taskInvocation(
+				"delivered-run",
+				agent.Name,
+				map[string]string{"payload": "value"},
+			)
+
+			got, err := runfactory.ResolveInvocation(agent, invocation, taskResolverScheme(t))
+			assertResolutionErrorCode(t, err, test.wantCode)
+			if got != nil {
+				t.Fatalf("expected no resolved run, got %#v", got)
 			}
 		})
 	}
@@ -152,6 +239,9 @@ func TestResolveTaskRejectsEveryLockedExecutionField(t *testing.T) {
 		{name: "env nested literal", field: "env", apply: func(spec *kontextv1alpha1.AgentRunSpec) {
 			spec.Env = []kontextv1alpha1.EnvVar{{Name: "EMPTY", Value: &emptyString}}
 		}},
+		{name: "delivery", field: "delivery", apply: func(spec *kontextv1alpha1.AgentRunSpec) {
+			spec.Delivery = &kontextv1alpha1.AgentRunDeliverySpec{Port: 8080}
+		}},
 	}
 
 	for _, test := range tests {
@@ -160,7 +250,7 @@ func TestResolveTaskRejectsEveryLockedExecutionField(t *testing.T) {
 			invocation := taskInvocation("task-run", "task", nil)
 			test.apply(&invocation.Spec)
 
-			got, err := runfactory.ResolveTask(agent, invocation, taskResolverScheme(t))
+			got, err := runfactory.ResolveInvocation(agent, invocation, taskResolverScheme(t))
 			resolutionErr := assertResolutionErrorCode(t, err, runfactory.ErrorConflictingFields)
 			if got != nil {
 				t.Fatalf("expected no resolved run, got %#v", got)
@@ -185,44 +275,75 @@ func TestResolveTaskReportsStableErrors(t *testing.T) {
 			name:     "nil invocation",
 			agent:    taskAgent("task", "goal", ""),
 			wantCode: runfactory.ErrorMissingAgent,
-			wantText: `Task resolution failed [MissingAgent]: Agent "" was not found`,
+			wantText: `AgentRun resolution failed [MissingAgent]: Agent "" was not found`,
 		},
 		{
 			name:       "nil Agent",
 			invocation: taskInvocation("run", "missing", nil),
 			wantCode:   runfactory.ErrorMissingAgent,
-			wantText:   `Task resolution failed [MissingAgent]: Agent "missing" was not found`,
+			wantText:   `AgentRun resolution failed [MissingAgent]: Agent "missing" was not found`,
 		},
 		{
 			name:       "missing reference",
 			agent:      taskAgent("task", "goal", ""),
 			invocation: taskInvocation("run", "", nil),
 			wantCode:   runfactory.ErrorMissingAgent,
-			wantText:   `Task resolution failed [MissingAgent]: Agent "" was not found`,
+			wantText:   `AgentRun resolution failed [MissingAgent]: Agent "" was not found`,
 		},
 		{
 			name:       "reference mismatch",
 			agent:      taskAgent("task", "goal", ""),
 			invocation: taskInvocation("run", "other", nil),
 			wantCode:   runfactory.ErrorMissingAgent,
-			wantText:   `Task resolution failed [MissingAgent]: Agent "other" was not found`,
+			wantText:   `AgentRun resolution failed [MissingAgent]: Agent "other" was not found`,
 		},
 		{
 			name: "wrong mode",
+			agent: &kontextv1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{Name: "scheduled", Namespace: "default"},
+				Spec:       kontextv1alpha1.AgentSpec{Mode: kontextv1alpha1.AgentModeScheduled},
+			},
+			invocation: taskInvocation("run", "scheduled", nil),
+			wantCode:   runfactory.ErrorWrongMode,
+			wantText:   `AgentRun resolution failed [WrongMode]: Agent "scheduled" has unsupported mode "Scheduled"`,
+		},
+		{
+			name: "Service delivery disabled",
 			agent: &kontextv1alpha1.Agent{
 				ObjectMeta: metav1.ObjectMeta{Name: "service", Namespace: "default"},
 				Spec:       kontextv1alpha1.AgentSpec{Mode: kontextv1alpha1.AgentModeService},
 			},
 			invocation: taskInvocation("run", "service", nil),
-			wantCode:   runfactory.ErrorWrongMode,
-			wantText:   `Task resolution failed [WrongMode]: Agent "service" has mode "Service"`,
+			wantCode:   runfactory.ErrorDeliveryDisabled,
+			wantText:   `AgentRun resolution failed [DeliveryDisabled]: Service Agent "service" does not declare runtime.delivery`,
+		},
+		{
+			name: "reserved Service run name",
+			agent: &kontextv1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "service",
+					Namespace: "default",
+					UID:       types.UID("service-uid"),
+				},
+				Spec: kontextv1alpha1.AgentSpec{
+					Mode:         kontextv1alpha1.AgentModeService,
+					Goal:         "serve",
+					GoalTemplate: "${payload}",
+					Runtime: kontextv1alpha1.RuntimeSpec{
+						Delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080},
+					},
+				},
+			},
+			invocation: taskInvocation("service-1", "service", map[string]string{"payload": "work"}),
+			wantCode:   runfactory.ErrorReservedName,
+			wantText:   `AgentRun resolution failed [ReservedName]: AgentRun name "service-1" is reserved for standing runs of Service Agent "service"`,
 		},
 		{
 			name:       "sorted missing parameters",
 			agent:      taskAgent("task", "", "${z} ${a}"),
 			invocation: taskInvocation("run", "task", nil),
 			wantCode:   runfactory.ErrorMissingParameters,
-			wantText:   `Task resolution failed [MissingParameters]: missing parameters: a, z`,
+			wantText:   `AgentRun resolution failed [MissingParameters]: missing parameters: a, z`,
 		},
 		{
 			name:  "sorted conflicting fields",
@@ -236,13 +357,13 @@ func TestResolveTaskReportsStableErrors(t *testing.T) {
 				},
 			},
 			wantCode: runfactory.ErrorConflictingFields,
-			wantText: `Task resolution failed [ConflictingFields]: invocation supplies locked fields: env, tools`,
+			wantText: `AgentRun resolution failed [ConflictingFields]: invocation supplies locked fields: env, tools`,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := runfactory.ResolveTask(test.agent, test.invocation, scheme)
+			_, err := runfactory.ResolveInvocation(test.agent, test.invocation, scheme)
 			assertResolutionErrorCode(t, err, test.wantCode)
 			if err.Error() != test.wantText {
 				t.Fatalf("error = %q, want %q", err.Error(), test.wantText)
@@ -278,7 +399,7 @@ func TestResolveTaskBuildsIsolatedSnapshot(t *testing.T) {
 	agentBefore := agent.DeepCopy()
 	invocationBefore := invocation.DeepCopy()
 
-	got, err := runfactory.ResolveTask(agent, invocation, taskResolverScheme(t))
+	got, err := runfactory.ResolveInvocation(agent, invocation, taskResolverScheme(t))
 	if err != nil {
 		t.Fatalf("resolve Task: %v", err)
 	}
@@ -327,7 +448,7 @@ func TestResolveTaskBuildsIsolatedSnapshot(t *testing.T) {
 	}
 }
 
-func FuzzResolveTask(f *testing.F) {
+func FuzzResolveInvocation(f *testing.F) {
 	seeds := []struct {
 		template string
 		key      string
@@ -356,8 +477,8 @@ func FuzzResolveTask(f *testing.F) {
 		agentBefore := agent.DeepCopy()
 		invocationBefore := invocation.DeepCopy()
 
-		first, firstErr := runfactory.ResolveTask(agent, invocation, scheme)
-		second, secondErr := runfactory.ResolveTask(agent, invocation, scheme)
+		first, firstErr := runfactory.ResolveInvocation(agent, invocation, scheme)
+		second, secondErr := runfactory.ResolveInvocation(agent, invocation, scheme)
 
 		if !reflect.DeepEqual(agent, agentBefore) {
 			t.Fatal("resolver mutated Agent input")

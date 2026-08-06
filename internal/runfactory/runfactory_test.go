@@ -59,6 +59,7 @@ func TestNewForAgentBuildsCompleteIndependentSnapshot(t *testing.T) {
 							Source: kontextv1alpha1.ResultSourceStdout,
 							Format: kontextv1alpha1.ResultFormatKontextEnvelope,
 						},
+						Delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080},
 						SecurityContext: &kontextv1alpha1.RuntimeSecurityContext{
 							AllowPrivilegeEscalation: ptr(false),
 							ReadOnlyRootFilesystem:   ptr(true),
@@ -119,6 +120,7 @@ func TestNewForAgentBuildsCompleteIndependentSnapshot(t *testing.T) {
 							Source: kontextv1alpha1.ResultSourceStdout,
 							Format: kontextv1alpha1.ResultFormatKontextEnvelope,
 						},
+						Delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080},
 						SecurityContext: &kontextv1alpha1.RuntimeSecurityContext{
 							AllowPrivilegeEscalation: ptr(false),
 							ReadOnlyRootFilesystem:   ptr(true),
@@ -299,6 +301,7 @@ func TestSnapshotFieldCoverage(t *testing.T) {
 	assertStructFields(t, reflect.TypeFor[kontextv1alpha1.AgentRunSpec](), []string{
 		"AgentRef",
 		"Budget",
+		"Delivery",
 		"Env",
 		"Goal",
 		"KnowledgeConfigMapRef",
@@ -361,6 +364,7 @@ func mutateFullAgent(agent *kontextv1alpha1.Agent) {
 	agent.Spec.Runtime.Command[0] = "/changed-command"
 	agent.Spec.Runtime.Args[0] = "changed-arg"
 	agent.Spec.Runtime.Result.Format = kontextv1alpha1.ResultFormatLastLine
+	agent.Spec.Runtime.Delivery.Port = 9090
 	*agent.Spec.Runtime.SecurityContext.AllowPrivilegeEscalation = true
 	*agent.Spec.Runtime.SecurityContext.ReadOnlyRootFilesystem = false
 	*agent.Spec.Runtime.SecurityContext.RunAsNonRoot = false

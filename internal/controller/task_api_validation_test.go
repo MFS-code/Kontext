@@ -24,6 +24,7 @@ func TestTaskAgentAPIValidation(t *testing.T) {
 		goalTemplate string
 		schedule     string
 		backoff      *kontextv1alpha1.BackoffSpec
+		delivery     *kontextv1alpha1.RuntimeDeliverySpec
 		wantValid    bool
 	}{
 		{name: "Task static goal", mode: kontextv1alpha1.AgentModeTask, goal: "static", wantValid: true},
@@ -32,15 +33,21 @@ func TestTaskAgentAPIValidation(t *testing.T) {
 		{name: "Task both goals", mode: kontextv1alpha1.AgentModeTask, goal: "static", goalTemplate: "${input}"},
 		{name: "Task rejects schedule", mode: kontextv1alpha1.AgentModeTask, goal: "static", schedule: "* * * * *"},
 		{name: "Task rejects backoff", mode: kontextv1alpha1.AgentModeTask, goal: "static", backoff: &kontextv1alpha1.BackoffSpec{}},
+		{name: "Task rejects delivery", mode: kontextv1alpha1.AgentModeTask, goal: "static", delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080}},
 		{name: "Service static goal", mode: kontextv1alpha1.AgentModeService, goal: "serve", backoff: &kontextv1alpha1.BackoffSpec{}, wantValid: true},
+		{name: "Service warm delivery", mode: kontextv1alpha1.AgentModeService, goal: "serve", goalTemplate: "${input}", delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080}, wantValid: true},
 		{name: "Service missing goal", mode: kontextv1alpha1.AgentModeService},
 		{name: "Service rejects template", mode: kontextv1alpha1.AgentModeService, goalTemplate: "${input}"},
+		{name: "Service delivery requires template", mode: kontextv1alpha1.AgentModeService, goal: "serve", delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080}},
+		{name: "Service template requires delivery", mode: kontextv1alpha1.AgentModeService, goal: "serve", goalTemplate: "${input}"},
+		{name: "Service delivery rejects zero port", mode: kontextv1alpha1.AgentModeService, goal: "serve", goalTemplate: "${input}", delivery: &kontextv1alpha1.RuntimeDeliverySpec{}},
 		{name: "Service rejects schedule", mode: kontextv1alpha1.AgentModeService, goal: "serve", schedule: "* * * * *"},
 		{name: "Scheduled static goal", mode: kontextv1alpha1.AgentModeScheduled, goal: "scheduled", schedule: "* * * * *", wantValid: true},
 		{name: "Scheduled missing goal", mode: kontextv1alpha1.AgentModeScheduled, schedule: "* * * * *"},
 		{name: "Scheduled missing schedule", mode: kontextv1alpha1.AgentModeScheduled, goal: "scheduled"},
 		{name: "Scheduled rejects template", mode: kontextv1alpha1.AgentModeScheduled, goalTemplate: "${input}", schedule: "* * * * *"},
 		{name: "Scheduled rejects backoff", mode: kontextv1alpha1.AgentModeScheduled, goal: "scheduled", schedule: "* * * * *", backoff: &kontextv1alpha1.BackoffSpec{}},
+		{name: "Scheduled rejects delivery", mode: kontextv1alpha1.AgentModeScheduled, goal: "scheduled", schedule: "* * * * *", delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080}},
 	}
 
 	for index, test := range tests {
@@ -49,6 +56,8 @@ func TestTaskAgentAPIValidation(t *testing.T) {
 			if test.schedule != "" {
 				schedule = &kontextv1alpha1.ScheduleSpec{Expression: test.schedule}
 			}
+			runtimeSpec := echoRuntimeSpec()
+			runtimeSpec.Delivery = test.delivery
 			agent := &kontextv1alpha1.Agent{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      fmt.Sprintf("task-agent-validation-%d", index),
@@ -59,7 +68,7 @@ func TestTaskAgentAPIValidation(t *testing.T) {
 					Goal:         test.goal,
 					GoalTemplate: test.goalTemplate,
 					Model:        "test/model",
-					Runtime:      echoRuntimeSpec(),
+					Runtime:      runtimeSpec,
 					Schedule:     schedule,
 					Backoff:      test.backoff,
 				},
@@ -108,6 +117,30 @@ func TestAgentRunPersistenceAPIValidation(t *testing.T) {
 			wantMessage: "parameters require agentRef",
 		},
 		{
+			name: "delivery requires reference",
+			spec: mergeSpec(
+				completeDeliveryAgentRunSpec(nil, 8080),
+				map[string]any{"delivery": map[string]any{"port": int64(8080)}},
+			),
+			wantMessage: "delivery requires agentRef",
+		},
+		{
+			name: "delivery port is bounded",
+			spec: mergeSpec(
+				completeDeliveryAgentRunSpec(map[string]any{"name": "service"}, 65536),
+				map[string]any{"delivery": map[string]any{"port": int64(65536)}},
+			),
+			wantMessage: "should be less than or equal to 65535",
+		},
+		{
+			name: "delivery matches runtime snapshot",
+			spec: mergeSpec(
+				completeDeliveryAgentRunSpec(map[string]any{"name": "service"}, 8080),
+				map[string]any{"delivery": map[string]any{"port": int64(9090)}},
+			),
+			wantMessage: "delivery must match runtime.delivery",
+		},
+		{
 			name:      "standalone complete execution",
 			spec:      completeAgentRunSpec(nil),
 			wantValid: true,
@@ -122,6 +155,17 @@ func TestAgentRunPersistenceAPIValidation(t *testing.T) {
 			spec: mergeSpec(
 				completeAgentRunSpec(map[string]any{"name": "task"}),
 				map[string]any{"parameters": map[string]any{"input": "value"}},
+			),
+			wantValid: true,
+		},
+		{
+			name: "fully resolved Service delivery snapshot",
+			spec: mergeSpec(
+				completeDeliveryAgentRunSpec(map[string]any{"name": "service"}, 8080),
+				map[string]any{
+					"parameters": map[string]any{"input": "value"},
+					"delivery":   map[string]any{"port": int64(8080)},
+				},
 			),
 			wantValid: true,
 		},
@@ -232,6 +276,17 @@ func completeAgentRunSpec(agentRef map[string]any) map[string]any {
 	}
 	if agentRef != nil {
 		spec["agentRef"] = agentRef
+	}
+	return spec
+}
+
+func completeDeliveryAgentRunSpec(agentRef map[string]any, port int64) map[string]any {
+	spec := completeAgentRunSpec(agentRef)
+	spec["runtime"] = map[string]any{
+		"image": "kontext-echo:dev",
+		"delivery": map[string]any{
+			"port": port,
+		},
 	}
 	return spec
 }
