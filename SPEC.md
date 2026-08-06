@@ -422,9 +422,11 @@ The runtime returns HTTP `200 OK` only with one terminal
 validated and projected into `status.output`, `status.result`, and
 `status.usage` exactly like a native termination-log envelope. Legacy result
 payloads and plain text are not accepted on this new endpoint. The complete
-response body must not exceed 4096 bytes. A non-2xx response, malformed or
-oversized body, transport failure after delivery begins, or delivery timeout
-fails the run with an actionable status message.
+response body must not exceed 4096 bytes. A non-2xx response or malformed or
+oversized body fails the run with an actionable status message. A transport
+failure without a response returns the run to `Pending` and retries against
+the current standing Pod using the stable run UID. Exhausting the bounded
+delivery window fails the run.
 
 Delivery uses the existing phases; it does not add a `Delivered` phase:
 
@@ -436,13 +438,14 @@ Delivery uses the existing phases; it does not add a `Delivered` phase:
   or failed by the controller for a delivery/protocol error.
 - `BudgetExceeded` — the delivered run exceeded its wallclock budget.
 
-A missing, unready, unreachable, or mid-recast target remains `Pending` and is
-retried with bounded backoff while delivery has not started. Kontext does not
-create a replacement Pod for a delivered run; Service recast remains the
-`Agent` controller's responsibility. Every in-flight request has a bounded
-controller timeout, and the run's wallclock budget remains authoritative when
-it expires sooner. Request cancellation closes the HTTP request; runtimes
-should stop work when the request context is canceled.
+A missing, unready, unreachable, or mid-recast target remains or returns to
+`Pending` and is retried with bounded backoff until the delivery window
+expires. Kontext does not create a replacement Pod for a delivered run;
+Service recast remains the `Agent` controller's responsibility. The delivery
+window is five minutes from `AgentRun` creation. Once the first HTTP attempt
+starts, `budget.wallclock` also runs across transport retries and wins when it
+expires sooner. Request cancellation closes the HTTP request; runtimes should
+stop work when the request context is canceled.
 
 The control plane sends one delivery to one standing runtime and records its
 outcome. Queueing, prioritization, fan-out, and workload-specific backpressure

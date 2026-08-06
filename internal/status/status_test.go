@@ -1,6 +1,7 @@
 package status_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -10,7 +11,40 @@ import (
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
 	"github.com/MFS-code/Kontext/internal/status"
+	resultv1alpha1 "github.com/MFS-code/Kontext/pkg/result/v1alpha1"
 )
+
+func TestObserveResultEnvelopeProjectsSharedTerminalStatus(t *testing.T) {
+	total := int64(0)
+	envelope := resultv1alpha1.Envelope{
+		APIVersion: resultv1alpha1.APIVersion,
+		Outcome:    resultv1alpha1.OutcomeSucceeded,
+		Output: &resultv1alpha1.Output{
+			MediaType: "application/json",
+			Value:     json.RawMessage(`{"answer":"done"}`),
+		},
+		Usage: &resultv1alpha1.Usage{TotalTokens: &total},
+	}
+
+	observation := status.ObserveResultEnvelope(envelope)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseSucceeded ||
+		observation.Result != `{"answer":"done"}` ||
+		observation.Output == nil ||
+		string(observation.Output.Value.Raw) != `{"answer":"done"}` ||
+		observation.Usage == nil ||
+		observation.Usage.Tokens == nil ||
+		*observation.Usage.Tokens != total {
+		t.Fatalf("unexpected result projection: %#v", observation)
+	}
+
+	envelope.Outcome = resultv1alpha1.OutcomeFailed
+	envelope.Error = &resultv1alpha1.ErrorInfo{Message: "runtime failed"}
+	observation = status.ObserveResultEnvelope(envelope)
+	if observation.Phase != kontextv1alpha1.AgentRunPhaseFailed ||
+		!strings.Contains(observation.Message, "runtime failed") {
+		t.Fatalf("unexpected failure projection: %#v", observation)
+	}
+}
 
 func TestObservePodPlainTextTermination(t *testing.T) {
 	pod := &corev1.Pod{

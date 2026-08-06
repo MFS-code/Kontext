@@ -10,8 +10,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	controllerconfig "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/conditions"
@@ -23,15 +26,17 @@ import (
 // AgentRunReconciler reconciles an AgentRun object.
 type AgentRunReconciler struct {
 	client.Client
-	APIReader     client.Reader
-	Scheme        *runtime.Scheme
-	ReporterImage string
-	Clock         scheduler.Clock
+	APIReader      client.Reader
+	Scheme         *runtime.Scheme
+	ReporterImage  string
+	Clock          scheduler.Clock
+	DeliveryClient HTTPDoer
 }
 
 // +kubebuilder:rbac:groups=kontext.dev,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kontext.dev,resources=agentruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;create
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -41,16 +46,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if run.Spec.Delivery != nil {
-		if run.Status.Phase == "" {
-			return ctrl.Result{}, r.transitionRun(
-				ctx,
-				&run,
-				kontextv1alpha1.AgentRunPhasePending,
-				"Agent run is waiting for the warm-delivery controller.",
-				nil,
-			)
-		}
-		return ctrl.Result{}, nil
+		return r.reconcileDelivery(ctx, &run)
 	}
 	if run.Status.Phase.IsTerminal() {
 		if run.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
@@ -199,8 +195,17 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 		)
 	}
 
+	deliveryCredentialSecret := ""
+	if run.Spec.Runtime.Delivery != nil {
+		var err error
+		deliveryCredentialSecret, err = r.ensureDeliveryCredential(ctx, run)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	pod, err := podbuilder.BuildPodWithConfig(run, podbuilder.Config{
-		ReporterImage: r.ReporterImage,
+		ReporterImage:            r.ReporterImage,
+		DeliveryCredentialSecret: deliveryCredentialSecret,
 	})
 	if err != nil {
 		return ctrl.Result{}, r.transitionRun(
@@ -408,8 +413,35 @@ func (r *AgentRunReconciler) nowPtr() *metav1.Time {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&kontextv1alpha1.AgentRun{}).
+	if err := ctrl.NewControllerManagedBy(mgr).
+		Named("pod-backed-agentrun").
+		For(
+			&kontextv1alpha1.AgentRun{},
+			builder.WithPredicates(predicate.NewPredicateFuncs(isPodBackedAgentRun)),
+		).
 		Owns(&corev1.Pod{}).
-		Complete(r)
+		Complete(r); err != nil {
+		return fmt.Errorf("set up Pod-backed AgentRun controller: %w", err)
+	}
+	if err := ctrl.NewControllerManagedBy(mgr).
+		Named("delivered-agentrun").
+		For(
+			&kontextv1alpha1.AgentRun{},
+			builder.WithPredicates(predicate.NewPredicateFuncs(isDeliveredAgentRun)),
+		).
+		WithOptions(controllerconfig.Options{MaxConcurrentReconciles: maxConcurrentAgentRuns}).
+		Complete(r); err != nil {
+		return fmt.Errorf("set up delivered AgentRun controller: %w", err)
+	}
+	return nil
+}
+
+func isPodBackedAgentRun(object client.Object) bool {
+	run, ok := object.(*kontextv1alpha1.AgentRun)
+	return ok && run.Spec.Delivery == nil
+}
+
+func isDeliveredAgentRun(object client.Object) bool {
+	run, ok := object.(*kontextv1alpha1.AgentRun)
+	return ok && run.Spec.Delivery != nil
 }

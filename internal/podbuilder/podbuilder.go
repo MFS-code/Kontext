@@ -14,6 +14,7 @@ import (
 
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/runtimepolicy"
+	deliveryv1alpha1 "github.com/MFS-code/Kontext/pkg/delivery/v1alpha1"
 )
 
 const (
@@ -36,7 +37,8 @@ const (
 var invalidNameChars = regexp.MustCompile(`[^a-z0-9-]+`)
 
 type Config struct {
-	ReporterImage string
+	ReporterImage            string
+	DeliveryCredentialSecret string
 }
 
 // BuildPodWithConfig constructs a Pod with operator-managed runtime integrations.
@@ -54,6 +56,19 @@ func BuildPodWithConfig(run *kontextv1alpha1.AgentRun, config Config) (*corev1.P
 	env, err := buildEnv(run)
 	if err != nil {
 		return nil, err
+	}
+	if config.DeliveryCredentialSecret != "" {
+		env = append(env, corev1.EnvVar{
+			Name: deliveryv1alpha1.TokenEnvName,
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: config.DeliveryCredentialSecret,
+					},
+					Key: deliveryv1alpha1.TokenSecretKey,
+				},
+			},
+		})
 	}
 	volumes, volumeMounts := buildKnowledgeVolumes(run)
 
@@ -254,6 +269,7 @@ func buildEnv(run *kontextv1alpha1.AgentRun) ([]corev1.EnvVar, error) {
 	for _, credential := range runtimepolicy.Credentials(provider) {
 		reserved[credential.EnvVarName] = struct{}{}
 	}
+	reserved[deliveryv1alpha1.TokenEnvName] = struct{}{}
 
 	for _, extra := range run.Spec.Env {
 		if _, exists := reserved[extra.Name]; exists {
