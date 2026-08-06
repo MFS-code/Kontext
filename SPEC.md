@@ -193,7 +193,9 @@ submitting a user-named `AgentRun` whose `spec.agentRef.name` names that Task
 Agent. Runs may be submitted concurrently; there is no generated-name or
 single-active-run restriction. A user invokes a warm-delivery-enabled Service
 Agent with the same sparse `AgentRun` shape. Service Agents without
-`runtime.delivery` reject referenced invocations.
+`runtime.delivery` reject referenced invocations. Names matching the referenced
+Service Agent followed by a canonical positive integer, such as `owner-1`, are
+reserved for the controller's standing runs and reject user invocations.
 
 A referenced invocation request is sparse: it may contain only `agentRef` and
 optional `parameters`. Kubernetes
@@ -257,6 +259,8 @@ Every rejected referenced resolution includes one stable class:
 - `DeliveryDisabled`: the reference names a Service Agent without
   `runtime.delivery`.
 - `InvalidDelivery`: the Service delivery configuration is invalid.
+- `ReservedName`: a Service invocation uses the controller-reserved standing
+  run name pattern `<agent>-<positive integer>`.
 - `InvalidTemplate`: the Agent definition has invalid goal/template shape or
   placeholder syntax.
 - `MissingParameters`: required placeholder names have no supplied value.

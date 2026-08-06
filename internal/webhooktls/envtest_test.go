@@ -229,6 +229,7 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 
 	rejections := []struct {
 		name      string
+		runName   string
 		agentName string
 		spec      map[string]any
 		want      string
@@ -247,6 +248,13 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 			name:      "wrong-mode",
 			agentName: scheduledAgent.Name,
 			want:      "WrongMode",
+		},
+		{
+			name:      "reserved-name",
+			runName:   warmServiceAgent.Name + "-1",
+			agentName: warmServiceAgent.Name,
+			spec:      map[string]any{"parameters": map[string]any{"payload": "work"}},
+			want:      "ReservedName",
 		},
 		{
 			name:      "missing-parameter",
@@ -286,7 +294,11 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 			for key, value := range test.spec {
 				spec[key] = value
 			}
-			err := k8sClient.Create(ctx, testAgentRun("reject-"+test.name, spec))
+			runName := test.runName
+			if runName == "" {
+				runName = "reject-" + test.name
+			}
+			err := k8sClient.Create(ctx, testAgentRun(runName, spec))
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("create error = %v, want text %q", err, test.want)
 			}

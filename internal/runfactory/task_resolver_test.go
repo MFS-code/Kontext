@@ -318,6 +318,27 @@ func TestResolveTaskReportsStableErrors(t *testing.T) {
 			wantText:   `AgentRun resolution failed [DeliveryDisabled]: Service Agent "service" does not declare runtime.delivery`,
 		},
 		{
+			name: "reserved Service run name",
+			agent: &kontextv1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "service",
+					Namespace: "default",
+					UID:       types.UID("service-uid"),
+				},
+				Spec: kontextv1alpha1.AgentSpec{
+					Mode:         kontextv1alpha1.AgentModeService,
+					Goal:         "serve",
+					GoalTemplate: "${payload}",
+					Runtime: kontextv1alpha1.RuntimeSpec{
+						Delivery: &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080},
+					},
+				},
+			},
+			invocation: taskInvocation("service-1", "service", map[string]string{"payload": "work"}),
+			wantCode:   runfactory.ErrorReservedName,
+			wantText:   `AgentRun resolution failed [ReservedName]: AgentRun name "service-1" is reserved for standing runs of Service Agent "service"`,
+		},
+		{
 			name:       "sorted missing parameters",
 			agent:      taskAgent("task", "", "${z} ${a}"),
 			invocation: taskInvocation("run", "task", nil),

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,6 +26,7 @@ const (
 	ErrorWrongMode         ResolutionErrorCode = "WrongMode"
 	ErrorDeliveryDisabled  ResolutionErrorCode = "DeliveryDisabled"
 	ErrorInvalidDelivery   ResolutionErrorCode = "InvalidDelivery"
+	ErrorReservedName      ResolutionErrorCode = "ReservedName"
 	ErrorInvalidTemplate   ResolutionErrorCode = "InvalidTemplate"
 	ErrorMissingParameters ResolutionErrorCode = "MissingParameters"
 	ErrorUnusedParameters  ResolutionErrorCode = "UnusedParameters"
@@ -49,6 +51,8 @@ func (e *ResolutionError) Error() string {
 	case ErrorDeliveryDisabled:
 		return fmt.Sprintf("AgentRun resolution failed [%s]: Service Agent %q does not declare runtime.delivery", e.Code, e.AgentName)
 	case ErrorInvalidDelivery:
+		return fmt.Sprintf("AgentRun resolution failed [%s]: %s", e.Code, e.Detail)
+	case ErrorReservedName:
 		return fmt.Sprintf("AgentRun resolution failed [%s]: %s", e.Code, e.Detail)
 	case ErrorInvalidTemplate:
 		return fmt.Sprintf("AgentRun resolution failed [%s]: %s", e.Code, e.Detail)
@@ -140,6 +144,16 @@ func ResolveInvocation(
 			return nil, &ResolutionError{
 				Code:      ErrorDeliveryDisabled,
 				AgentName: agent.Name,
+			}
+		}
+		if isReservedServiceRunName(agent.Name, invocation.Name) {
+			return nil, &ResolutionError{
+				Code: ErrorReservedName,
+				Detail: fmt.Sprintf(
+					"AgentRun name %q is reserved for standing runs of Service Agent %q",
+					invocation.Name,
+					agent.Name,
+				),
 			}
 		}
 		if agent.Spec.Runtime.Delivery.Port < 1 || agent.Spec.Runtime.Delivery.Port > 65535 {
@@ -316,6 +330,18 @@ func interpolateGoal(template string, parameters map[string]string) (string, err
 		return "", &ResolutionError{Code: ErrorUnusedParameters, Names: sortedSetKeys(unused)}
 	}
 	return rendered.String(), nil
+}
+
+func isReservedServiceRunName(agentName string, runName string) bool {
+	prefix := agentName + "-"
+	if !strings.HasPrefix(runName, prefix) {
+		return false
+	}
+	value, err := strconv.ParseInt(strings.TrimPrefix(runName, prefix), 10, 32)
+	if err != nil || value < 1 {
+		return false
+	}
+	return runName == fmt.Sprintf("%s-%d", agentName, value)
 }
 
 func parsePlaceholder(template string, start int) (string, int, error) {
