@@ -28,6 +28,7 @@ func TestParseDeliveryRequest(t *testing.T) {
 	request, err := deliveryv1alpha1.Parse([]byte(`{
 		"apiVersion":"kontext.dev/delivery/v1alpha1",
 		"run":{"name":"review-1","namespace":"default","uid":"run-uid"},
+		"target":{"name":"owner-1-pod","uid":"pod-uid"},
 		"goal":"Review the change."
 	}`))
 	if err != nil {
@@ -36,6 +37,8 @@ func TestParseDeliveryRequest(t *testing.T) {
 	if request.Run.Name != "review-1" ||
 		request.Run.Namespace != "default" ||
 		request.Run.UID != "run-uid" ||
+		request.Target.Name != "owner-1-pod" ||
+		request.Target.UID != "pod-uid" ||
 		request.Goal != "Review the change." {
 		t.Fatalf("decoded request = %#v", request)
 	}
@@ -54,27 +57,37 @@ func TestParseDeliveryRequestRejectsInvalidRecords(t *testing.T) {
 		},
 		{
 			name: "missing identity",
-			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{},"goal":"work"}`,
+			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{},"target":{"name":"pod","uid":"pod-uid"},"goal":"work"}`,
 			want: "delivery run name is required",
 		},
 		{
+			name: "missing target identity",
+			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid"},"target":{},"goal":"work"}`,
+			want: "delivery target pod name is required",
+		},
+		{
 			name: "missing goal",
-			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid"}}`,
+			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid"},"target":{"name":"pod","uid":"pod-uid"}}`,
 			want: "delivery goal is required",
 		},
 		{
 			name: "unknown field",
-			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid"},"goal":"work","extra":true}`,
+			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid"},"target":{"name":"pod","uid":"pod-uid"},"goal":"work","extra":true}`,
 			want: "unknown field",
 		},
 		{
 			name: "unknown identity field",
-			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid","extra":true},"goal":"work"}`,
+			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid","extra":true},"target":{"name":"pod","uid":"pod-uid"},"goal":"work"}`,
+			want: "unknown field",
+		},
+		{
+			name: "unknown target field",
+			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid"},"target":{"name":"pod","uid":"pod-uid","extra":true},"goal":"work"}`,
 			want: "unknown field",
 		},
 		{
 			name: "trailing JSON",
-			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid"},"goal":"work"} {}`,
+			body: `{"apiVersion":"kontext.dev/delivery/v1alpha1","run":{"name":"run","namespace":"default","uid":"uid"},"target":{"name":"pod","uid":"pod-uid"},"goal":"work"} {}`,
 			want: "trailing JSON value",
 		},
 	}
