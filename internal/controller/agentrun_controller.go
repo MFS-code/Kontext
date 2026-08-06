@@ -40,7 +40,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if run.Spec.Delivery != nil {
+	if run.Spec.Delivery != nil || run.Spec.Runtime.Delivery != nil {
 		if run.Status.Phase == "" {
 			return ctrl.Result{}, r.transitionRun(
 				ctx,

@@ -101,3 +101,45 @@ func TestParseDeliveryRequestRejectsInvalidRecords(t *testing.T) {
 		})
 	}
 }
+
+func TestResponseSignatureBindsDeliveryAndBody(t *testing.T) {
+	token := []byte("standing-pod-secret")
+	body := []byte(`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded"}`)
+	signature := deliveryv1alpha1.ResponseSignature(token, "challenge", "run-uid", body)
+
+	if !deliveryv1alpha1.VerifyResponseSignature(
+		token,
+		"challenge",
+		"run-uid",
+		body,
+		signature,
+	) {
+		t.Fatal("valid response signature was rejected")
+	}
+	for _, test := range []struct {
+		name      string
+		token     []byte
+		challenge string
+		runUID    string
+		body      []byte
+		signature string
+	}{
+		{name: "wrong token", token: []byte("other"), challenge: "challenge", runUID: "run-uid", body: body, signature: signature},
+		{name: "wrong challenge", token: token, challenge: "other", runUID: "run-uid", body: body, signature: signature},
+		{name: "wrong run", token: token, challenge: "challenge", runUID: "other", body: body, signature: signature},
+		{name: "changed body", token: token, challenge: "challenge", runUID: "run-uid", body: append(body, ' '), signature: signature},
+		{name: "malformed signature", token: token, challenge: "challenge", runUID: "run-uid", body: body, signature: "%%%"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if deliveryv1alpha1.VerifyResponseSignature(
+				test.token,
+				test.challenge,
+				test.runUID,
+				test.body,
+				test.signature,
+			) {
+				t.Fatal("invalid response signature was accepted")
+			}
+		})
+	}
+}

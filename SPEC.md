@@ -338,7 +338,7 @@ Any container can be a Kontext agent if it follows this. Kontext never inspects 
 
 The controller injects, on the Pod:
 
-- Env vars: `KONTEXT_GOAL`, `KONTEXT_MODEL`, `KONTEXT_PROVIDER`, `KONTEXT_TOOLS` (comma-separated), `KONTEXT_BUDGET_TOKENS`, `KONTEXT_BUDGET_WALLCLOCK`, `KONTEXT_BUDGET_DOLLARS`, `KONTEXT_AGENT_NAME`, `KONTEXT_RUN_NAME`.
+- Env vars: `KONTEXT_GOAL`, `KONTEXT_MODEL`, `KONTEXT_PROVIDER`, `KONTEXT_TOOLS` (comma-separated), `KONTEXT_BUDGET_TOKENS`, `KONTEXT_BUDGET_WALLCLOCK`, `KONTEXT_BUDGET_DOLLARS`, `KONTEXT_AGENT_NAME`, `KONTEXT_RUN_NAME`. Warm-delivery Service Pods additionally receive the Secret-backed `KONTEXT_DELIVERY_TOKEN`.
 - Provider credentials mounted from `secretRef` as env (e.g. `ANTHROPIC_API_KEY`).
 - Optional static ConfigMap context from `knowledgeConfigMapRef`, mounted
   read-only at `/kontext/knowledge`. This is not RAG: the control plane does no
@@ -392,6 +392,25 @@ runtime must reject a request whose Host does not match its own Kubernetes
 hostname before accepting the delivery. The controller verifies the target Pod
 name, UID, IP, readiness, and owner chain again after the HTTP exchange and
 discards the response if that identity changed.
+
+Each standing warm-delivery Pod receives a controller-generated random
+credential through the Secret-backed `KONTEXT_DELIVERY_TOKEN` environment
+variable. The credential never appears in an Agent or AgentRun, request,
+status, or log. For every attempt, the controller sends a fresh base64url
+nonce in `Kontext-Delivery-Challenge`. A successful runtime response includes
+`Kontext-Delivery-Signature`, computed as unpadded base64url of:
+
+```text
+HMAC-SHA256(
+  KONTEXT_DELIVERY_TOKEN,
+  apiVersion || 0x00 || challenge || 0x00 || run.uid || 0x00 || exact-response-body
+)
+```
+
+The controller verifies that signature before parsing or projecting the result
+envelope. Missing or invalid signatures fail the run. This challenge-response
+binds the accepted result to the credential mounted only into the verified
+standing Pod without transmitting that credential over plaintext Pod HTTP.
 
 The request contains the resolved goal, not template parameters. Parameter
 rendering and execution-field snapshotting have already completed in
