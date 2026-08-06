@@ -40,6 +40,18 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if run.Spec.Delivery != nil {
+		if run.Status.Phase == "" {
+			return ctrl.Result{}, r.transitionRun(
+				ctx,
+				&run,
+				kontextv1alpha1.AgentRunPhasePending,
+				"Agent run is waiting for the warm-delivery controller.",
+				nil,
+			)
+		}
+		return ctrl.Result{}, nil
+	}
 	if run.Status.Phase.IsTerminal() {
 		if run.Status.Phase == kontextv1alpha1.AgentRunPhaseBudgetExceeded {
 			return ctrl.Result{}, r.deleteBudgetExceededPod(ctx, &run)
