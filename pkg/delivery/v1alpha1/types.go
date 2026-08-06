@@ -1,8 +1,9 @@
 // Package v1alpha1 defines the warm-delivery request contract shared by
 // Service runtimes and the control plane.
 //
-// Delivery requests are strict records. Unknown top-level or run identity
-// fields require a new contract version instead of being silently ignored.
+// Delivery requests are strict records. Unknown top-level, run identity, or
+// target identity fields require a new contract version instead of being
+// silently ignored.
 package v1alpha1
 
 import (
@@ -27,6 +28,7 @@ const (
 type Request struct {
 	APIVersion string      `json:"apiVersion"`
 	Run        RunIdentity `json:"run"`
+	Target     PodIdentity `json:"target"`
 	Goal       string      `json:"goal"`
 }
 
@@ -35,6 +37,12 @@ type RunIdentity struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 	UID       string `json:"uid"`
+}
+
+// PodIdentity binds a delivery attempt to the verified standing Service Pod.
+type PodIdentity struct {
+	Name string `json:"name"`
+	UID  string `json:"uid"`
 }
 
 // Validate rejects requests that cannot be tied to one persisted AgentRun.
@@ -50,6 +58,12 @@ func (request Request) Validate() error {
 	}
 	if request.Run.UID == "" {
 		return errors.New("delivery run uid is required")
+	}
+	if request.Target.Name == "" {
+		return errors.New("delivery target pod name is required")
+	}
+	if request.Target.UID == "" {
+		return errors.New("delivery target pod uid is required")
 	}
 	if request.Goal == "" {
 		return errors.New("delivery goal is required")

@@ -355,6 +355,7 @@ runtime listens on that port on the Pod network interface and exposes:
 
 ```text
 POST /kontext.dev/v1alpha1/agent-runs
+Host: <standing Pod name>
 Content-Type: application/json
 Accept: application/json
 ```
@@ -369,6 +370,10 @@ The request is one strict JSON object:
     "namespace": "default",
     "uid": "6d291c0e-3a2d-4b33-956e-8d4ec30f1ac3"
   },
+  "target": {
+    "name": "owner-1-pod",
+    "uid": "481b6787-bc93-4eae-9d23-e8253c99d481"
+  },
   "goal": "the fully resolved invocation goal"
 }
 ```
@@ -381,9 +386,16 @@ network failures or Service Pod replacement. Runtimes performing non-idempotent
 external effects must persist whatever stronger deduplication their workload
 requires.
 
+`target` identifies the verified standing Service Pod selected for this
+attempt. The controller also sets the HTTP `Host` header to that Pod name. A
+runtime must reject a request whose Host does not match its own Kubernetes
+hostname before accepting the delivery. The controller verifies the target Pod
+name, UID, IP, readiness, and owner chain again after the HTTP exchange and
+discards the response if that identity changed.
+
 The request contains the resolved goal, not template parameters. Parameter
 rendering and execution-field snapshotting have already completed in
-admission. Unknown fields, a missing identity or goal, an unsupported
+admission. Unknown fields, a missing run or target identity or goal, an unsupported
 `apiVersion`, and trailing JSON are invalid requests.
 
 The runtime returns HTTP `200 OK` only with one terminal
