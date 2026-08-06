@@ -10,6 +10,7 @@ import (
 	kontextv1alpha1 "github.com/MFS-code/Kontext/api/v1alpha1"
 	"github.com/MFS-code/Kontext/internal/podbuilder"
 	"github.com/MFS-code/Kontext/internal/testsupport"
+	deliveryv1alpha1 "github.com/MFS-code/Kontext/pkg/delivery/v1alpha1"
 )
 
 func TestBuildPodInjectsKontextEnv(t *testing.T) {
@@ -48,7 +49,12 @@ func TestBuildPodInjectsKontextEnv(t *testing.T) {
 }
 
 func TestBuildPodRejectsControllerManagedEnvOverrides(t *testing.T) {
-	for _, name := range []string{"KONTEXT_TOOLS", "KONTEXT_BUDGET_TOKENS", "ANTHROPIC_API_KEY"} {
+	for _, name := range []string{
+		"KONTEXT_TOOLS",
+		"KONTEXT_BUDGET_TOKENS",
+		"ANTHROPIC_API_KEY",
+		deliveryv1alpha1.TokenEnvName,
+	} {
 		t.Run(name, func(t *testing.T) {
 			run := &kontextv1alpha1.AgentRun{
 				ObjectMeta: metav1.ObjectMeta{Name: "override-task", Namespace: "default"},
@@ -66,6 +72,37 @@ func TestBuildPodRejectsControllerManagedEnvOverrides(t *testing.T) {
 				t.Fatalf("expected managed env override rejection")
 			}
 		})
+	}
+}
+
+func TestBuildPodInjectsDeliveryCredential(t *testing.T) {
+	run := &kontextv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "service-run", Namespace: "default"},
+		Spec: kontextv1alpha1.AgentRunSpec{
+			Goal:    "serve",
+			Model:   "model",
+			Runtime: kontextv1alpha1.RuntimeSpec{Image: "runtime:dev"},
+		},
+	}
+	pod, err := podbuilder.BuildPodWithConfig(run, podbuilder.Config{
+		DeliveryCredentialSecret: "delivery-auth",
+	})
+	if err != nil {
+		t.Fatalf("build delivery Pod: %v", err)
+	}
+	var found *corev1.EnvVar
+	for index := range pod.Spec.Containers[0].Env {
+		if pod.Spec.Containers[0].Env[index].Name == deliveryv1alpha1.TokenEnvName {
+			found = &pod.Spec.Containers[0].Env[index]
+			break
+		}
+	}
+	if found == nil ||
+		found.ValueFrom == nil ||
+		found.ValueFrom.SecretKeyRef == nil ||
+		found.ValueFrom.SecretKeyRef.Name != "delivery-auth" ||
+		found.ValueFrom.SecretKeyRef.Key != deliveryv1alpha1.TokenSecretKey {
+		t.Fatalf("unexpected delivery credential env: %#v", found)
 	}
 }
 

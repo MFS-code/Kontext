@@ -3,6 +3,8 @@ package controller
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,7 +46,8 @@ type HTTPDoer interface {
 }
 
 type resolvedDeliveryTarget struct {
-	pod *corev1.Pod
+	pod        *corev1.Pod
+	credential []byte
 }
 
 type deliveryUnavailable struct {
@@ -145,7 +148,7 @@ func (r *AgentRunReconciler) reconcileDelivery(
 
 	originalUID := run.UID
 	runKey := client.ObjectKeyFromObject(run)
-	envelope, retry, deliveryErr := r.deliver(ctx, run, target.pod, requestDeadline)
+	envelope, retry, deliveryErr := r.deliver(ctx, run, target, requestDeadline)
 
 	var latest kontextv1alpha1.AgentRun
 	if err := r.APIReader.Get(ctx, runKey, &latest); err != nil {
@@ -307,7 +310,19 @@ func (r *AgentRunReconciler) resolveDeliveryTarget(
 			message: "Referenced Service Agent's standing Pod is not ready for delivery.",
 		}, nil
 	}
-	return &resolvedDeliveryTarget{pod: &pod}, nil, nil
+	credential, err := r.loadDeliveryCredential(ctx, &standingRun)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, &deliveryUnavailable{
+				reason:  "TargetNotReady",
+				message: "Referenced Service Agent is waiting for its delivery credential.",
+			}, nil
+		}
+		return nil, nil, &deliveryConfigurationError{
+			message: fmt.Sprintf("Standing Service delivery credential is invalid: %v.", err),
+		}
+	}
+	return &resolvedDeliveryTarget{pod: &pod, credential: credential}, nil, nil
 }
 
 func (r *AgentRunReconciler) confirmDeliveryTarget(
@@ -325,7 +340,8 @@ func (r *AgentRunReconciler) confirmDeliveryTarget(
 		current.pod.UID != expected.pod.UID ||
 		current.pod.Namespace != expected.pod.Namespace ||
 		current.pod.Name != expected.pod.Name ||
-		current.pod.Status.PodIP != expected.pod.Status.PodIP {
+		current.pod.Status.PodIP != expected.pod.Status.PodIP ||
+		!bytes.Equal(current.credential, expected.credential) {
 		return nil, &deliveryUnavailable{
 			reason:  "TargetChanged",
 			message: "Standing Service Pod identity changed during delivery.",
@@ -361,9 +377,18 @@ func deliveryPodReady(pod *corev1.Pod) bool {
 func (r *AgentRunReconciler) deliver(
 	ctx context.Context,
 	run *kontextv1alpha1.AgentRun,
-	pod *corev1.Pod,
+	target *resolvedDeliveryTarget,
 	deadline time.Time,
 ) (resultv1alpha1.Envelope, bool, error) {
+	pod := target.pod
+	challengeBytes := make([]byte, 32)
+	if _, err := rand.Read(challengeBytes); err != nil {
+		return resultv1alpha1.Envelope{}, false, fmt.Errorf(
+			"generate Service delivery challenge: %w",
+			err,
+		)
+	}
+	challenge := base64.RawURLEncoding.EncodeToString(challengeBytes)
 	payload, err := json.Marshal(deliveryv1alpha1.Request{
 		APIVersion: deliveryv1alpha1.APIVersion,
 		Run: deliveryv1alpha1.RunIdentity{
@@ -403,6 +428,7 @@ func (r *AgentRunReconciler) deliver(
 	request.Host = pod.Name
 	request.Header.Set("Content-Type", deliveryContentTypeJSON)
 	request.Header.Set("Accept", deliveryContentTypeJSON)
+	request.Header.Set(deliveryv1alpha1.ChallengeHeader, challenge)
 
 	response, err := r.deliveryClient().Do(request)
 	if err != nil {
@@ -424,6 +450,17 @@ func (r *AgentRunReconciler) deliver(
 		return resultv1alpha1.Envelope{}, false, fmt.Errorf(
 			"Service delivery returned HTTP %d.",
 			response.StatusCode,
+		)
+	}
+	if !deliveryv1alpha1.VerifyResponseSignature(
+		target.credential,
+		challenge,
+		string(run.UID),
+		body,
+		response.Header.Get(deliveryv1alpha1.SignatureHeader),
+	) {
+		return resultv1alpha1.Envelope{}, false, fmt.Errorf(
+			"Service delivery response authentication failed.",
 		)
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))

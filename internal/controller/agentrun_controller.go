@@ -36,6 +36,7 @@ type AgentRunReconciler struct {
 // +kubebuilder:rbac:groups=kontext.dev,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kontext.dev,resources=agentruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;create
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -194,8 +195,17 @@ func (r *AgentRunReconciler) reconcileMissingPod(ctx context.Context, run *konte
 		)
 	}
 
+	deliveryCredentialSecret := ""
+	if run.Spec.Runtime.Delivery != nil {
+		var err error
+		deliveryCredentialSecret, err = r.ensureDeliveryCredential(ctx, run)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	pod, err := podbuilder.BuildPodWithConfig(run, podbuilder.Config{
-		ReporterImage: r.ReporterImage,
+		ReporterImage:            r.ReporterImage,
+		DeliveryCredentialSecret: deliveryCredentialSecret,
 	})
 	if err != nil {
 		return ctrl.Result{}, r.transitionRun(

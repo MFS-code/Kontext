@@ -30,6 +30,8 @@ import (
 func TestAgentRunReconcilerDeliversToStandingService(t *testing.T) {
 	var received deliveryv1alpha1.Request
 	var receivedHost string
+	var credential []byte
+	responseBody := `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":{"answer":"warm"}},"usage":{"totalTokens":7}}`
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost || request.URL.Path != deliveryv1alpha1.EndpointPath {
 			t.Errorf("request = %s %s", request.Method, request.URL.Path)
@@ -38,6 +40,9 @@ func TestAgentRunReconcilerDeliversToStandingService(t *testing.T) {
 			request.Header.Get("Accept") != "application/json" {
 			t.Errorf("unexpected delivery headers: %#v", request.Header)
 		}
+		if request.Header.Get(deliveryv1alpha1.ChallengeHeader) == "" {
+			t.Error("delivery challenge header is empty")
+		}
 		receivedHost = request.Host
 		var err error
 		received, err = deliveryv1alpha1.Parse(readRequestBody(t, request))
@@ -45,13 +50,23 @@ func TestAgentRunReconcilerDeliversToStandingService(t *testing.T) {
 			t.Errorf("parse delivery request: %v", err)
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(writer, `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"application/json","value":{"answer":"warm"}},"usage":{"totalTokens":7}}`)
+		writer.Header().Set(
+			deliveryv1alpha1.SignatureHeader,
+			deliveryv1alpha1.ResponseSignature(
+				credential,
+				request.Header.Get(deliveryv1alpha1.ChallengeHeader),
+				received.Run.UID,
+				[]byte(responseBody),
+			),
+		)
+		fmt.Fprint(writer, responseBody)
 	}))
 	t.Cleanup(server.Close)
 	host, port := serverAddress(t, server)
 
 	ctx := context.Background()
 	fixture := createDeliveryFixture(t, ctx, "delivery-success", host, port)
+	credential = fixture.credential
 	reconciler := newAgentRunReconciler()
 	result, err := reconciler.Reconcile(ctx, ctrl.Request{
 		NamespacedName: types.NamespacedName{
@@ -104,15 +119,25 @@ func TestAgentRunReconcilerDeliversToStandingService(t *testing.T) {
 }
 
 func TestAgentRunReconcilerUsesStandingSnapshotAfterAgentPortChange(t *testing.T) {
+	var credential []byte
+	responseBody := `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded"}`
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(writer, `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded"}`)
+		writeDeliveryResponse(
+			t,
+			writer,
+			request,
+			credential,
+			http.StatusOK,
+			"application/json",
+			responseBody,
+		)
 	}))
 	t.Cleanup(server.Close)
 	host, port := serverAddress(t, server)
 
 	ctx := context.Background()
 	fixture := createDeliveryFixture(t, ctx, "delivery-agent-drift", host, port)
+	credential = fixture.credential
 	var updatedAgent kontextv1alpha1.Agent
 	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(fixture.agent), &updatedAgent); err != nil {
 		t.Fatalf("get Service Agent: %v", err)
@@ -215,13 +240,20 @@ func TestAgentRunReconcilerRejectsInvalidDeliveryResponses(t *testing.T) {
 
 	for index, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			var credential []byte
 			server := httptest.NewServer(http.HandlerFunc(func(
 				writer http.ResponseWriter,
 				request *http.Request,
 			) {
-				writer.Header().Set("Content-Type", test.contentType)
-				writer.WriteHeader(test.status)
-				fmt.Fprint(writer, test.body)
+				writeDeliveryResponse(
+					t,
+					writer,
+					request,
+					credential,
+					test.status,
+					test.contentType,
+					test.body,
+				)
 			}))
 			t.Cleanup(server.Close)
 			host, port := serverAddress(t, server)
@@ -233,6 +265,7 @@ func TestAgentRunReconcilerRejectsInvalidDeliveryResponses(t *testing.T) {
 				host,
 				port,
 			)
+			credential = fixture.credential
 
 			if _, err := newAgentRunReconciler().Reconcile(ctx, ctrl.Request{
 				NamespacedName: client.ObjectKeyFromObject(fixture.delivered),
@@ -251,26 +284,87 @@ func TestAgentRunReconcilerRejectsInvalidDeliveryResponses(t *testing.T) {
 	}
 }
 
+func TestAgentRunReconcilerRejectsUnauthenticatedDeliveryResponses(t *testing.T) {
+	for index, signature := range []string{"", "invalid-signature"} {
+		t.Run(fmt.Sprintf("case-%d", index), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(
+				writer http.ResponseWriter,
+				request *http.Request,
+			) {
+				if _, err := deliveryv1alpha1.Parse(readRequestBody(t, request)); err != nil {
+					t.Errorf("parse delivery request: %v", err)
+				}
+				writer.Header().Set("Content-Type", "application/json")
+				if signature != "" {
+					writer.Header().Set(deliveryv1alpha1.SignatureHeader, signature)
+				}
+				fmt.Fprint(writer, `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded"}`)
+			}))
+			t.Cleanup(server.Close)
+			host, port := serverAddress(t, server)
+			ctx := context.Background()
+			fixture := createDeliveryFixture(
+				t,
+				ctx,
+				fmt.Sprintf("delivery-unauthenticated-%d", index),
+				host,
+				port,
+			)
+
+			if _, err := newAgentRunReconciler().Reconcile(ctx, ctrl.Request{
+				NamespacedName: client.ObjectKeyFromObject(fixture.delivered),
+			}); err != nil {
+				t.Fatalf("reconcile unauthenticated response: %v", err)
+			}
+			var updated kontextv1alpha1.AgentRun
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(fixture.delivered), &updated); err != nil {
+				t.Fatalf("get rejected delivery: %v", err)
+			}
+			if updated.Status.Phase != kontextv1alpha1.AgentRunPhaseFailed ||
+				!strings.Contains(updated.Status.Message, "authentication failed") {
+				t.Fatalf("unauthenticated response status = %#v", updated.Status)
+			}
+		})
+	}
+}
+
 func TestAgentRunReconcilerRetriesAgainstRecastService(t *testing.T) {
 	requestStarted := make(chan struct{})
 	releaseFirstResponse := make(chan struct{})
+	var firstCredential []byte
+	var replacementCredential []byte
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if requests.Add(1) == 1 {
 			close(requestStarted)
 			<-releaseFirstResponse
-			writer.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(writer, `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"text/plain","value":"stale result"}}`)
+			writeDeliveryResponse(
+				t,
+				writer,
+				request,
+				firstCredential,
+				http.StatusOK,
+				"application/json",
+				`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"text/plain","value":"stale result"}}`,
+			)
 			return
 		}
-		writer.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(writer, `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"text/plain","value":"recast complete"}}`)
+		writeDeliveryResponse(
+			t,
+			writer,
+			request,
+			replacementCredential,
+			http.StatusOK,
+			"application/json",
+			`{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded","output":{"mediaType":"text/plain","value":"recast complete"}}`,
+		)
 	}))
 	t.Cleanup(server.Close)
 	host, port := serverAddress(t, server)
 
 	ctx := context.Background()
 	fixture := createDeliveryFixture(t, ctx, "delivery-recast", host, port)
+	firstCredential = fixture.credential
 	reconciler := newAgentRunReconciler()
 	type reconcileResult struct {
 		result ctrl.Result
@@ -297,6 +391,7 @@ func TestAgentRunReconcilerRetriesAgainstRecastService(t *testing.T) {
 		"delivery-recast-standing-2",
 		host,
 	)
+	replacementCredential = deliveryCredentialForPod(t, ctx, replacementRun, replacementPod)
 	var currentAgent kontextv1alpha1.Agent
 	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(fixture.agent), &currentAgent); err != nil {
 		t.Fatalf("get Service Agent for recast: %v", err)
@@ -401,17 +496,27 @@ func TestAgentRunReconcilerDoesNotOverwriteTerminalStatusAfterResponse(t *testin
 func TestAgentRunReconcilerDoesNotApplyResponseToRecreatedRun(t *testing.T) {
 	requestStarted := make(chan struct{})
 	releaseResponse := make(chan struct{})
+	var credential []byte
+	responseBody := `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded"}`
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		close(requestStarted)
 		<-releaseResponse
-		writer.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(writer, `{"apiVersion":"kontext.dev/result/v1alpha1","outcome":"Succeeded"}`)
+		writeDeliveryResponse(
+			t,
+			writer,
+			request,
+			credential,
+			http.StatusOK,
+			"application/json",
+			responseBody,
+		)
 	}))
 	t.Cleanup(server.Close)
 	host, port := serverAddress(t, server)
 
 	ctx := context.Background()
 	fixture := createDeliveryFixture(t, ctx, "delivery-uid-race", host, port)
+	credential = fixture.credential
 	originalUID := fixture.delivered.UID
 	reconciler := newAgentRunReconciler()
 	done := make(chan error, 1)
@@ -673,10 +778,11 @@ func TestServiceRecastRejectsDeliveredRunNameCollision(t *testing.T) {
 }
 
 type deliveryFixture struct {
-	agent     *kontextv1alpha1.Agent
-	standing  *kontextv1alpha1.AgentRun
-	pod       *corev1.Pod
-	delivered *kontextv1alpha1.AgentRun
+	agent      *kontextv1alpha1.Agent
+	standing   *kontextv1alpha1.AgentRun
+	pod        *corev1.Pod
+	delivered  *kontextv1alpha1.AgentRun
+	credential []byte
 }
 
 func createDeliveryFixture(
@@ -714,10 +820,11 @@ func createDeliveryFixture(
 		t.Fatalf("create delivered run: %v", err)
 	}
 	return deliveryFixture{
-		agent:     agent,
-		standing:  standing,
-		pod:       pod,
-		delivered: delivered,
+		agent:      agent,
+		standing:   standing,
+		pod:        pod,
+		delivered:  delivered,
+		credential: deliveryCredentialForPod(t, ctx, standing, pod),
 	}
 }
 
@@ -745,23 +852,17 @@ func createStandingTarget(
 	if err := k8sClient.Create(ctx, run); err != nil {
 		t.Fatalf("create standing run: %v", err)
 	}
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      runName + "-pod",
-			Namespace: run.Namespace,
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{{
-				Name:  podbuilder.RuntimeContainerName,
-				Image: "runtime:test",
-			}},
-		},
-	}
-	if err := controllerutil.SetControllerReference(run, pod, scheme); err != nil {
-		t.Fatalf("own standing Pod: %v", err)
-	}
-	if err := k8sClient.Create(ctx, pod); err != nil {
+	if _, err := newAgentRunReconciler().Reconcile(ctx, ctrl.Request{
+		NamespacedName: client.ObjectKeyFromObject(run),
+	}); err != nil {
 		t.Fatalf("create standing Pod: %v", err)
+	}
+	pod := &corev1.Pod{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{
+		Namespace: run.Namespace,
+		Name:      podbuilder.PodNameForRun(run.Name),
+	}, pod); err != nil {
+		t.Fatalf("get standing Pod: %v", err)
 	}
 	pod.Status = corev1.PodStatus{
 		Phase: corev1.PodRunning,
@@ -781,6 +882,9 @@ func createStandingTarget(
 	if err := k8sClient.Status().Update(ctx, pod); err != nil {
 		t.Fatalf("mark standing Pod ready: %v", err)
 	}
+	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(run), run); err != nil {
+		t.Fatalf("refresh standing run: %v", err)
+	}
 	run.Status = kontextv1alpha1.AgentRunStatus{
 		Phase:   kontextv1alpha1.AgentRunPhaseRunning,
 		PodName: pod.Name,
@@ -789,6 +893,44 @@ func createStandingTarget(
 		t.Fatalf("mark standing run active: %v", err)
 	}
 	return run, pod
+}
+
+func deliveryCredentialForPod(
+	t *testing.T,
+	ctx context.Context,
+	run *kontextv1alpha1.AgentRun,
+	pod *corev1.Pod,
+) []byte {
+	t.Helper()
+	var secretName string
+	for _, item := range pod.Spec.Containers[0].Env {
+		if item.Name == deliveryv1alpha1.TokenEnvName &&
+			item.ValueFrom != nil &&
+			item.ValueFrom.SecretKeyRef != nil {
+			secretName = item.ValueFrom.SecretKeyRef.Name
+			break
+		}
+	}
+	if secretName == "" {
+		t.Fatalf("standing Pod has no %s Secret reference", deliveryv1alpha1.TokenEnvName)
+	}
+	var secret corev1.Secret
+	if err := k8sClient.Get(ctx, types.NamespacedName{
+		Namespace: pod.Namespace,
+		Name:      secretName,
+	}, &secret); err != nil {
+		t.Fatalf("get delivery credential Secret: %v", err)
+	}
+	if secret.Immutable == nil ||
+		!*secret.Immutable ||
+		!metav1.IsControlledBy(&secret, run) {
+		t.Fatalf("delivery credential Secret is mutable or unowned: %#v", secret.ObjectMeta)
+	}
+	token := secret.Data[deliveryv1alpha1.TokenSecretKey]
+	if len(token) == 0 {
+		t.Fatalf("delivery credential Secret has no %q data", deliveryv1alpha1.TokenSecretKey)
+	}
+	return append([]byte(nil), token...)
 }
 
 func deliveredRunForAgent(
@@ -837,6 +979,38 @@ func readRequestBody(t *testing.T, request *http.Request) []byte {
 		t.Fatalf("read delivery request: %v", err)
 	}
 	return body
+}
+
+func writeDeliveryResponse(
+	t *testing.T,
+	writer http.ResponseWriter,
+	request *http.Request,
+	credential []byte,
+	statusCode int,
+	contentType string,
+	body string,
+) {
+	t.Helper()
+	payload, err := deliveryv1alpha1.Parse(readRequestBody(t, request))
+	if err != nil {
+		t.Errorf("parse delivery request: %v", err)
+		http.Error(writer, "invalid delivery request", http.StatusBadRequest)
+		return
+	}
+	writer.Header().Set("Content-Type", contentType)
+	if statusCode == http.StatusOK {
+		writer.Header().Set(
+			deliveryv1alpha1.SignatureHeader,
+			deliveryv1alpha1.ResponseSignature(
+				credential,
+				request.Header.Get(deliveryv1alpha1.ChallengeHeader),
+				payload.Run.UID,
+				[]byte(body),
+			),
+		)
+	}
+	writer.WriteHeader(statusCode)
+	fmt.Fprint(writer, body)
 }
 
 func conditionHasReason(conditionsList []metav1.Condition, reason string) bool {
