@@ -213,7 +213,14 @@ func (r *AgentReconciler) handleServiceRunAlreadyExists(
 	agent *kontextv1alpha1.Agent,
 	runName string,
 ) (ctrl.Result, error) {
-	existing, accepted, err := r.verifyExistingOwnedRun(ctx, agent, runName, nil)
+	existing, accepted, err := r.verifyExistingOwnedRun(
+		ctx,
+		agent,
+		runName,
+		func(run *kontextv1alpha1.AgentRun) bool {
+			return run.Spec.Delivery == nil
+		},
+	)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -282,6 +289,9 @@ func (r *AgentReconciler) observeServiceRuns(
 	var previousSuffix int32
 	for i := range children {
 		run := &children[i]
+		if run.Spec.Delivery != nil {
+			continue
+		}
 		suffix, ok := serviceRunSuffix(agent.Name, run.Name)
 		if !ok {
 			continue
