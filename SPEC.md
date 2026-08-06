@@ -13,7 +13,8 @@ sidebarTitle: API spec
 Kontext exposes two custom resources and one runtime-image contract.
 
 - `Agent` — the reusable **definition / desired state** of an agent.
-- `AgentRun` — one bounded **execution** of an agent. Owns exactly one Pod.
+- `AgentRun` — one bounded, auditable **execution** of an agent. It either owns
+  one Pod or is delivered to a standing Service runtime.
 - **Runtime image contract** — how any container becomes a Kontext agent.
 
 API group/version: `kontext.dev/v1alpha1` (alpha on purpose — the shape is allowed to evolve).
@@ -28,10 +29,13 @@ API group/version: `kontext.dev/v1alpha1` (alpha on purpose — the shape is all
 | `Agent` mode `Service`   | `Deployment`             | Always-on. Controller keeps one live `AgentRun`; re-casts on exit/failure.             |
 | `Agent` mode `Task`      | reusable task template   | Creating the Agent does not execute it. A user creates a named, sparse `AgentRun` referencing it to trigger work. |
 | `Agent` mode `Scheduled` | `CronJob`                | Mints one-shot `AgentRun`s from standard five-field cron slots. |
-| `AgentRun`               | `Pod` / `Job`            | The single execution unit. Owns one Pod. Holds `status.result`, usage, immutable spec. |
+| `AgentRun`               | `Pod` / `Job`            | The single auditable execution unit. Owns one Pod unless warm-delivered to a standing Service runtime. Holds `status.result`, usage, immutable spec. |
 
 
-`AgentRun` is the one execution engine every mode reuses. The `Agent` controller manages `AgentRun`s the way `Deployment`/`CronJob` manage their children.
+`AgentRun` is the execution record every mode reuses. The `Agent` controller
+manages standing Service and Scheduled `AgentRun`s the way
+`Deployment`/`CronJob` manage their children. Users may also create referenced
+runs to invoke Task Agents or warm-delivery-enabled Service Agents.
 
 ---
 
@@ -49,9 +53,10 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `runtime.command`    | []string                              | no  | Override entrypoint.                                           |
 | `runtime.args`       | []string                              | no  |                                                                |
 | `runtime.result`     | object                                | no  | Optional stdout result capture policy.                         |
+| `runtime.delivery`   | object                                | no  | Service-only opt-in to warm HTTP delivery. Requires `port`.    |
 | `runtime.securityContext` | restricted security context     | no  | Portable non-root, capability-drop, filesystem, and seccomp settings. |
-| `goal`               | string                                | no* | Concrete goal. Required for `Service`/`Scheduled`; exactly one of `goal` or `goalTemplate` is required for `Task`. |
-| `goalTemplate`       | string                                | no  | Parameterized goal for `Task`; forbidden in other modes.       |
+| `goal`               | string                                | no* | Concrete execution goal. Required for `Service`/`Scheduled`; exactly one of `goal` or `goalTemplate` is required for `Task`. |
+| `goalTemplate`       | string                                | no  | Parameterized invocation goal for `Task` or a warm-delivery-enabled `Service`. |
 | `provider`           | string                                | no  | Default `anthropic`.                                           |
 | `model`              | string                                | yes |                                                                |
 | `tools`              | []string                              | no  | Declared tool allowlist (semantics live in the runtime image). |
@@ -68,6 +73,14 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 
  required depending on `mode`.
 
+A Service Agent always has a concrete `goal` for its standing runtime. Without
+`runtime.delivery`, it forbids `goalTemplate` and preserves the original
+long-running behavior. Opting into warm delivery requires both
+`runtime.delivery.port` and `goalTemplate`: `goal` starts the standing runtime,
+while `goalTemplate` resolves each referenced user-created `AgentRun`.
+`runtime.delivery.port` is an integer from 1 through 65535. Task and Scheduled
+Agents cannot configure `runtime.delivery`.
+
 ### `status`
 
 
@@ -76,7 +89,7 @@ The reusable definition. Cluster-namespaced. Has a status subresource.
 | `conditions`         | []Condition | `Ready`, `Progressing`.              |
 | `currentRunName`     | string      | `Service`: the live run.             |
 | `lastRunName`        | string      | `Task`: newest retained owned run by creation time. `Scheduled`: newest retained owned run by slot; empty when no child is retained. |
-| `runsCreated`        | int         | `Task`: current retained owned-run count. `Scheduled`: monotonic creation sequence. `Service`: monotonic run suffix. |
+| `runsCreated`        | int         | `Task`: current retained owned-run count. `Scheduled`: monotonic creation sequence. `Service`: monotonic standing-run suffix; delivered runs are excluded. |
 | `restarts`           | int         | `Service`: re-cast count.            |
 | `lastScheduleTime`   | timestamp   | `Scheduled`: latest observed slot that minted a run; retained after child pruning. |
 | `nextScheduleTime`   | timestamp   | `Scheduled`: next slot the controller will evaluate. |
@@ -136,15 +149,18 @@ mode-specific reasons:
 
 ## `AgentRun`
 
-One bounded execution. Maps to exactly one Pod. **Spec is immutable after creation** (snapshot semantics) so a run is self-contained and auditable.
+One bounded execution. It maps to exactly one owned Pod unless `spec.delivery`
+marks it for a standing Service runtime. **Spec is immutable after creation**
+(snapshot semantics) so a run is self-contained and auditable.
 
 ### `spec`
 
 
 | Field                | Type     | Req | Notes                                            |
 | -------------------- | -------- | --- | ------------------------------------------------ |
-| `agentRef.name`      | string   | no  | Owning `Agent`. Task CREATE admission treats a sparse user-created reference as an explicit execution trigger. Omitted = standalone ad-hoc run. |
-| `parameters`         | map[string]string | no | Immutable Task invocation parameters retained with the resolved snapshot. Requires `agentRef`. |
+| `agentRef.name`      | string   | no  | Owning `Agent`. CREATE admission treats a sparse user-created reference as an explicit Task or Service invocation. Omitted = standalone ad-hoc run. |
+| `parameters`         | map[string]string | no | Immutable invocation parameters retained with the resolved snapshot. Requires `agentRef`. |
+| `delivery.port`      | int      | no  | Immutable Service warm-delivery marker and port snapshot. Admission-controlled; requires `agentRef`. |
 | `goal`               | string   | yes | Concrete, fully-resolved goal.                   |
 | `provider`           | string   | no  | Resolved from Agent at creation.                 |
 | `model`              | string   | yes |                                                  |
@@ -158,25 +174,31 @@ One bounded execution. Maps to exactly one Pod. **Spec is immutable after creati
 | `runtime.command`    | []string | no  | Required when stdout capture is configured.      |
 | `runtime.args`       | []string | no  | Appended to the declared command.                |
 | `runtime.result`     | object   | no  | Optional stdout result capture policy.           |
+| `runtime.delivery`   | object   | no  | Resolved runtime capability snapshot; `spec.delivery` determines this run's lifecycle. |
 | `runtime.securityContext` | restricted security context | no | Portable non-root, capability-drop, filesystem, and seccomp settings. |
 
 
 When created from an `Agent`, execution fields are snapshotted so the run does
-not drift if the `Agent` changes later. Service and Scheduled controllers
-create fully resolved runs. Standalone runs provide a complete execution spec
-directly.
+not drift if the `Agent` changes later. The Service and Scheduled controllers
+create fully resolved Pod-owning runs. Admission adds `delivery` only to sparse
+invocations of warm-delivery-enabled Service Agents; this immutable field is
+the lifecycle discriminator and prevents a delivered run from being mistaken
+for the Service's standing run. Standalone runs provide a complete execution
+spec directly.
 
-### Task invocation and resolution
+### Referenced invocation and resolution
 
 Creating a Task `Agent` never starts work. A user explicitly triggers it by
 submitting a user-named `AgentRun` whose `spec.agentRef.name` names that Task
 Agent. Runs may be submitted concurrently; there is no generated-name or
-single-active-run restriction.
+single-active-run restriction. A user invokes a warm-delivery-enabled Service
+Agent with the same sparse `AgentRun` shape. Service Agents without
+`runtime.delivery` reject referenced invocations.
 
-A Task invocation request is sparse: it may contain only `agentRef` and
+A referenced invocation request is sparse: it may contain only `agentRef` and
 optional `parameters`. Kubernetes
 [invokes mutating admission first](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/)
-and then validates the final object against the CRD. Task CREATE admission
+and then validates the final object against the CRD. CREATE admission
 receives the sparse request, resolves it in memory, and returns the complete
 immutable execution snapshot that the API server validates and stores. The
 persisted `AgentRun.spec` always includes `goal`, `model`, and `runtime.image`;
@@ -184,14 +206,19 @@ an unresolved sparse object is never valid stored state.
 
 Resolution copies runtime, provider, model, tools, budget, service account,
 Secret reference, knowledge ConfigMap reference, and environment from the
-Agent. The concrete goal is copied from `goal` or rendered from
-`goalTemplate`. These execution fields are locked: an invocation request that
+Agent. For Task Agents, the concrete goal is copied from `goal` or rendered
+from `goalTemplate`. For Service Agents, the standing `goal` is never
+delivered; the invocation goal is rendered from `goalTemplate`, and admission
+adds the immutable `delivery.port` snapshot. These execution fields are
+locked: an invocation request that
 supplies any of them is rejected, even when the supplied value would match the
 template. Users needing execution overrides create a standalone `AgentRun` or
 a separate Agent definition.
 
 A Task Agent configures exactly one of `goal` or `goalTemplate`. A static
-`goal` accepts no parameters. A template uses only ASCII identifier
+`goal` accepts no parameters. A warm-delivery-enabled Service Agent configures
+both its standing `goal` and its invocation `goalTemplate`. A template uses
+only ASCII identifier
 placeholders matching `[A-Za-z_][A-Za-z0-9_]*`:
 
 - `${name}` inserts the exact string value of parameter `name`.
@@ -213,7 +240,7 @@ The pure resolver in `internal/runfactory` defines these semantics. The CREATE
 webhook fetches the referenced same-namespace Agent through the API reader,
 rejects invalid requests, and returns the resolver's complete object as the
 admission patch. Complete standalone and controller-created runs do not match
-the sparse webhook and remain independent of Task admission.
+the sparse webhook and remain independent of invocation admission.
 
 The installed `MutatingWebhookConfiguration` matches namespaced
 `kontext.dev/v1alpha1` `AgentRun` CREATE requests only when `agentRef` is
@@ -223,11 +250,14 @@ present and at least one required execution field is absent. It uses
 fail closed when admission is unavailable; complete requests bypass the
 webhook.
 
-Every rejected Task resolution includes one stable class:
+Every rejected referenced resolution includes one stable class:
 
 - `MissingAgent`: the same-namespace referenced Agent does not exist.
-- `WrongMode`: the reference names a non-Task Agent.
-- `InvalidTemplate`: the Task definition has invalid goal/template shape or
+- `WrongMode`: the reference names a Scheduled or unknown-mode Agent.
+- `DeliveryDisabled`: the reference names a Service Agent without
+  `runtime.delivery`.
+- `InvalidDelivery`: the Service delivery configuration is invalid.
+- `InvalidTemplate`: the Agent definition has invalid goal/template shape or
   placeholder syntax.
 - `MissingParameters`: required placeholder names have no supplied value.
 - `UnusedParameters`: supplied names are unused, including any parameter map
@@ -241,7 +271,7 @@ Every rejected Task resolution includes one stable class:
 | Field                | Type                                                           | Notes                                                       |
 | -------------------- | -------------------------------------------------------------- | ----------------------------------------------------------- |
 | `phase`              | enum `Pending`|`Running`|`Succeeded`|`Failed`|`BudgetExceeded` |                                                             |
-| `podName`            | string                                                         |                                                             |
+| `podName`            | string                                                         | Owned execution Pod, or the standing Service Pod selected for delivery. |
 | `output.mediaType`   | string                                                         | Media type for the structured terminal output.              |
 | `output.value`       | arbitrary JSON                                                 | Authoritative structured output.                            |
 | `result`             | string                                                         | Backward-compatible deterministic projection of `output`.   |
@@ -268,12 +298,14 @@ For Task Agents, `status.lastRunName` is the newest retained owned Task run by
 creation time. `status.runsCreated` is the exact number of currently retained
 owned Task runs, not a lifetime counter. Deleting an owned run can therefore
 decrease `runsCreated` and can move or clear `lastRunName`. These Task meanings
-do not change the existing Service status semantics. `currentRunName` and
-`restarts` stay empty for Task Agents.
+do not change the existing Service status semantics. Delivered Service runs do
+not participate in standing-run suffixes, `currentRunName`, `lastRunName`,
+`runsCreated`, or `restarts`. `currentRunName` and `restarts` stay empty for
+Task Agents.
 
 ### Contract evolution policy
 
-The three public contract surfaces evolve differently:
+The four public contract surfaces evolve differently:
 
 - **Result envelopes are lenient at the top level.** Consumers ignore unknown
   top-level fields so producers can add optional result metadata without
@@ -284,6 +316,9 @@ The three public contract surfaces evolve differently:
   trailing JSON. Changing the event envelope shape requires a new event
   contract version so streaming observers never silently interpret a different
   record shape.
+- **Delivery request envelopes are strict.** Service runtimes reject unknown
+  fields and trailing JSON. Changing the request shape requires a new delivery
+  contract version.
 - **CRDs evolve additively within `v1alpha1`.** Existing fields keep their
   meaning and new fields are optional. Kubernetes structurally validates CRD
   data; arbitrary JSON is confined to fields explicitly documented as
@@ -309,6 +344,75 @@ The controller injects, on the Pod:
   overridden through either form. Secret values remain Kubernetes Secret data;
   they are not copied into Agent/AgentRun fields or controller logs.
 
+### Input — Service warm delivery
+
+A Service runtime opts in by configuring `spec.runtime.delivery.port`. The
+runtime listens on that port on the Pod network interface and exposes:
+
+```text
+POST /kontext.dev/v1alpha1/agent-runs
+Content-Type: application/json
+Accept: application/json
+```
+
+The request is one strict JSON object:
+
+```json
+{
+  "apiVersion": "kontext.dev/delivery/v1alpha1",
+  "run": {
+    "name": "review-42",
+    "namespace": "default",
+    "uid": "6d291c0e-3a2d-4b33-956e-8d4ec30f1ac3"
+  },
+  "goal": "the fully resolved invocation goal"
+}
+```
+
+`run` identifies the persisted `AgentRun` audit record. Its Kubernetes UID is
+the delivery idempotency identity; runtimes must not execute the same UID
+concurrently and should replay a cached terminal response when they still have
+one. The controller does not promise exactly-once execution across ambiguous
+network failures or Service Pod replacement. Runtimes performing non-idempotent
+external effects must persist whatever stronger deduplication their workload
+requires.
+
+The request contains the resolved goal, not template parameters. Parameter
+rendering and execution-field snapshotting have already completed in
+admission. Unknown fields, a missing identity or goal, an unsupported
+`apiVersion`, and trailing JSON are invalid requests.
+
+The runtime returns HTTP `200 OK` only with one terminal
+`kontext.dev/result/v1alpha1` envelope as the response body. The envelope is
+validated and projected into `status.output`, `status.result`, and
+`status.usage` exactly like a native termination-log envelope. Legacy result
+payloads and plain text are not accepted on this new endpoint. The complete
+response body must not exceed 4096 bytes. A non-2xx response, malformed or
+oversized body, transport failure after delivery begins, or delivery timeout
+fails the run with an actionable status message.
+
+Delivery uses the existing phases; it does not add a `Delivered` phase:
+
+- `Pending` — waiting for the referenced Service Agent to have a live, Ready
+  standing Pod, or waiting to retry a connection that was not established.
+- `Running` — the controller has started the HTTP request against the selected
+  Pod. `status.startTime` is set and `status.podName` records that standing Pod.
+- `Succeeded` or `Failed` — projected from a valid terminal response envelope,
+  or failed by the controller for a delivery/protocol error.
+- `BudgetExceeded` — the delivered run exceeded its wallclock budget.
+
+A missing, unready, unreachable, or mid-recast target remains `Pending` and is
+retried with bounded backoff while delivery has not started. Kontext does not
+create a replacement Pod for a delivered run; Service recast remains the
+`Agent` controller's responsibility. Every in-flight request has a bounded
+controller timeout, and the run's wallclock budget remains authoritative when
+it expires sooner. Request cancellation closes the HTTP request; runtimes
+should stop work when the request context is canceled.
+
+The control plane sends one delivery to one standing runtime and records its
+outcome. Queueing, prioritization, fan-out, and workload-specific backpressure
+remain runtime-image concerns.
+
 ### Output — logs and execution events
 
 - Write operational progress to **stdout** and diagnostics to **stderr**,
@@ -332,9 +436,10 @@ writing `/dev/termination-log` therefore succeeds with absent `status.output`
 and an empty `status.result`. Native runtimes and images using injected stdout
 capture write richer structured output, usage, timing, and execution metadata.
 
-On completion, a runtime that provides a structured result writes a compact
-versioned envelope to `/dev/termination-log` (and may also write
-`/kontext/result.json`):
+On completion, a one-shot runtime that provides a structured result writes a
+compact versioned envelope to `/dev/termination-log` (and may also write
+`/kontext/result.json`). A warm-delivery Service runtime returns the same
+versioned envelope as its HTTP response body:
 
 ```json
 {
@@ -573,7 +678,11 @@ security boundary.
 ### Mode expectations for the image
 
 - **Task / Scheduled run image:** does its work, writes result, exits. Pod `restartPolicy: Never`.
-- **Service run image:** expected to be long-running (loop / serve / watch). When it exits for any reason, the `Agent` (Service) controller mints a fresh `AgentRun` — this is "instantly re-cast on failure".
+- **Service run image:** expected to be long-running (loop / serve / watch).
+  When `runtime.delivery` is configured, it also implements the warm-delivery
+  HTTP endpoint. When the standing process exits for any reason, the `Agent`
+  (Service) controller mints a fresh Pod-owning `AgentRun` — this is "instantly
+  re-cast on failure". Delivered `AgentRun`s never own or recast Pods.
 
 ---
 

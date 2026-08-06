@@ -142,6 +142,12 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 	if err := k8sClient.Create(ctx, serviceAgent); err != nil {
 		t.Fatalf("create Service Agent: %v", err)
 	}
+	warmServiceAgent := testTaskAgent("warm-service-agent", "serve", "Handle ${payload}.")
+	warmServiceAgent.Spec.Mode = kontextv1alpha1.AgentModeService
+	warmServiceAgent.Spec.Runtime.Delivery = &kontextv1alpha1.RuntimeDeliverySpec{Port: 8080}
+	if err := k8sClient.Create(ctx, warmServiceAgent); err != nil {
+		t.Fatalf("create warm-delivery Service Agent: %v", err)
+	}
 	scheduledAgent := testTaskAgent("scheduled-agent", "scheduled", "")
 	scheduledAgent.Spec.Mode = kontextv1alpha1.AgentModeScheduled
 	scheduledAgent.Spec.Schedule = &kontextv1alpha1.ScheduleSpec{Expression: "0 * * * *"}
@@ -196,6 +202,31 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 		t.Fatalf("invocation label was not retained: %#v", templateRun.Labels)
 	}
 
+	serviceInvocation := testAgentRun("service-through-webhook", map[string]any{
+		"agentRef":   map[string]any{"name": warmServiceAgent.Name},
+		"parameters": map[string]any{"payload": "the request"},
+	})
+	if err := k8sClient.Create(ctx, serviceInvocation); err != nil {
+		t.Fatalf("create sparse Service invocation: %v", err)
+	}
+	var deliveredRun kontextv1alpha1.AgentRun
+	if err := k8sClient.Get(ctx, client.ObjectKey{
+		Namespace: "default",
+		Name:      serviceInvocation.GetName(),
+	}, &deliveredRun); err != nil {
+		t.Fatalf("get resolved Service delivery: %v", err)
+	}
+	if deliveredRun.Spec.Goal != "Handle the request." ||
+		deliveredRun.Spec.Delivery == nil ||
+		deliveredRun.Spec.Delivery.Port != 8080 ||
+		deliveredRun.Spec.AgentRef == nil ||
+		deliveredRun.Spec.AgentRef.Name != warmServiceAgent.Name {
+		t.Fatalf("persisted Service delivery snapshot is incomplete: %#v", deliveredRun.Spec)
+	}
+	if !metav1.IsControlledBy(&deliveredRun, warmServiceAgent) {
+		t.Fatalf("delivered run is not controlled by Service Agent: %#v", deliveredRun.OwnerReferences)
+	}
+
 	rejections := []struct {
 		name      string
 		agentName string
@@ -208,8 +239,13 @@ func TestEnvtestRealTLSAndNarrowAdmissionBypass(t *testing.T) {
 			want:      "MissingAgent",
 		},
 		{
-			name:      "wrong-mode",
+			name:      "delivery-disabled",
 			agentName: serviceAgent.Name,
+			want:      "DeliveryDisabled",
+		},
+		{
+			name:      "wrong-mode",
+			agentName: scheduledAgent.Name,
 			want:      "WrongMode",
 		},
 		{

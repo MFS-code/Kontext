@@ -154,6 +154,20 @@ spec:
                     items:
                       type: string
                     type: array
+                  delivery:
+                    description: RuntimeDeliverySpec opts a Service runtime into warm
+                      HTTP delivery.
+                    properties:
+                      port:
+                        description: Port is the container port where the runtime
+                          accepts delivery requests.
+                        format: int32
+                        maximum: 65535
+                        minimum: 1
+                        type: integer
+                    required:
+                    - port
+                    type: object
                   image:
                     minLength: 1
                     type: string
@@ -296,13 +310,17 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: Task agents require exactly one of goal or goalTemplate; Service
-                and Scheduled agents require goal and forbid goalTemplate
+                agents require goal and require goalTemplate exactly when runtime.delivery
+                is configured; Scheduled agents require goal and forbid goalTemplate
               rule: 'self.mode == ''Task'' ? has(self.goal) != has(self.goalTemplate)
-                : has(self.goal) && !has(self.goalTemplate)'
+                : self.mode == ''Service'' ? has(self.goal) && (has(self.runtime.delivery)
+                == has(self.goalTemplate)) : has(self.goal) && !has(self.goalTemplate)'
             - message: schedule is required only for Scheduled agents
               rule: 'self.mode == ''Scheduled'' ? has(self.schedule) : !has(self.schedule)'
             - message: backoff is only valid for Service agents
               rule: self.mode == 'Service' || !has(self.backoff)
+            - message: runtime.delivery is only valid for Service agents
+              rule: self.mode == 'Service' || !has(self.runtime.delivery)
           status:
             description: AgentStatus defines the observed state of Agent.
             properties:

@@ -27,7 +27,7 @@ Kontext adds two custom resources under `kontext.dev/v1alpha1`, deliberately mir
 | `Agent` (mode `Service`) | `Deployment` | Always-on. The controller keeps one live `AgentRun` and re-casts it with backoff when it exits. |
 | `Agent` (mode `Task`) | reusable template | Creating the Agent runs nothing. A sparse, user-named `AgentRun` resolves the template and starts one immutable execution. |
 | `Agent` (mode `Scheduled`) | `CronJob` | Mints one-shot `AgentRun`s from a standard five-field cron schedule with deadlines, concurrency policy, suspension, and bounded history. |
-| `AgentRun` | `Job` / `Pod` | One bounded execution. Owns exactly one Pod, holds the immutable spec snapshot, the final `.status.result`, and usage. |
+| `AgentRun` | `Job` / `Pod` | One bounded execution. Owns one Pod or is warm-delivered to a standing Service runtime; holds the immutable spec snapshot, final `.status.result`, and usage. |
 
 An `AgentRun` can also be created standalone, without any owning `Agent` — useful for ad-hoc dispatch and demos.
 

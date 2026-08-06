@@ -113,9 +113,9 @@ The registration uses `failurePolicy: Fail`, `matchPolicy: Equivalent`,
 `sideEffects: None`, no reinvocation, and a five-second timeout. Its
 `matchConditions` expression selects namespaced `kontext.dev/v1alpha1`
 `AgentRun` CREATE requests that have `agentRef` and lack at least one required
-execution field. The webhook resolves those sparse Task invocations into
-complete immutable snapshots. Complete standalone and controller-created runs
-bypass it.
+execution field. The webhook resolves those sparse Task or warm-delivery
+Service invocations into complete immutable snapshots. Complete standalone and
+controller-created runs bypass it.
 
 ### Workload identity
 

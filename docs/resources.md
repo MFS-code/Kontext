@@ -16,7 +16,9 @@ model, budgets, and related fields.
 
 - **Service** — always-on. The controller keeps one live child `AgentRun` and
   re-casts it with backoff after exit or failure. In-memory conversation is not
-  restored across recasts.
+  restored across recasts. A Service may declare the warm-delivery HTTP
+  capability so additional referenced `AgentRun`s execute through that
+  standing runtime.
 - **Task** — reusable one-shot template. Creating the Agent does not execute
   it. A user explicitly triggers work by creating a named `AgentRun` that
   references it. Admission resolves the immutable execution snapshot before
@@ -29,9 +31,10 @@ model, budgets, and related fields.
 
 ## AgentRun
 
-`AgentRun` is one bounded execution. It owns exactly one Pod, snapshots its
-immutable spec, and holds terminal status including `.status.result` and usage
-fields when available.
+`AgentRun` is one bounded execution. It owns one Pod unless admission marks it
+for warm delivery to a standing Service runtime. It snapshots its immutable
+spec and holds terminal status including `.status.result` and usage fields when
+available.
 
 You can create an `AgentRun` standalone, without an owning `Agent`. That path
 is the fastest way to prove install health with the echo runtime.
@@ -48,7 +51,7 @@ historical latest observed slot even after that child is pruned.
 retained child metadata. Pruning or manually deleting children never decreases
 it.
 
-### Task invocation requests
+### Referenced invocation requests
 
 A Task Agent configures exactly one static `goal` or parameterized
 `goalTemplate`. Its sparse request shape contains only `agentRef` and optional
@@ -78,6 +81,14 @@ resolves this request against the same-namespace Task Agent, and the API server
 validates and stores only the complete snapshot. Persisted AgentRuns always
 contain `goal`, `model`, and `runtime.image`. If admission cannot resolve a
 matching sparse request, creation fails closed with an actionable error.
+
+A Service Agent opts into the same sparse request shape with
+`runtime.delivery.port` and an invocation `goalTemplate`. Its separate concrete
+`goal` starts the standing runtime. Admission renders the template and adds an
+immutable `delivery` snapshot so the controller can deliver the run instead of
+creating another Pod. Service Agents without the capability reject sparse
+invocations. The versioned HTTP request and response contract is defined in
+the [API spec](/SPEC).
 
 Task runs are user-named and can execute concurrently. For Task status,
 `lastRunName` means the newest retained owned run by creation time, while

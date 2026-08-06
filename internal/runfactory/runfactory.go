@@ -17,19 +17,21 @@ import (
 	"github.com/MFS-code/Kontext/internal/runtimepolicy"
 )
 
-// ResolutionErrorCode identifies a stable Task resolution failure class.
+// ResolutionErrorCode identifies a stable referenced-run resolution failure class.
 type ResolutionErrorCode string
 
 const (
 	ErrorMissingAgent      ResolutionErrorCode = "MissingAgent"
 	ErrorWrongMode         ResolutionErrorCode = "WrongMode"
+	ErrorDeliveryDisabled  ResolutionErrorCode = "DeliveryDisabled"
+	ErrorInvalidDelivery   ResolutionErrorCode = "InvalidDelivery"
 	ErrorInvalidTemplate   ResolutionErrorCode = "InvalidTemplate"
 	ErrorMissingParameters ResolutionErrorCode = "MissingParameters"
 	ErrorUnusedParameters  ResolutionErrorCode = "UnusedParameters"
 	ErrorConflictingFields ResolutionErrorCode = "ConflictingFields"
 )
 
-// ResolutionError is returned for every rejected Task invocation.
+// ResolutionError is returned for every rejected referenced invocation.
 type ResolutionError struct {
 	Code      ResolutionErrorCode
 	AgentName string
@@ -41,22 +43,26 @@ type ResolutionError struct {
 func (e *ResolutionError) Error() string {
 	switch e.Code {
 	case ErrorMissingAgent:
-		return fmt.Sprintf("Task resolution failed [%s]: Agent %q was not found", e.Code, e.AgentName)
+		return fmt.Sprintf("AgentRun resolution failed [%s]: Agent %q was not found", e.Code, e.AgentName)
 	case ErrorWrongMode:
-		return fmt.Sprintf("Task resolution failed [%s]: Agent %q has mode %q", e.Code, e.AgentName, e.Mode)
+		return fmt.Sprintf("AgentRun resolution failed [%s]: Agent %q has unsupported mode %q", e.Code, e.AgentName, e.Mode)
+	case ErrorDeliveryDisabled:
+		return fmt.Sprintf("AgentRun resolution failed [%s]: Service Agent %q does not declare runtime.delivery", e.Code, e.AgentName)
+	case ErrorInvalidDelivery:
+		return fmt.Sprintf("AgentRun resolution failed [%s]: %s", e.Code, e.Detail)
 	case ErrorInvalidTemplate:
-		return fmt.Sprintf("Task resolution failed [%s]: %s", e.Code, e.Detail)
+		return fmt.Sprintf("AgentRun resolution failed [%s]: %s", e.Code, e.Detail)
 	case ErrorMissingParameters:
-		return fmt.Sprintf("Task resolution failed [%s]: missing parameters: %s", e.Code, strings.Join(e.Names, ", "))
+		return fmt.Sprintf("AgentRun resolution failed [%s]: missing parameters: %s", e.Code, strings.Join(e.Names, ", "))
 	case ErrorUnusedParameters:
 		if len(e.Names) == 0 {
-			return fmt.Sprintf("Task resolution failed [%s]: static goals do not accept parameters", e.Code)
+			return fmt.Sprintf("AgentRun resolution failed [%s]: static goals do not accept parameters", e.Code)
 		}
-		return fmt.Sprintf("Task resolution failed [%s]: unused parameters: %s", e.Code, strings.Join(e.Names, ", "))
+		return fmt.Sprintf("AgentRun resolution failed [%s]: unused parameters: %s", e.Code, strings.Join(e.Names, ", "))
 	case ErrorConflictingFields:
-		return fmt.Sprintf("Task resolution failed [%s]: invocation supplies locked fields: %s", e.Code, strings.Join(e.Names, ", "))
+		return fmt.Sprintf("AgentRun resolution failed [%s]: invocation supplies locked fields: %s", e.Code, strings.Join(e.Names, ", "))
 	default:
-		return fmt.Sprintf("Task resolution failed [%s]", e.Code)
+		return fmt.Sprintf("AgentRun resolution failed [%s]", e.Code)
 	}
 }
 
@@ -97,10 +103,10 @@ func NewForAgent(
 	return run, nil
 }
 
-// ResolveTask resolves a sparse user invocation against a Task Agent. It is
-// pure: neither input is mutated, and the returned run shares no execution
-// data with either input.
-func ResolveTask(
+// ResolveInvocation resolves a sparse user invocation against a Task Agent or
+// a warm-delivery-enabled Service Agent. It is pure: neither input is mutated,
+// and the returned run shares no execution data with either input.
+func ResolveInvocation(
 	agent *kontextv1alpha1.Agent,
 	invocation *kontextv1alpha1.AgentRun,
 	scheme *runtime.Scheme,
@@ -117,19 +123,50 @@ func ResolveTask(
 		(invocation.Namespace != "" && invocation.Namespace != agent.Namespace) {
 		return nil, &ResolutionError{Code: ErrorMissingAgent, AgentName: referenceName}
 	}
-	if agent.Spec.Mode != kontextv1alpha1.AgentModeTask {
+	if fields := lockedInvocationFields(invocation.Spec); len(fields) > 0 {
+		return nil, &ResolutionError{Code: ErrorConflictingFields, Names: fields}
+	}
+
+	var (
+		goal     string
+		delivery *kontextv1alpha1.AgentRunDeliverySpec
+		err      error
+	)
+	switch agent.Spec.Mode {
+	case kontextv1alpha1.AgentModeTask:
+		goal, err = resolveTaskGoal(agent.Spec, invocation.Spec.Parameters)
+	case kontextv1alpha1.AgentModeService:
+		if agent.Spec.Runtime.Delivery == nil {
+			return nil, &ResolutionError{
+				Code:      ErrorDeliveryDisabled,
+				AgentName: agent.Name,
+			}
+		}
+		if agent.Spec.Runtime.Delivery.Port < 1 || agent.Spec.Runtime.Delivery.Port > 65535 {
+			return nil, &ResolutionError{
+				Code: ErrorInvalidDelivery,
+				Detail: fmt.Sprintf(
+					"Service Agent %q has invalid runtime.delivery.port %d",
+					agent.Name,
+					agent.Spec.Runtime.Delivery.Port,
+				),
+			}
+		}
+		if agent.Spec.Goal == "" || agent.Spec.GoalTemplate == "" {
+			return nil, &ResolutionError{
+				Code:   ErrorInvalidTemplate,
+				Detail: "Service Agent with runtime.delivery must configure goal and goalTemplate",
+			}
+		}
+		goal, err = interpolateGoal(agent.Spec.GoalTemplate, invocation.Spec.Parameters)
+		delivery = &kontextv1alpha1.AgentRunDeliverySpec{Port: agent.Spec.Runtime.Delivery.Port}
+	default:
 		return nil, &ResolutionError{
 			Code:      ErrorWrongMode,
 			AgentName: agent.Name,
 			Mode:      agent.Spec.Mode,
 		}
 	}
-
-	if fields := lockedInvocationFields(invocation.Spec); len(fields) > 0 {
-		return nil, &ResolutionError{Code: ErrorConflictingFields, Names: fields}
-	}
-
-	goal, err := resolveGoal(agent.Spec, invocation.Spec.Parameters)
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +186,7 @@ func ResolveTask(
 	}
 	resolved.Labels[podbuilder.LabelAgentName] = agent.Name
 	resolved.Spec.Parameters = maps.Clone(invocation.Spec.Parameters)
+	resolved.Spec.Delivery = delivery
 	return resolved, nil
 }
 
@@ -165,7 +203,7 @@ func ValidateTask(agent *kontextv1alpha1.Agent) error {
 			Mode:      agent.Spec.Mode,
 		}
 	}
-	_, err := resolveGoal(agent.Spec, nil)
+	_, err := resolveTaskGoal(agent.Spec, nil)
 	if resolutionErr, ok := err.(*ResolutionError); ok && resolutionErr.Code == ErrorMissingParameters {
 		return nil
 	}
@@ -173,7 +211,7 @@ func ValidateTask(agent *kontextv1alpha1.Agent) error {
 }
 
 func lockedInvocationFields(spec kontextv1alpha1.AgentRunSpec) []string {
-	fields := make([]string, 0, 10)
+	fields := make([]string, 0, 11)
 	if spec.Goal != "" {
 		fields = append(fields, "goal")
 	}
@@ -204,11 +242,14 @@ func lockedInvocationFields(spec kontextv1alpha1.AgentRunSpec) []string {
 	if spec.Env != nil {
 		fields = append(fields, "env")
 	}
+	if spec.Delivery != nil {
+		fields = append(fields, "delivery")
+	}
 	sort.Strings(fields)
 	return fields
 }
 
-func resolveGoal(spec kontextv1alpha1.AgentSpec, parameters map[string]string) (string, error) {
+func resolveTaskGoal(spec kontextv1alpha1.AgentSpec, parameters map[string]string) (string, error) {
 	hasGoal := spec.Goal != ""
 	hasTemplate := spec.GoalTemplate != ""
 	if hasGoal == hasTemplate {

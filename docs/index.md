@@ -22,7 +22,7 @@ when it dies.
 | `Agent` (mode `Service`) | `Deployment` | Always-on. The controller keeps one live `AgentRun` and re-casts it when it exits. |
 | `Agent` (mode `Task`) | reusable template | Creating the Agent runs nothing. Sparse named invocations become immutable owned `AgentRun`s. |
 | `Agent` (mode `Scheduled`) | `CronJob` | Mints one-shot `AgentRun`s from standard five-field cron slots with safe overlap and deadline policy. |
-| `AgentRun` | `Job` / `Pod` | One bounded execution. Owns exactly one Pod and holds `.status.result`. |
+| `AgentRun` | `Job` / `Pod` | One bounded execution. Owns one Pod or is warm-delivered to a standing Service runtime, and holds `.status.result`. |
 
 You can also create a standalone `AgentRun` without an owning `Agent` — useful
 for ad-hoc dispatch and demos.
