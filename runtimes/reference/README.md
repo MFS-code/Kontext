@@ -250,7 +250,7 @@ definitions.
 
 SDK v1.6.1 negotiates MCP protocol `2025-11-25` by default and accepts
 `2025-06-18`, `2025-03-26`, and `2024-11-05`. The SDK requires Go 1.25; this
-repository declares Go 1.26.5. Its runtime dependency footprint adds
+repository declares Go 1.26.6. Its runtime dependency footprint adds
 `google/jsonschema-go`, `segmentio/encoding`, `yosida95/uritemplate`,
 `golang.org/x/oauth2`, and their small transitive dependencies. Kontext uses
 the same JSON Schema package to reject malformed discovered schemas while

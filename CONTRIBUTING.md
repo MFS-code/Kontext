@@ -15,7 +15,7 @@ review and safer to test than broad rewrites.
 
 Required tools:
 
-- Go 1.26.5
+- Go 1.26.6
 - Node.js 22 for the hosted docs site
 - Docker with Buildx
 - kubectl

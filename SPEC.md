@@ -698,7 +698,7 @@ subagents, or background orchestration.
 
 Configured MCP servers are a maintained-runtime concern, not control-plane
 vocabulary. The reference runtime uses the official MCP Go SDK v1.6.1, which
-requires Go 1.25 or newer; this repository declares Go 1.26.5. The SDK
+requires Go 1.25 or newer; this repository declares Go 1.26.6. The SDK
 negotiates protocol `2025-11-25` and accepts `2025-06-18`, `2025-03-26`, and
 `2024-11-05`. Discovered MCP tools join the same immutable allowlisted registry
 and use the same turn, call-count, output, cancellation, event, and cleanup

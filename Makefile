@@ -11,7 +11,7 @@ CONTEXT ?= .
 DIST_DIR ?= dist
 
 # Get the currently used golang version
-GO_VERSION ?= 1.26.5
+GO_VERSION ?= 1.26.6
 
 # Pin govulncheck so CI and local runs share the same analyzer.
 GOVULNCHECK_VERSION ?= v1.6.0
