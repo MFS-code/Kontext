@@ -1,7 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/((?!assets/|raw/|llms\\.txt$|llms-full\\.txt$|favicon\\.svg$).*)",
+      "source": "/((?!assets/|raw/|llms\\.txt$|llms-full\\.txt$|sitemap\\.xml$|favicon\\.svg$).*)",
       "destination": "/index.html"
     }
   ],
@@ -47,6 +47,15 @@
         {
           "key": "Content-Type",
           "value": "text/plain; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/sitemap.xml",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/xml; charset=utf-8"
         }
       ]
     }
