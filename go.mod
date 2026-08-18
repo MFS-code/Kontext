@@ -1,6 +1,6 @@
 module github.com/MFS-code/Kontext
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/google/jsonschema-go v0.4.3

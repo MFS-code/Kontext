@@ -23,6 +23,16 @@ for (const metadata of pageMetadataById.values()) {
   );
 }
 
+const sitemap = fs.readFileSync(path.join(dist, "sitemap.xml"), "utf8");
+const sitemapUrls = [
+  ...sitemap.matchAll(/<loc>(https:\/\/docs\.kontext\.run\/[^<]*)<\/loc>/g),
+].map((match) => match[1]);
+const expectedSitemapUrls = [...pageMetadataById.values()].map(
+  ({ routePath }) => new URL(routePath, "https://docs.kontext.run").href,
+);
+assert.deepEqual(sitemapUrls, expectedSitemapUrls);
+assert.equal(new Set(sitemapUrls).size, pageMetadataById.size);
+
 const llmsIndex = fs.readFileSync(path.join(dist, "llms.txt"), "utf8");
 for (const page of ["task-workload", "scheduled-workload"]) {
   assert.match(

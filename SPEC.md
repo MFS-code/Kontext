@@ -195,7 +195,8 @@ single-active-run restriction. A user invokes a warm-delivery-enabled Service
 Agent with the same sparse `AgentRun` shape. Service Agents without
 `runtime.delivery` reject referenced invocations. Names matching the referenced
 Service Agent followed by a canonical positive integer, such as `owner-1`, are
-reserved for the controller's standing runs and reject user invocations.
+used for the controller's standing runs, so user invocations with those names
+are rejected.
 
 A referenced invocation request is sparse: it may contain only `agentRef` and
 optional `parameters`. Kubernetes
@@ -259,8 +260,8 @@ Every rejected referenced resolution includes one stable class:
 - `DeliveryDisabled`: the reference names a Service Agent without
   `runtime.delivery`.
 - `InvalidDelivery`: the Service delivery configuration is invalid.
-- `ReservedName`: a Service invocation uses the controller-reserved standing
-  run name pattern `<agent>-<positive integer>`.
+- `ReservedName`: a Service invocation uses the standing-run name pattern
+  `<agent>-<positive integer>` managed by the controller.
 - `InvalidTemplate`: the Agent definition has invalid goal/template shape or
   placeholder syntax.
 - `MissingParameters`: required placeholder names have no supplied value.
@@ -697,7 +698,7 @@ subagents, or background orchestration.
 
 Configured MCP servers are a maintained-runtime concern, not control-plane
 vocabulary. The reference runtime uses the official MCP Go SDK v1.6.1, which
-requires Go 1.25 or newer; this repository declares Go 1.26.5. The SDK
+requires Go 1.25 or newer; this repository declares Go 1.26.6. The SDK
 negotiates protocol `2025-11-25` and accepts `2025-06-18`, `2025-03-26`, and
 `2024-11-05`. Discovered MCP tools join the same immutable allowlisted registry
 and use the same turn, call-count, output, cancellation, event, and cleanup

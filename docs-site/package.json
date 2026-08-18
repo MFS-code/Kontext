@@ -8,7 +8,7 @@
     "predev": "npm run sync",
     "prebuild": "npm run sync",
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/emit-llm-files.mjs",
+    "build": "tsc -b && vite build && node scripts/emit-llm-files.mjs && node scripts/emit-sitemap.mjs",
     "preview": "vite preview",
     "pretypecheck": "npm run sync",
     "typecheck": "tsc -b --noEmit",
