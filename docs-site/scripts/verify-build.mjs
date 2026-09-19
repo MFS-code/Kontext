@@ -11,7 +11,7 @@ const docsSite = path.resolve(
 const repoRoot = path.resolve(docsSite, "..");
 const dist = path.join(docsSite, "dist");
 
-for (const metadata of pageMetadataById.values()) {
+for (const [id, metadata] of pageMetadataById) {
   const source = fs.readFileSync(path.join(repoRoot, metadata.srcFile));
   const mirror = fs.readFileSync(
     path.join(dist, metadata.rawPath.replace(/^\//, "")),
@@ -20,6 +20,29 @@ for (const metadata of pageMetadataById.values()) {
     mirror,
     source,
     `${metadata.rawPath} does not byte-match ${metadata.srcFile}`,
+  );
+
+  const page = fs.readFileSync(
+    path.join(dist, metadata.routePath.replace(/^\//, ""), "index.html"),
+    "utf8",
+  );
+  const sourceText = source.toString("utf8");
+  const title = sourceText.match(/^title:\s*(.+)$/m)?.[1];
+  const description = sourceText.match(/^description:\s*(.+)$/m)?.[1];
+  assert.ok(title, `${metadata.srcFile} has a title`);
+  assert.ok(description, `${metadata.srcFile} has a description`);
+  assert.ok(
+    page.includes(`<title>${title} · Kontext Docs</title>`),
+    `${metadata.routePath} has its route-specific title`,
+  );
+  assert.ok(
+    page.includes(`name="description" content="${description}"`),
+    `${metadata.routePath} has its route-specific description`,
+  );
+  assert.match(page, /<main class="content">[\s\S]*<h1>/);
+  assert.ok(
+    page.includes(`href="${metadata.routePath}"`),
+    `${id} appears in prerendered navigation`,
   );
 }
 
@@ -54,5 +77,5 @@ for (const term of [
 }
 
 console.log(
-  `Verified ${pageMetadataById.size} raw mirrors and generated LLM corpora`,
+  `Verified ${pageMetadataById.size} prerendered routes, raw mirrors, and generated LLM corpora`,
 );
