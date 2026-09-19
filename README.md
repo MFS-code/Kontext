@@ -1,13 +1,20 @@
 # Kontext
 
-A Kubernetes-native control plane for running, governing, and observing AI agents as production workloads.
+Kontext is a Kubernetes-native control plane for running AI agents as
+production workloads. It provides `Agent` and `AgentRun` custom resources,
+reconciles runs into Pods, and lets you bring your own container runtime.
 
 The thesis: **agents are workloads.** An agent should not live in a screen session or behind a bespoke orchestration service. It should be a resource your cluster understands — created with `kubectl apply`, observed with `kubectl logs -f`, governed by RBAC, budgets, and owner references, and restarted by a controller when it dies.
 
-Public sites:
+[kontext.run](https://kontext.run) ·
+[documentation](https://docs.kontext.run) ·
+[current releases](https://github.com/MFS-code/Kontext/releases)
 
-- Marketing site: [kontext.run](https://kontext.run)
-- Docs: [docs.kontext.run](https://docs.kontext.run)
+Install the current alpha on an existing Kubernetes cluster:
+
+```bash
+kubectl apply -f https://github.com/MFS-code/Kontext/releases/download/v0.1.0-alpha.2/install.yaml
+```
 
 After the [quickstart](#quickstart-on-kind) below, this is the whole workflow:
 

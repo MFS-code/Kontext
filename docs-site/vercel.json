@@ -1,7 +1,62 @@
 {
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/docs",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
-      "source": "/((?!assets/|raw/|llms\\.txt$|llms-full\\.txt$|sitemap\\.xml$|favicon\\.svg$).*)",
+      "source": "/docs",
+      "destination": "/docs/index.html"
+    },
+    {
+      "source": "/docs/quickstart",
+      "destination": "/docs/quickstart/index.html"
+    },
+    {
+      "source": "/docs/resources",
+      "destination": "/docs/resources/index.html"
+    },
+    {
+      "source": "/docs/task-workload",
+      "destination": "/docs/task-workload/index.html"
+    },
+    {
+      "source": "/docs/scheduled-workload",
+      "destination": "/docs/scheduled-workload/index.html"
+    },
+    {
+      "source": "/docs/service-workload",
+      "destination": "/docs/service-workload/index.html"
+    },
+    {
+      "source": "/docs/operations",
+      "destination": "/docs/operations/index.html"
+    },
+    {
+      "source": "/docs/releases",
+      "destination": "/docs/releases/index.html"
+    },
+    {
+      "source": "/docs/runtimes",
+      "destination": "/docs/runtimes/index.html"
+    },
+    {
+      "source": "/docs/evals",
+      "destination": "/docs/evals/index.html"
+    },
+    {
+      "source": "/SPEC",
+      "destination": "/SPEC/index.html"
+    },
+    {
+      "source": "/docs/when-not-to-use-agents",
+      "destination": "/docs/when-not-to-use-agents/index.html"
+    },
+    {
+      "source": "/((?!assets/|raw/|llms\\.txt$|llms-full\\.txt$|robots\\.txt$|sitemap\\.xml$|favicon\\.svg$).*)",
       "destination": "/index.html"
     }
   ],
@@ -43,6 +98,15 @@
     },
     {
       "source": "/llms-full.txt",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/plain; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/robots.txt",
       "headers": [
         {
           "key": "Content-Type",
