@@ -56,7 +56,7 @@
       "destination": "/docs/when-not-to-use-agents/index.html"
     },
     {
-      "source": "/((?!assets/|raw/|llms\\.txt$|llms-full\\.txt$|sitemap\\.xml$|favicon\\.svg$).*)",
+      "source": "/((?!assets/|raw/|llms\\.txt$|llms-full\\.txt$|robots\\.txt$|sitemap\\.xml$|favicon\\.svg$).*)",
       "destination": "/index.html"
     }
   ],
@@ -98,6 +98,15 @@
     },
     {
       "source": "/llms-full.txt",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/plain; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/robots.txt",
       "headers": [
         {
           "key": "Content-Type",

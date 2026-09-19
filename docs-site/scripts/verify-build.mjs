@@ -19,6 +19,14 @@ const rewrites = new Map(
     destination,
   ]),
 );
+const spaCatchAll = vercelConfig.rewrites.find(
+  ({ destination }) => destination === "/index.html",
+);
+assert.ok(spaCatchAll, "Vercel config has an SPA catch-all");
+const spaCatchAllPattern = new RegExp(spaCatchAll.source);
+assert.equal(spaCatchAllPattern.test("/robots.txt"), false);
+assert.equal(spaCatchAllPattern.test("/sitemap.xml"), false);
+assert.equal(spaCatchAllPattern.test("/docs/search"), true);
 
 for (const [id, metadata] of pageMetadataById) {
   const source = fs.readFileSync(path.join(repoRoot, metadata.srcFile));
@@ -69,6 +77,18 @@ const expectedSitemapUrls = [...pageMetadataById.values()].map(
 );
 assert.deepEqual(sitemapUrls, expectedSitemapUrls);
 assert.equal(new Set(sitemapUrls).size, pageMetadataById.size);
+
+const robots = fs.readFileSync(path.join(dist, "robots.txt"), "utf8");
+assert.equal(
+  robots,
+  [
+    "User-agent: *",
+    "Allow: /",
+    "",
+    "Sitemap: https://docs.kontext.run/sitemap.xml",
+    "",
+  ].join("\n"),
+);
 
 const llmsIndex = fs.readFileSync(path.join(dist, "llms.txt"), "utf8");
 for (const page of ["task-workload", "scheduled-workload"]) {
