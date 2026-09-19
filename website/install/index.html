@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Kontext on Kubernetes</title>
+<meta name="description" content="Install Kontext v0.1.0-alpha.2 on an existing Kubernetes cluster with kubectl, then run an AgentRun.">
+<link rel="canonical" href="https://kontext.run/install">
+<meta name="theme-color" content="#fcfbf8">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Kontext">
+<meta property="og:url" content="https://kontext.run/install">
+<meta property="og:title" content="Install Kontext on Kubernetes">
+<meta property="og:description" content="Install Kontext v0.1.0-alpha.2 on an existing Kubernetes cluster with kubectl, then run an AgentRun.">
+<meta property="og:image" content="https://kontext.run/social-card.svg">
+<meta property="og:image:type" content="image/svg+xml">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Kontext — Agents are workloads">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Install Kontext on Kubernetes">
+<meta name="twitter:description" content="Install Kontext v0.1.0-alpha.2 on an existing Kubernetes cluster with kubectl, then run an AgentRun.">
+<meta name="twitter:image" content="https://kontext.run/social-card.svg">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main>
+  <header>
+    <a class="brand" href="/">kontext</a>
+    <nav aria-label="Primary">
+      <a href="https://docs.kontext.run/docs/quickstart">docs</a>
+      <a href="/vs-kagent">vs kagent</a>
+      <a href="https://github.com/MFS-code/Kontext">github</a>
+    </nav>
+  </header>
+
+  <h1>Install Kontext</h1>
+  <p class="tagline">Current alpha: v0.1.0-alpha.2</p>
+  <p class="lede">
+    Install the published manifest on an existing Kubernetes cluster. You need
+    <code>kubectl</code> and permission to create cluster-scoped resources.
+    No repository clone, Docker, or kind is required.
+  </p>
+
+  <pre class="terminal"><span class="tok-prompt">$</span> VERSION=v0.1.0-alpha.2
+<span class="tok-prompt">$</span> <span class="tok-cmd">kubectl</span> apply -f \
+  "https://github.com/MFS-code/Kontext/releases/download/${VERSION}/install.yaml"
+<span class="tok-prompt">$</span> <span class="tok-cmd">kubectl</span> rollout status deployment/kontext-controller-manager \
+  --namespace kontext-system \
+  --timeout=120s</pre>
+
+  <section>
+    <h2>What gets installed</h2>
+    <p>
+      The release manifest installs the <code>Agent</code> and
+      <code>AgentRun</code> CRDs, controller, admission webhook, RBAC, Service,
+      and NetworkPolicy. Release images are pinned by digest.
+    </p>
+  </section>
+
+  <section>
+    <h2>Run an agent workload</h2>
+    <p>
+      Follow the <a href="https://docs.kontext.run/docs/quickstart">quickstart</a>
+      to apply a keyless echo <code>AgentRun</code>, watch its Pod logs, and read
+      the result from status.
+    </p>
+  </section>
+
+  <section>
+    <h2>Before production use</h2>
+    <p>
+      Kontext is alpha software. Read the
+      <a href="https://docs.kontext.run/docs/releases">release and uninstall notes</a>
+      and the
+      <a href="https://docs.kontext.run/docs/operations">operations contract</a>.
+      Deleting the CRDs also deletes every <code>Agent</code> and
+      <code>AgentRun</code>.
+    </p>
+  </section>
+
+  <footer>
+    <span>v0.1.0-alpha.2 · MIT</span>
+    <span>
+      <a href="/vs-kagent">vs kagent</a>
+      <a href="https://docs.kontext.run/docs/quickstart">docs</a>
+      <a href="https://github.com/MFS-code/Kontext/releases">github releases</a>
+    </span>
+  </footer>
+</main>
+</body>
+</html>

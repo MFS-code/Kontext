@@ -55,6 +55,7 @@ const releaseVersionFiles = [
     "README.md",
     "SECURITY.md",
     "website/index.html",
+    "website/install/index.html",
     "deploy/examples/v1alpha1/README.md",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
   ].map((file) => path.join(repoRoot, file)),
@@ -189,6 +190,42 @@ test("website AgentRun manifests include required execution fields", () => {
     const runtime = manifest.match(/^  runtime:\s*\n((?: {4}.*(?:\n|$))*)/m);
     assert.ok(runtime, "AgentRun spec includes runtime");
     assert.match(runtime[1], /^    image:\s+\S.*$/m);
+  }
+});
+
+test("marketing ranking pages have metadata, internal links, and sitemap entries", () => {
+  const sitemap = fs.readFileSync(
+    path.join(repoRoot, "website/sitemap.xml"),
+    "utf8",
+  );
+  const pages = [
+    {
+      route: "/install",
+      file: "website/install/index.html",
+      links: ["/vs-kagent", "https://docs.kontext.run/docs/quickstart"],
+    },
+    {
+      route: "/vs-kagent",
+      file: "website/vs-kagent/index.html",
+      links: ["/install", "https://docs.kontext.run/docs/quickstart"],
+    },
+  ];
+
+  for (const { route, file, links } of pages) {
+    const source = fs.readFileSync(path.join(repoRoot, file), "utf8");
+    assert.match(source, /<title>[^<]+<\/title>/);
+    assert.match(source, /<meta name="description" content="[^"]+">/);
+    assert.ok(
+      source.includes(`<link rel="canonical" href="https://kontext.run${route}">`),
+      `${file} has its canonical URL`,
+    );
+    assert.ok(
+      sitemap.includes(`<loc>https://kontext.run${route}</loc>`),
+      `${route} appears in the marketing sitemap`,
+    );
+    for (const link of links) {
+      assert.ok(source.includes(`href="${link}"`), `${file} links to ${link}`);
+    }
   }
 });
 

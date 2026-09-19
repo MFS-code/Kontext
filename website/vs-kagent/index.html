@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontext vs kagent: Kubernetes AI agents</title>
+<meta name="description" content="A technical comparison of Kontext and kagent for running AI agents on Kubernetes, including runtime, resource, and workflow differences.">
+<link rel="canonical" href="https://kontext.run/vs-kagent">
+<meta name="theme-color" content="#fcfbf8">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Kontext">
+<meta property="og:url" content="https://kontext.run/vs-kagent">
+<meta property="og:title" content="Kontext vs kagent: Kubernetes AI agents">
+<meta property="og:description" content="A technical comparison of Kontext and kagent for running AI agents on Kubernetes, including runtime, resource, and workflow differences.">
+<meta property="og:image" content="https://kontext.run/social-card.svg">
+<meta property="og:image:type" content="image/svg+xml">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Kontext — Agents are workloads">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Kontext vs kagent: Kubernetes AI agents">
+<meta name="twitter:description" content="A technical comparison of Kontext and kagent for running AI agents on Kubernetes, including runtime, resource, and workflow differences.">
+<meta name="twitter:image" content="https://kontext.run/social-card.svg">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main>
+  <header>
+    <a class="brand" href="/">kontext</a>
+    <nav aria-label="Primary">
+      <a href="/install">install</a>
+      <a href="https://docs.kontext.run">docs</a>
+      <a href="https://github.com/MFS-code/Kontext">github</a>
+    </nav>
+  </header>
+
+  <h1>Kontext vs kagent</h1>
+  <p class="tagline">Two Kubernetes-native approaches to AI agents</p>
+  <p class="lede">
+    Both projects use Kubernetes resources and controllers. The main difference
+    is scope: Kontext treats agents as container workloads with explicit
+    execution objects; kagent provides a broader agent platform with integrated
+    runtimes, tools, and interaction surfaces.
+  </p>
+
+  <section>
+    <h2>At a glance</h2>
+    <div class="comparison-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Kontext</th>
+            <th>kagent</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Core model</th>
+            <td><code>Agent</code> definitions and immutable <code>AgentRun</code> executions</td>
+            <td>Agent platform built around Kubernetes CRDs</td>
+          </tr>
+          <tr>
+            <th>Runtime</th>
+            <td>Bring your own container image; structured results are optional</td>
+            <td>Integrated agent runtimes with framework and model-provider support</td>
+          </tr>
+          <tr>
+            <th>Execution</th>
+            <td>Each run is a Kubernetes object with a Pod, status, budget, and owner references</td>
+            <td>Controller and engine manage agent configuration, conversations, and tools</td>
+          </tr>
+          <tr>
+            <th>Interface</th>
+            <td>Kubernetes API, <code>kubectl</code>, logs, and status</td>
+            <td>Kubernetes API plus CLI and dashboard</td>
+          </tr>
+          <tr>
+            <th>Project status</th>
+            <td>Alpha</td>
+            <td>CNCF Sandbox project created by Solo.io</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>When Kontext fits</h2>
+    <p>
+      Choose Kontext when the agent runtime is already a container, execution
+      history should be represented by <code>AgentRun</code> resources, and the
+      Kubernetes API should remain the primary operating surface. Kontext keeps
+      the control-plane boundary narrow and does not require a specific agent
+      framework.
+    </p>
+  </section>
+
+  <section>
+    <h2>When kagent fits</h2>
+    <p>
+      Choose <a href="https://kagent.dev/">kagent</a> when you want an integrated
+      platform for defining and interacting with agents, model providers, MCP
+      tools, memory, and agent-to-agent workflows, with a CLI and dashboard.
+      Its larger built-in surface can reduce the assembly required for those
+      use cases.
+    </p>
+  </section>
+
+  <section>
+    <h2>Start with the workload model</h2>
+    <p>
+      Read the Kontext
+      <a href="https://github.com/MFS-code/Kontext/blob/main/SPEC.md">API specification</a>
+      or <a href="/install">install the current alpha</a>. The
+      <a href="https://docs.kontext.run/docs/quickstart">quickstart</a> shows one
+      complete <code>AgentRun</code> without cloning the repository.
+    </p>
+  </section>
+
+  <footer>
+    <span>comparison updated September 2026</span>
+    <span>
+      <a href="/install">install</a>
+      <a href="https://docs.kontext.run">docs</a>
+      <a href="https://github.com/MFS-code/Kontext/releases">github releases</a>
+    </span>
+  </footer>
+</main>
+</body>
+</html>

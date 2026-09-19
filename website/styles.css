@@ -177,6 +177,31 @@ section a:focus-visible {
   text-decoration: underline;
 }
 
+.comparison-table {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+thead th,
+tbody th {
+  color: var(--ink);
+  font-weight: 650;
+}
+
 .lede a {
   color: var(--accent);
   text-decoration: none;
