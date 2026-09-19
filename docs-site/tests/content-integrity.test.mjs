@@ -216,6 +216,12 @@ test("marketing ranking pages have metadata, internal links, and sitemap entries
     assert.match(source, /<title>[^<]+<\/title>/);
     assert.match(source, /<meta name="description" content="[^"]+">/);
     assert.ok(
+      source.includes(
+        '<meta property="og:image" content="https://kontext.run/social-card.png">',
+      ),
+      `${file} uses the marketing social card`,
+    );
+    assert.ok(
       source.includes(`<link rel="canonical" href="https://kontext.run${route}">`),
       `${file} has its canonical URL`,
     );

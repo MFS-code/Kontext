@@ -10,6 +10,15 @@ const docsSite = path.resolve(
 );
 const repoRoot = path.resolve(docsSite, "..");
 const dist = path.join(docsSite, "dist");
+const vercelConfig = JSON.parse(
+  fs.readFileSync(path.join(docsSite, "vercel.json"), "utf8"),
+);
+const rewrites = new Map(
+  vercelConfig.rewrites.map(({ source, destination }) => [
+    source,
+    destination,
+  ]),
+);
 
 for (const [id, metadata] of pageMetadataById) {
   const source = fs.readFileSync(path.join(repoRoot, metadata.srcFile));
@@ -43,6 +52,11 @@ for (const [id, metadata] of pageMetadataById) {
   assert.ok(
     page.includes(`href="${metadata.routePath}"`),
     `${id} appears in prerendered navigation`,
+  );
+  assert.equal(
+    rewrites.get(metadata.routePath),
+    `${metadata.routePath}/index.html`,
+    `${metadata.routePath} serves its prerendered HTML on Vercel`,
   );
 }
 
